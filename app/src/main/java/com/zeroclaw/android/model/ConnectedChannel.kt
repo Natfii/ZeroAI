@@ -353,7 +353,7 @@ enum class ChannelType(
             ),
     ),
 
-    /** Lark/Feishu channel. */
+    /** Lark channel (international). */
     LARK(
         displayName = "Lark",
         tomlKey = "lark",
@@ -389,10 +389,14 @@ enum class ChannelType(
                     inputType = FieldInputType.LIST,
                 ),
                 ChannelFieldSpec(
-                    "use_feishu",
-                    "Use Feishu Endpoint",
-                    defaultValue = "false",
-                    inputType = FieldInputType.BOOLEAN,
+                    "receive_mode",
+                    "Receive Mode",
+                    defaultValue = "webhook",
+                ),
+                ChannelFieldSpec(
+                    "port",
+                    "Port",
+                    inputType = FieldInputType.NUMBER,
                 ),
             ),
     ),

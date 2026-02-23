@@ -124,6 +124,18 @@ data class AgentTomlEntry(
  * @property browserAllowedDomains Allowed browser domains list.
  * @property httpRequestEnabled Whether the HTTP request tool is enabled.
  * @property httpRequestAllowedDomains Allowed HTTP domains list.
+ * @property transcriptionEnabled Whether audio transcription is active.
+ * @property transcriptionApiUrl Transcription API endpoint URL.
+ * @property transcriptionModel Transcription model name.
+ * @property transcriptionLanguage ISO language code hint for transcription.
+ * @property transcriptionMaxDurationSecs Maximum audio duration in seconds.
+ * @property multimodalMaxImages Maximum images per request.
+ * @property multimodalMaxImageSizeMb Maximum image size in MB.
+ * @property multimodalAllowRemoteFetch Whether to allow fetching remote image URLs.
+ * @property proxyEnabled Whether proxy configuration is active.
+ * @property proxyHttpProxy HTTP proxy URL.
+ * @property proxyHttpsProxy HTTPS proxy URL.
+ * @property proxyNoProxy List of domains that bypass the proxy.
  */
 @Suppress("LongParameterList")
 data class GlobalTomlConfig(
@@ -190,6 +202,18 @@ data class GlobalTomlConfig(
     val browserAllowedDomains: List<String> = emptyList(),
     val httpRequestEnabled: Boolean = false,
     val httpRequestAllowedDomains: List<String> = emptyList(),
+    val transcriptionEnabled: Boolean = false,
+    val transcriptionApiUrl: String = DEFAULT_TRANSCRIPTION_API_URL,
+    val transcriptionModel: String = DEFAULT_TRANSCRIPTION_MODEL,
+    val transcriptionLanguage: String = "",
+    val transcriptionMaxDurationSecs: Int = DEFAULT_TRANSCRIPTION_MAX_DURATION,
+    val multimodalMaxImages: Int = DEFAULT_MULTIMODAL_MAX_IMAGES,
+    val multimodalMaxImageSizeMb: Int = DEFAULT_MULTIMODAL_MAX_SIZE_MB,
+    val multimodalAllowRemoteFetch: Boolean = false,
+    val proxyEnabled: Boolean = false,
+    val proxyHttpProxy: String = "",
+    val proxyHttpsProxy: String = "",
+    val proxyNoProxy: List<String> = emptyList(),
 ) {
     /** Constants for [GlobalTomlConfig]. */
     companion object {
@@ -249,6 +273,22 @@ data class GlobalTomlConfig(
 
         /** Default keyword weight. */
         const val DEFAULT_KEYWORD_WEIGHT = 0.3f
+
+        /** Default transcription API URL (Groq Whisper). */
+        const val DEFAULT_TRANSCRIPTION_API_URL =
+            "https://api.groq.com/openai/v1/audio/transcriptions"
+
+        /** Default transcription model. */
+        const val DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
+
+        /** Default max transcription duration in seconds. */
+        const val DEFAULT_TRANSCRIPTION_MAX_DURATION = 120
+
+        /** Default max images for multimodal. */
+        const val DEFAULT_MULTIMODAL_MAX_IMAGES = 4
+
+        /** Default max image size in MB. */
+        const val DEFAULT_MULTIMODAL_MAX_SIZE_MB = 5
     }
 }
 
@@ -386,6 +426,9 @@ object ConfigTomlBuilder {
             appendComposioSection(config)
             appendBrowserSection(config)
             appendHttpRequestSection(config)
+            appendTranscriptionSection(config)
+            appendMultimodalSection(config)
+            appendProxySection(config)
         }
 
     /**
@@ -673,6 +716,70 @@ object ConfigTomlBuilder {
         if (config.httpRequestAllowedDomains.isNotEmpty()) {
             val list = config.httpRequestAllowedDomains.joinToString(", ") { tomlString(it) }
             appendLine("allowed_domains = [$list]")
+        }
+    }
+
+    /**
+     * Appends the `[transcription]` TOML section when transcription is enabled.
+     *
+     * Upstream fields: enabled, api_url, model, language, max_duration_secs.
+     *
+     * @param config Configuration to read transcription values from.
+     */
+    private fun StringBuilder.appendTranscriptionSection(config: GlobalTomlConfig) {
+        if (!config.transcriptionEnabled) return
+        appendLine()
+        appendLine("[transcription]")
+        appendLine("enabled = true")
+        appendLine("api_url = ${tomlString(config.transcriptionApiUrl)}")
+        appendLine("model = ${tomlString(config.transcriptionModel)}")
+        if (config.transcriptionLanguage.isNotBlank()) {
+            appendLine("language = ${tomlString(config.transcriptionLanguage)}")
+        }
+        appendLine("max_duration_secs = ${config.transcriptionMaxDurationSecs}")
+    }
+
+    /**
+     * Appends the `[multimodal]` TOML section when non-default values exist.
+     *
+     * Upstream fields: max_images, max_image_size_mb, allow_remote_fetch.
+     *
+     * @param config Configuration to read multimodal values from.
+     */
+    private fun StringBuilder.appendMultimodalSection(config: GlobalTomlConfig) {
+        val hasNonDefault =
+            config.multimodalMaxImages != GlobalTomlConfig.DEFAULT_MULTIMODAL_MAX_IMAGES ||
+                config.multimodalMaxImageSizeMb != GlobalTomlConfig.DEFAULT_MULTIMODAL_MAX_SIZE_MB ||
+                config.multimodalAllowRemoteFetch
+        if (!hasNonDefault) return
+        appendLine()
+        appendLine("[multimodal]")
+        appendLine("max_images = ${config.multimodalMaxImages}")
+        appendLine("max_image_size_mb = ${config.multimodalMaxImageSizeMb}")
+        appendLine("allow_remote_fetch = ${config.multimodalAllowRemoteFetch}")
+    }
+
+    /**
+     * Appends the `[proxy]` TOML section when proxy is enabled.
+     *
+     * Upstream fields: enabled, http_proxy, https_proxy, no_proxy.
+     *
+     * @param config Configuration to read proxy values from.
+     */
+    private fun StringBuilder.appendProxySection(config: GlobalTomlConfig) {
+        if (!config.proxyEnabled) return
+        appendLine()
+        appendLine("[proxy]")
+        appendLine("enabled = true")
+        if (config.proxyHttpProxy.isNotBlank()) {
+            appendLine("http_proxy = ${tomlString(config.proxyHttpProxy)}")
+        }
+        if (config.proxyHttpsProxy.isNotBlank()) {
+            appendLine("https_proxy = ${tomlString(config.proxyHttpsProxy)}")
+        }
+        if (config.proxyNoProxy.isNotEmpty()) {
+            val list = config.proxyNoProxy.joinToString(", ") { tomlString(it) }
+            appendLine("no_proxy = [$list]")
         }
     }
 

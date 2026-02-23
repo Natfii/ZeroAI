@@ -409,6 +409,116 @@ class ConfigTomlBuilderTest {
                 )
             assertFalse(toml.contains("[reliability]"))
         }
+
+        @Test
+        @DisplayName("transcription enabled emits transcription section")
+        fun `transcription enabled emits transcription section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        transcriptionEnabled = true,
+                        transcriptionLanguage = "en",
+                    ),
+                )
+            assertTrue(toml.contains("[transcription]"))
+            assertTrue(toml.contains("enabled = true"))
+            assertTrue(toml.contains("api_url"))
+            assertTrue(toml.contains("""model = "whisper-large-v3-turbo""""))
+            assertTrue(toml.contains("""language = "en""""))
+            assertTrue(toml.contains("max_duration_secs = 120"))
+        }
+
+        @Test
+        @DisplayName("transcription disabled omits transcription section")
+        fun `transcription disabled omits transcription section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        transcriptionEnabled = false,
+                    ),
+                )
+            assertFalse(toml.contains("[transcription]"))
+        }
+
+        @Test
+        @DisplayName("non-default multimodal emits multimodal section")
+        fun `non-default multimodal emits multimodal section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        multimodalMaxImages = 8,
+                        multimodalAllowRemoteFetch = true,
+                    ),
+                )
+            assertTrue(toml.contains("[multimodal]"))
+            assertTrue(toml.contains("max_images = 8"))
+            assertTrue(toml.contains("allow_remote_fetch = true"))
+        }
+
+        @Test
+        @DisplayName("default multimodal omits multimodal section")
+        fun `default multimodal omits multimodal section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                    ),
+                )
+            assertFalse(toml.contains("[multimodal]"))
+        }
+
+        @Test
+        @DisplayName("proxy enabled emits proxy section")
+        fun `proxy enabled emits proxy section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        proxyEnabled = true,
+                        proxyHttpProxy = "http://proxy:8080",
+                        proxyNoProxy = listOf("localhost", "127.0.0.1"),
+                    ),
+                )
+            assertTrue(toml.contains("[proxy]"))
+            assertTrue(toml.contains("enabled = true"))
+            assertTrue(toml.contains("""http_proxy = "http://proxy:8080""""))
+            assertTrue(toml.contains(""""localhost""""))
+            assertTrue(toml.contains(""""127.0.0.1""""))
+        }
+
+        @Test
+        @DisplayName("proxy disabled omits proxy section")
+        fun `proxy disabled omits proxy section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        proxyEnabled = false,
+                    ),
+                )
+            assertFalse(toml.contains("[proxy]"))
+        }
     }
 
     @Nested
