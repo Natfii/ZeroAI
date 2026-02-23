@@ -68,15 +68,15 @@ fn parse_category(cat: &str) -> zeroclaw::memory::MemoryCategory {
 pub(crate) fn list_memories_inner(
     category: Option<String>,
     limit: u32,
+    session_id: Option<String>,
 ) -> Result<Vec<FfiMemoryEntry>, FfiError> {
     crate::runtime::with_memory(|memory, handle| {
         let cat = category.as_deref().map(parse_category);
-        let entries =
-            handle
-                .block_on(memory.list(cat.as_ref()))
-                .map_err(|e| FfiError::SpawnError {
-                    detail: format!("memory list failed: {e}"),
-                })?;
+        let entries = handle
+            .block_on(memory.list(cat.as_ref(), session_id.as_deref()))
+            .map_err(|e| FfiError::SpawnError {
+                detail: format!("memory list failed: {e}"),
+            })?;
         let limit = limit as usize;
         Ok(entries.iter().take(limit).map(to_ffi).collect())
     })
@@ -95,10 +95,11 @@ pub(crate) fn list_memories_inner(
 pub(crate) fn recall_memory_inner(
     query: String,
     limit: u32,
+    session_id: Option<String>,
 ) -> Result<Vec<FfiMemoryEntry>, FfiError> {
     crate::runtime::with_memory(|memory, handle| {
         let entries = handle
-            .block_on(memory.recall(&query, limit as usize))
+            .block_on(memory.recall(&query, limit as usize, session_id.as_deref()))
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("memory recall failed: {e}"),
             })?;
@@ -150,7 +151,20 @@ mod tests {
 
     #[test]
     fn test_list_memories_not_running() {
-        let result = list_memories_inner(None, 100);
+        let result = list_memories_inner(None, 100, None);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FfiError::StateError { detail } => {
+                assert!(detail.contains("not running"));
+            }
+            other => panic!("expected StateError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_list_memories_with_session_not_running() {
+        let result =
+            list_memories_inner(Some("core".into()), 50, Some("session-abc".into()));
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::StateError { detail } => {
@@ -162,7 +176,23 @@ mod tests {
 
     #[test]
     fn test_recall_memory_not_running() {
-        let result = recall_memory_inner("test query".into(), 10);
+        let result = recall_memory_inner("test query".into(), 10, None);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FfiError::StateError { detail } => {
+                assert!(detail.contains("not running"));
+            }
+            other => panic!("expected StateError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_recall_memory_with_session_not_running() {
+        let result = recall_memory_inner(
+            "test query".into(),
+            10,
+            Some("session-xyz".into()),
+        );
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::StateError { detail } => {

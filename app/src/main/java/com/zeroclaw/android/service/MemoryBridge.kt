@@ -21,13 +21,14 @@ class MemoryBridge(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /**
-     * Lists memory entries, optionally filtered by category.
+     * Lists memory entries, optionally filtered by category and/or session.
      *
      * Safe to call from the main thread; the underlying blocking FFI call is
      * dispatched to [ioDispatcher].
      *
      * @param category Optional category filter (e.g. "core", "daily", "conversation").
      * @param limit Maximum number of entries to return.
+     * @param sessionId Optional session ID to scope results to a specific session.
      * @return List of [MemoryEntry] instances.
      * @throws FfiException if the native layer reports an error.
      */
@@ -35,21 +36,23 @@ class MemoryBridge(
     suspend fun listMemories(
         category: String? = null,
         limit: UInt = DEFAULT_LIMIT,
+        sessionId: String? = null,
     ): List<MemoryEntry> =
         withContext(ioDispatcher) {
             com.zeroclaw.ffi
-                .listMemories(category, limit)
+                .listMemories(category, limit, sessionId)
                 .map { it.toModel() }
         }
 
     /**
-     * Searches memory entries by keyword query.
+     * Searches memory entries by keyword query, optionally scoped to a session.
      *
      * Safe to call from the main thread; the underlying blocking FFI call is
      * dispatched to [ioDispatcher].
      *
      * @param query Search keyword.
      * @param limit Maximum number of results to return.
+     * @param sessionId Optional session ID to scope results to a specific session.
      * @return List of [MemoryEntry] instances ranked by relevance.
      * @throws FfiException if the native layer reports an error.
      */
@@ -57,10 +60,11 @@ class MemoryBridge(
     suspend fun recallMemory(
         query: String,
         limit: UInt = DEFAULT_LIMIT,
+        sessionId: String? = null,
     ): List<MemoryEntry> =
         withContext(ioDispatcher) {
             com.zeroclaw.ffi
-                .recallMemory(query, limit)
+                .recallMemory(query, limit, sessionId)
                 .map { it.toModel() }
         }
 

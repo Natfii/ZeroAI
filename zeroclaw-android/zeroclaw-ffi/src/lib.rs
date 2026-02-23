@@ -618,10 +618,12 @@ pub fn list_tools() -> Result<Vec<tools_browse::FfiToolSpec>, FfiError> {
     })
 }
 
-/// Lists memory entries, optionally filtered by category.
+/// Lists memory entries, optionally filtered by category and/or session.
 ///
 /// Categories: `"core"`, `"daily"`, `"conversation"`, or any custom
 /// category name. Pass `None` for all categories.
+///
+/// When `session_id` is provided, only entries from that session are returned.
 ///
 /// # Errors
 ///
@@ -633,9 +635,10 @@ pub fn list_tools() -> Result<Vec<tools_browse::FfiToolSpec>, FfiError> {
 pub fn list_memories(
     category: Option<String>,
     limit: u32,
+    session_id: Option<String>,
 ) -> Result<Vec<memory_browse::FfiMemoryEntry>, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
-        memory_browse::list_memories_inner(category, limit)
+        memory_browse::list_memories_inner(category, limit, session_id)
     }))
     .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
@@ -644,9 +647,11 @@ pub fn list_memories(
     })
 }
 
-/// Searches memory entries by keyword query.
+/// Searches memory entries by keyword query, optionally scoped to a session.
 ///
 /// Returns up to `limit` entries ranked by relevance.
+///
+/// When `session_id` is provided, only entries from that session are searched.
 ///
 /// # Errors
 ///
@@ -658,9 +663,10 @@ pub fn list_memories(
 pub fn recall_memory(
     query: String,
     limit: u32,
+    session_id: Option<String>,
 ) -> Result<Vec<memory_browse::FfiMemoryEntry>, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
-        memory_browse::recall_memory_inner(query, limit)
+        memory_browse::recall_memory_inner(query, limit, session_id)
     }))
     .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {

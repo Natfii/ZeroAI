@@ -52,7 +52,7 @@ class MemoryBridgeTest {
                     makeFfiMemoryEntry(id = "id-2", key = "task", category = "daily"),
                 )
             every {
-                com.zeroclaw.ffi.listMemories(null, MemoryBridge.DEFAULT_LIMIT)
+                com.zeroclaw.ffi.listMemories(null, MemoryBridge.DEFAULT_LIMIT, null)
             } returns ffiEntries
 
             val result = bridge.listMemories()
@@ -69,14 +69,30 @@ class MemoryBridgeTest {
     fun `listMemories with category filter passes category to FFI`() =
         runTest {
             every {
-                com.zeroclaw.ffi.listMemories("core", MemoryBridge.DEFAULT_LIMIT)
+                com.zeroclaw.ffi.listMemories("core", MemoryBridge.DEFAULT_LIMIT, null)
             } returns emptyList()
 
             val result = bridge.listMemories(category = "core")
 
             assertTrue(result.isEmpty())
             verify(exactly = 1) {
-                com.zeroclaw.ffi.listMemories("core", MemoryBridge.DEFAULT_LIMIT)
+                com.zeroclaw.ffi.listMemories("core", MemoryBridge.DEFAULT_LIMIT, null)
+            }
+        }
+
+    @Test
+    @DisplayName("listMemories with sessionId passes sessionId to FFI")
+    fun `listMemories with sessionId passes sessionId to FFI`() =
+        runTest {
+            every {
+                com.zeroclaw.ffi.listMemories(null, MemoryBridge.DEFAULT_LIMIT, "session-abc")
+            } returns emptyList()
+
+            val result = bridge.listMemories(sessionId = "session-abc")
+
+            assertTrue(result.isEmpty())
+            verify(exactly = 1) {
+                com.zeroclaw.ffi.listMemories(null, MemoryBridge.DEFAULT_LIMIT, "session-abc")
             }
         }
 
@@ -85,7 +101,7 @@ class MemoryBridgeTest {
     fun `listMemories propagates FfiException`() =
         runTest {
             every {
-                com.zeroclaw.ffi.listMemories(any(), any())
+                com.zeroclaw.ffi.listMemories(any(), any(), any())
             } throws FfiException.StateException("daemon not running")
 
             assertThrows<FfiException> {
@@ -107,7 +123,7 @@ class MemoryBridgeTest {
                     ),
                 )
             every {
-                com.zeroclaw.ffi.recallMemory("Rust", MemoryBridge.DEFAULT_LIMIT)
+                com.zeroclaw.ffi.recallMemory("Rust", MemoryBridge.DEFAULT_LIMIT, null)
             } returns ffiEntries
 
             val result = bridge.recallMemory("Rust")
@@ -118,11 +134,27 @@ class MemoryBridgeTest {
         }
 
     @Test
+    @DisplayName("recallMemory with sessionId passes sessionId to FFI")
+    fun `recallMemory with sessionId passes sessionId to FFI`() =
+        runTest {
+            every {
+                com.zeroclaw.ffi.recallMemory("Rust", MemoryBridge.DEFAULT_LIMIT, "session-xyz")
+            } returns emptyList()
+
+            val result = bridge.recallMemory("Rust", sessionId = "session-xyz")
+
+            assertTrue(result.isEmpty())
+            verify(exactly = 1) {
+                com.zeroclaw.ffi.recallMemory("Rust", MemoryBridge.DEFAULT_LIMIT, "session-xyz")
+            }
+        }
+
+    @Test
     @DisplayName("recallMemory propagates FfiException")
     fun `recallMemory propagates FfiException`() =
         runTest {
             every {
-                com.zeroclaw.ffi.recallMemory(any(), any())
+                com.zeroclaw.ffi.recallMemory(any(), any(), any())
             } throws FfiException.StateException("daemon not running")
 
             assertThrows<FfiException> {
