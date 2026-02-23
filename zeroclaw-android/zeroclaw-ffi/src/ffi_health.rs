@@ -98,10 +98,10 @@ pub fn mark_component_error(name: &str, detail: impl ToString) {
 
 /// Increments the restart counter for the named component.
 pub fn bump_component_restart(name: &str) {
-    if let Ok(mut guard) = state().lock() {
-        if let Some(entry) = guard.components.get_mut(name) {
-            entry.restart_count = entry.restart_count.saturating_add(1);
-        }
+    if let Ok(mut guard) = state().lock()
+        && let Some(entry) = guard.components.get_mut(name)
+    {
+        entry.restart_count = entry.restart_count.saturating_add(1);
     }
 }
 

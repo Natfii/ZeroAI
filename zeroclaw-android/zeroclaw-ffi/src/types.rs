@@ -12,11 +12,13 @@
 /// Converts a [`chrono::DateTime<Utc>`] to epoch milliseconds.
 ///
 /// Returns the number of milliseconds since the Unix epoch.
+#[allow(dead_code)]
 pub(crate) fn to_epoch_ms(dt: &chrono::DateTime<chrono::Utc>) -> i64 {
     dt.timestamp_millis()
 }
 
 /// Converts an optional [`chrono::DateTime<Utc>`] to optional epoch milliseconds.
+#[allow(dead_code)]
 pub(crate) fn opt_to_epoch_ms(dt: Option<&chrono::DateTime<chrono::Utc>>) -> Option<i64> {
     dt.map(to_epoch_ms)
 }

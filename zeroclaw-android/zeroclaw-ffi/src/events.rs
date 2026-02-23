@@ -47,6 +47,7 @@ static LISTENER: OnceLock<Mutex<Option<Arc<dyn FfiEventListener>>>> = OnceLock::
 static EVENT_BUFFER: OnceLock<Mutex<VecDeque<String>>> = OnceLock::new();
 
 /// Thread-safe event counter for unique IDs.
+#[allow(dead_code)]
 static EVENT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Returns a reference to the listener mutex, initialising on first access.
@@ -64,6 +65,7 @@ fn event_buffer() -> &'static Mutex<VecDeque<String>> {
 /// Events are serialised to JSON strings, stored in the ring buffer, and
 /// optionally forwarded to a Kotlin listener if one is registered.
 /// Metrics are intentionally not forwarded to conserve battery.
+#[allow(dead_code)]
 pub(crate) struct AndroidObserver;
 
 impl Observer for AndroidObserver {
@@ -155,6 +157,7 @@ pub(crate) fn get_recent_events_inner(limit: u32) -> Result<String, FfiError> {
 ///
 /// Uses manual formatting rather than serde to avoid per-event allocation
 /// overhead from the `serde_json` value tree.
+#[allow(dead_code)]
 fn format_event_json(id: u64, event: &ObserverEvent) -> String {
     let now_ms = chrono::Utc::now().timestamp_millis();
     let (kind, data) = event_to_kind_and_data(event);
@@ -162,7 +165,7 @@ fn format_event_json(id: u64, event: &ObserverEvent) -> String {
 }
 
 /// Converts an [`ObserverEvent`] to a `(kind, data_json)` pair.
-#[allow(clippy::match_same_arms)]
+#[allow(clippy::match_same_arms, dead_code)]
 fn event_to_kind_and_data(event: &ObserverEvent) -> (&'static str, String) {
     match event {
         ObserverEvent::LlmRequest {
@@ -271,6 +274,7 @@ fn event_to_kind_and_data(event: &ObserverEvent) -> (&'static str, String) {
 /// Handles double quotes, backslashes, common whitespace escapes
 /// (`\n`, `\r`, `\t`), and all remaining control characters (`\x00`-`\x1F`)
 /// via `\uXXXX` notation.
+#[allow(dead_code)]
 fn escape_json_string(s: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(s.len() + 4);

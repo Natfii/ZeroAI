@@ -84,8 +84,7 @@ pub(crate) fn get_cost_summary_inner() -> Result<FfiCostSummary, FfiError> {
         total_tokens: cost["total_tokens"].as_u64().unwrap_or(0),
         request_count: cost["request_count"]
             .as_u64()
-            .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
-            .unwrap_or(0),
+            .map_or(0, |n| u32::try_from(n).unwrap_or(u32::MAX)),
         model_breakdown_json: serde_json::to_string(&model_breakdown)
             .unwrap_or_else(|_| "[]".into()),
     })

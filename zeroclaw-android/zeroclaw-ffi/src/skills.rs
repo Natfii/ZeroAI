@@ -87,9 +87,8 @@ pub(crate) fn load_skills_from_workspace(
     workspace_dir: &std::path::Path,
 ) -> Vec<(SkillManifest, Vec<ToolManifest>)> {
     let skills_dir = workspace_dir.join("skills");
-    let entries = match std::fs::read_dir(&skills_dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = std::fs::read_dir(&skills_dir) else {
+        return Vec::new();
     };
 
     let mut result = Vec::new();
@@ -99,26 +98,26 @@ pub(crate) fn load_skills_from_workspace(
             continue;
         }
         let manifest_path = path.join("skill.toml");
-        if let Ok(content) = std::fs::read_to_string(&manifest_path) {
-            if let Ok(manifest) = toml::from_str::<SkillManifest>(&content) {
-                let tools = manifest.tools;
-                let skill = SkillManifest {
-                    name: if manifest.name.is_empty() {
-                        entry
-                            .file_name()
-                            .to_string_lossy()
-                            .into_owned()
-                    } else {
-                        manifest.name
-                    },
-                    description: manifest.description,
-                    version: manifest.version,
-                    author: manifest.author,
-                    tags: manifest.tags,
-                    tools: Vec::new(),
-                };
-                result.push((skill, tools));
-            }
+        if let Ok(content) = std::fs::read_to_string(&manifest_path)
+            && let Ok(manifest) = toml::from_str::<SkillManifest>(&content)
+        {
+            let tools = manifest.tools;
+            let skill = SkillManifest {
+                name: if manifest.name.is_empty() {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .into_owned()
+                } else {
+                    manifest.name
+                },
+                description: manifest.description,
+                version: manifest.version,
+                author: manifest.author,
+                tags: manifest.tags,
+                tools: Vec::new(),
+            };
+            result.push((skill, tools));
         }
     }
     result

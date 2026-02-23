@@ -23,6 +23,7 @@ pub struct FfiTokenUsage {
 
 impl FfiTokenUsage {
     /// Converts from the upstream provider [`TokenUsage`].
+    #[allow(dead_code)]
     pub(crate) fn from_upstream(usage: &zeroclaw::providers::traits::TokenUsage) -> Self {
         Self {
             input_tokens: usage.input_tokens,
@@ -45,6 +46,7 @@ pub struct FfiProviderCapabilities {
 
 impl FfiProviderCapabilities {
     /// Converts from the upstream [`ProviderCapabilities`].
+    #[allow(dead_code)]
     pub(crate) fn from_upstream(
         caps: &zeroclaw::providers::traits::ProviderCapabilities,
     ) -> Self {
