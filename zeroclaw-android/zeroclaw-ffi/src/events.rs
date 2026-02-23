@@ -100,6 +100,10 @@ impl Observer for AndroidObserver {
     fn name(&self) -> &str {
         "android"
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Registers a Kotlin-side event listener.
@@ -521,6 +525,16 @@ mod tests {
     fn test_android_observer_name() {
         let observer = AndroidObserver;
         assert_eq!(observer.name(), "android");
+    }
+
+    #[test]
+    fn test_android_observer_as_any_downcast() {
+        let observer = AndroidObserver;
+        let any_ref = observer.as_any();
+        assert!(
+            any_ref.downcast_ref::<AndroidObserver>().is_some(),
+            "as_any() should allow downcasting back to AndroidObserver"
+        );
     }
 
     #[test]
