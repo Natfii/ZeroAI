@@ -70,13 +70,14 @@ fn state() -> &'static Mutex<HealthState> {
 /// Marks the named component as healthy.
 pub fn mark_component_ok(name: &str) {
     if let Ok(mut guard) = state().lock() {
-        let entry = guard.components.entry(name.to_string()).or_insert_with(|| {
-            ComponentState {
+        let entry = guard
+            .components
+            .entry(name.to_string())
+            .or_insert_with(|| ComponentState {
                 status: "ok".into(),
                 last_error: None,
                 restart_count: 0,
-            }
-        });
+            });
         entry.status = "ok".into();
     }
 }
@@ -84,13 +85,14 @@ pub fn mark_component_ok(name: &str) {
 /// Marks the named component as in error state with a detail message.
 pub fn mark_component_error(name: &str, detail: impl ToString) {
     if let Ok(mut guard) = state().lock() {
-        let entry = guard.components.entry(name.to_string()).or_insert_with(|| {
-            ComponentState {
+        let entry = guard
+            .components
+            .entry(name.to_string())
+            .or_insert_with(|| ComponentState {
                 status: "error".into(),
                 last_error: None,
                 restart_count: 0,
-            }
-        });
+            });
         entry.status = "error".into();
         entry.last_error = Some(detail.to_string());
     }

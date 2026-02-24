@@ -163,8 +163,7 @@ mod tests {
 
     #[test]
     fn test_list_memories_with_session_not_running() {
-        let result =
-            list_memories_inner(Some("core".into()), 50, Some("session-abc".into()));
+        let result = list_memories_inner(Some("core".into()), 50, Some("session-abc".into()));
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::StateError { detail } => {
@@ -188,11 +187,7 @@ mod tests {
 
     #[test]
     fn test_recall_memory_with_session_not_running() {
-        let result = recall_memory_inner(
-            "test query".into(),
-            10,
-            Some("session-xyz".into()),
-        );
+        let result = recall_memory_inner("test query".into(), 10, Some("session-xyz".into()));
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::StateError { detail } => {

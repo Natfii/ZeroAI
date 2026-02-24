@@ -100,11 +100,10 @@ pub(crate) fn get_daily_cost_inner(year: i32, month: u32, day: u32) -> Result<f6
     let _ = crate::runtime::get_gateway_port()?;
 
     let today = chrono::Utc::now().date_naive();
-    let requested = chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| {
-        FfiError::ConfigError {
+    let requested =
+        chrono::NaiveDate::from_ymd_opt(year, month, day).ok_or_else(|| FfiError::ConfigError {
             detail: format!("invalid date: {year}-{month}-{day}"),
-        }
-    })?;
+        })?;
 
     if requested == today {
         let summary = get_cost_summary_inner()?;

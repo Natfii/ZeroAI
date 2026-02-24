@@ -517,10 +517,7 @@ where
             crate::ffi_health::mark_component_ok(name);
             match run_component().await {
                 Ok(()) => {
-                    crate::ffi_health::mark_component_error(
-                        name,
-                        "component exited unexpectedly",
-                    );
+                    crate::ffi_health::mark_component_error(name, "component exited unexpectedly");
                     tracing::warn!("Daemon component '{name}' exited unexpectedly");
                     backoff = initial_backoff_secs.max(1);
                 }

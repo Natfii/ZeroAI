@@ -104,10 +104,7 @@ pub(crate) fn load_skills_from_workspace(
             let tools = manifest.tools;
             let skill = SkillManifest {
                 name: if manifest.name.is_empty() {
-                    entry
-                        .file_name()
-                        .to_string_lossy()
-                        .into_owned()
+                    entry.file_name().to_string_lossy().into_owned()
                 } else {
                     manifest.name
                 },
@@ -132,8 +129,7 @@ pub(crate) fn load_skills_from_workspace(
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
 pub(crate) fn list_skills_inner() -> Result<Vec<FfiSkill>, FfiError> {
-    let workspace_dir =
-        crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
+    let workspace_dir = crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
     let skills = load_skills_from_workspace(&workspace_dir);
     Ok(skills
         .iter()
@@ -157,8 +153,7 @@ pub(crate) fn list_skills_inner() -> Result<Vec<FfiSkill>, FfiError> {
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
 pub(crate) fn get_skill_tools_inner(skill_name: String) -> Result<Vec<FfiSkillTool>, FfiError> {
-    let workspace_dir =
-        crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
+    let workspace_dir = crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
     let skills = load_skills_from_workspace(&workspace_dir);
     let tools = skills
         .iter()
@@ -189,8 +184,7 @@ pub(crate) fn get_skill_tools_inner(skill_name: String) -> Result<Vec<FfiSkillTo
 /// [`FfiError::SpawnError`] if the git clone or copy fails,
 /// [`FfiError::ConfigError`] if the source skill has no manifest.
 pub(crate) fn install_skill_inner(source: String) -> Result<(), FfiError> {
-    let workspace_dir =
-        crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
+    let workspace_dir = crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
     let skills_dir = workspace_dir.join("skills");
     std::fs::create_dir_all(&skills_dir).map_err(|e| FfiError::SpawnError {
         detail: format!("failed to create skills directory: {e}"),
@@ -204,10 +198,7 @@ pub(crate) fn install_skill_inner(source: String) -> Result<(), FfiError> {
 }
 
 /// Clones a skill from a git URL into the skills directory.
-fn install_skill_from_url(
-    url: &str,
-    skills_dir: &std::path::Path,
-) -> Result<(), FfiError> {
+fn install_skill_from_url(url: &str, skills_dir: &std::path::Path) -> Result<(), FfiError> {
     let repo_name = url
         .rsplit('/')
         .next()
@@ -252,10 +243,7 @@ fn install_skill_from_url(
 }
 
 /// Copies a skill from a local path into the skills directory.
-fn install_skill_from_path(
-    source: &str,
-    skills_dir: &std::path::Path,
-) -> Result<(), FfiError> {
+fn install_skill_from_path(source: &str, skills_dir: &std::path::Path) -> Result<(), FfiError> {
     let src_path = std::path::Path::new(source);
     if !src_path.is_dir() {
         return Err(FfiError::ConfigError {
@@ -269,11 +257,9 @@ fn install_skill_from_path(
         });
     }
 
-    let dir_name = src_path
-        .file_name()
-        .ok_or_else(|| FfiError::ConfigError {
-            detail: format!("cannot determine directory name from: {source}"),
-        })?;
+    let dir_name = src_path.file_name().ok_or_else(|| FfiError::ConfigError {
+        detail: format!("cannot determine directory name from: {source}"),
+    })?;
 
     let dest = skills_dir.join(dir_name);
     if dest.exists() {
@@ -288,10 +274,7 @@ fn install_skill_from_path(
 }
 
 /// Recursively copies a directory tree.
-fn copy_dir_recursive(
-    src: &std::path::Path,
-    dest: &std::path::Path,
-) -> std::io::Result<()> {
+fn copy_dir_recursive(src: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -322,8 +305,7 @@ pub(crate) fn remove_skill_inner(name: String) -> Result<(), FfiError> {
         });
     }
 
-    let workspace_dir =
-        crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
+    let workspace_dir = crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())?;
     let skill_dir = workspace_dir.join("skills").join(&name);
 
     if !skill_dir.is_dir() {
@@ -405,10 +387,7 @@ mod tests {
         let skills_dir = temp.join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
 
-        let result = install_skill_from_path(
-            &source_dir.to_string_lossy(),
-            &skills_dir,
-        );
+        let result = install_skill_from_path(&source_dir.to_string_lossy(), &skills_dir);
         assert!(result.is_ok());
         assert!(skills_dir.join("source-skill").join("skill.toml").exists());
 
@@ -425,10 +404,7 @@ mod tests {
         let skills_dir = temp.join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
 
-        let result = install_skill_from_path(
-            &source_dir.to_string_lossy(),
-            &skills_dir,
-        );
+        let result = install_skill_from_path(&source_dir.to_string_lossy(), &skills_dir);
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::ConfigError { detail } => {
@@ -455,10 +431,7 @@ mod tests {
         let skills_dir = temp.join("skills");
         std::fs::create_dir_all(skills_dir.join("dup-skill")).unwrap();
 
-        let result = install_skill_from_path(
-            &source_dir.to_string_lossy(),
-            &skills_dir,
-        );
+        let result = install_skill_from_path(&source_dir.to_string_lossy(), &skills_dir);
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::SpawnError { detail } => {

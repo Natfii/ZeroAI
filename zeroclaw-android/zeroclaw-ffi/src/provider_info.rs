@@ -47,9 +47,7 @@ pub struct FfiProviderCapabilities {
 impl FfiProviderCapabilities {
     /// Converts from the upstream [`ProviderCapabilities`].
     #[allow(dead_code)]
-    pub(crate) fn from_upstream(
-        caps: &zeroclaw::providers::traits::ProviderCapabilities,
-    ) -> Self {
+    pub(crate) fn from_upstream(caps: &zeroclaw::providers::traits::ProviderCapabilities) -> Self {
         Self {
             native_tool_calling: caps.native_tool_calling,
             vision: caps.vision,

@@ -29,9 +29,13 @@ pub(crate) fn gateway_get(path: &str) -> Result<serde_json::Value, FfiError> {
 
     runtime.block_on(async {
         let client = build_client()?;
-        let response = client.get(&url).send().await.map_err(|e| FfiError::SpawnError {
-            detail: format!("gateway GET {path} failed: {e}"),
-        })?;
+        let response = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| FfiError::SpawnError {
+                detail: format!("gateway GET {path} failed: {e}"),
+            })?;
         parse_response(response, path).await
     })
 }
@@ -47,14 +51,15 @@ pub(crate) fn gateway_post(
 
     runtime.block_on(async {
         let client = build_client()?;
-        let response = client
-            .post(&url)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| FfiError::SpawnError {
-                detail: format!("gateway POST {path} failed: {e}"),
-            })?;
+        let response =
+            client
+                .post(&url)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| FfiError::SpawnError {
+                    detail: format!("gateway POST {path} failed: {e}"),
+                })?;
         parse_response(response, path).await
     })
 }
