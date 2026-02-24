@@ -129,7 +129,7 @@ pub(crate) fn remove_cron_job_inner(id: String) -> Result<(), FfiError> {
 pub(crate) fn pause_cron_job_inner(id: String) -> Result<(), FfiError> {
     // Verify the daemon is running (gateway_get will check this).
     let _ = crate::runtime::get_gateway_port()?;
-    Err(FfiError::SpawnError {
+    Err(FfiError::StateError {
         detail: format!(
             "pause_job not available via gateway API (job {id}); \
              upstream cron module is pub(crate) in v0.1.6"
@@ -143,7 +143,7 @@ pub(crate) fn pause_cron_job_inner(id: String) -> Result<(), FfiError> {
 /// placeholder that returns an error until the upstream API is extended.
 pub(crate) fn resume_cron_job_inner(id: String) -> Result<(), FfiError> {
     let _ = crate::runtime::get_gateway_port()?;
-    Err(FfiError::SpawnError {
+    Err(FfiError::StateError {
         detail: format!(
             "resume_job not available via gateway API (job {id}); \
              upstream cron module is pub(crate) in v0.1.6"

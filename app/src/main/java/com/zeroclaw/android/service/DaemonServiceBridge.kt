@@ -193,7 +193,14 @@ class DaemonServiceBridge(
     @Throws(FfiException::class)
     suspend fun pollStatus(): DaemonStatus {
         val json = withContext(ioDispatcher) { getStatus() }
-        val status = parseStatus(json)
+        val status =
+            try {
+                parseStatus(json)
+            } catch (e: IllegalStateException) {
+                throw FfiException.StateException(
+                    e.message ?: "malformed status JSON",
+                )
+            }
         _lastStatus.value = status
         return status
     }
