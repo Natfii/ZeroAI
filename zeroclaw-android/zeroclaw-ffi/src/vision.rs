@@ -352,7 +352,7 @@ async fn dispatch_vision_request(
             let body = build_gemini_body(text, image_data, mime_types);
             let url = format!(
                 "https://generativelanguage.googleapis.com/v1beta/models/\
-                 {model}:generateContent?key={api_key}"
+                 {model}:generateContent"
             );
             (url, body)
         }
@@ -368,7 +368,9 @@ async fn dispatch_vision_request(
         VisionProvider::OpenAi { .. } => {
             request = request.header("Authorization", format!("Bearer {api_key}"));
         }
-        VisionProvider::Gemini => {}
+        VisionProvider::Gemini => {
+            request = request.header("x-goog-api-key", api_key);
+        }
     }
 
     let response = request.send().await.map_err(|e| FfiError::SpawnError {
