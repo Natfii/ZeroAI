@@ -6,8 +6,6 @@
 
 package com.zeroclaw.android.ui.screen.settings.apikeys
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,37 +17,30 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.WifiFind
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -58,8 +49,7 @@ import com.zeroclaw.android.data.ProviderKeyValidator
 import com.zeroclaw.android.data.ProviderRegistry
 import com.zeroclaw.android.model.ProviderAuthType
 import com.zeroclaw.android.ui.component.LoadingIndicator
-import com.zeroclaw.android.ui.component.NetworkScanSheet
-import com.zeroclaw.android.ui.component.ProviderDropdown
+import com.zeroclaw.android.ui.component.ProviderCredentialForm
 import com.zeroclaw.android.ui.component.SectionHeader
 
 /** Standard vertical spacing between form fields. */
@@ -71,22 +61,16 @@ private const val TOP_SPACING_DP = 8
 /** Bottom padding for the form. */
 private const val BOTTOM_SPACING_DP = 16
 
-/** Size of the scan button icon. */
-private const val SCAN_ICON_SIZE_DP = 18
-
-/** Spacing between the scan icon and label. */
-private const val SCAN_ICON_SPACING_DP = 4
-
 /** Spacer width between save button and loading indicator. */
 private const val BUTTON_INDICATOR_SPACING_DP = 12
 
 /**
  * Add or edit API key form screen.
  *
- * When adding a new key, the provider field is a [ProviderDropdown].
- * When editing an existing key, the provider is shown as a read-only dropdown.
- * Dynamically shows a base URL field for providers that require one, with
- * a "Scan Network" option for local providers to discover servers on the LAN.
+ * Delegates provider selection and credential input to [ProviderCredentialForm].
+ * When editing an existing key, the provider dropdown is locked. Dynamically
+ * shows a base URL field for providers that require one, with a "Scan Network"
+ * option for local providers to discover servers on the LAN.
  *
  * Navigation only occurs after the save operation completes successfully,
  * preventing data loss from optimistic navigation.
@@ -125,7 +109,6 @@ fun ApiKeyDetailScreen(
     var baseUrl by remember(existingKey) {
         mutableStateOf(existingKey?.baseUrl.orEmpty())
     }
-    var showScanSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(saveState) {
         if (saveState is SaveState.Saved) {
@@ -148,48 +131,26 @@ fun ApiKeyDetailScreen(
     val providerInfo = ProviderRegistry.findById(providerId)
     val authType = providerInfo?.authType
     val needsKey = authType == ProviderAuthType.API_KEY_ONLY
-    val showKeyField = authType != ProviderAuthType.URL_ONLY && authType != ProviderAuthType.NONE
-    val needsUrl =
-        authType == ProviderAuthType.URL_ONLY || authType == ProviderAuthType.URL_AND_OPTIONAL_KEY
     val isSaving = saveState is SaveState.Saving
     val isTesting = connectionTestState is ConnectionTestState.Testing
 
-    val context = LocalContext.current
-    val prefixWarning by remember(providerId, key) {
-        derivedStateOf {
-            if (providerInfo != null) {
-                ProviderKeyValidator.validateKeyFormat(providerInfo, key)
-            } else {
-                null
-            }
-        }
-    }
-    var prefixOverridden by remember { mutableStateOf(false) }
-
-    LaunchedEffect(providerId, key) {
-        prefixOverridden = false
-    }
-
     val prefixValid =
-        prefixWarning == null ||
-            prefixOverridden ||
-            providerInfo?.keyPrefix.isNullOrEmpty()
-    val saveEnabled = providerId.isNotBlank() && (key.isNotBlank() || !needsKey) && !isSaving && prefixValid
+        run {
+            val warning =
+                if (providerInfo != null) {
+                    ProviderKeyValidator.validateKeyFormat(providerInfo, key)
+                } else {
+                    null
+                }
+            warning == null || providerInfo?.keyPrefix.isNullOrEmpty()
+        }
+    val saveEnabled =
+        providerId.isNotBlank() && (key.isNotBlank() || !needsKey) && !isSaving && prefixValid
 
     LaunchedEffect(providerId) {
         if (existingKey == null && providerInfo?.defaultBaseUrl?.isNotEmpty() == true) {
             baseUrl = providerInfo.defaultBaseUrl
         }
-    }
-
-    if (showScanSheet) {
-        NetworkScanSheet(
-            onDismiss = { showScanSheet = false },
-            onServerSelected = { server ->
-                baseUrl = server.baseUrl
-                showScanSheet = false
-            },
-        )
     }
 
     Column(
@@ -206,112 +167,36 @@ fun ApiKeyDetailScreen(
             title = if (keyId != null) "Edit API Key" else "Add API Key",
         )
 
-        ProviderDropdown(
+        ProviderCredentialForm(
             selectedProviderId = providerId,
-            onProviderSelected = { providerId = it.id },
-            enabled = keyId == null && !isSaving,
+            apiKey = key,
+            baseUrl = baseUrl,
+            onProviderChanged = { providerId = it },
+            onApiKeyChanged = { key = it },
+            onBaseUrlChanged = { baseUrl = it },
+            enabled = !isSaving,
+            providerDropdownEnabled = keyId == null && !isSaving,
+            showApiKeyWhenBlank = true,
+            baseUrlKeyboardType = KeyboardType.Uri,
+            baseUrlImeAction = if (needsKey) ImeAction.Next else ImeAction.Done,
+            apiKeyImeAction = ImeAction.Done,
+            apiKeyTrailingIcon = {
+                IconButton(
+                    onClick = onNavigateToQrScanner,
+                    enabled = !isSaving,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription = "Scan QR code to fill API key"
+                        },
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.CameraAlt,
+                        contentDescription = null,
+                    )
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
         )
-
-        if (providerInfo?.helpText?.isNotEmpty() == true) {
-            Text(
-                text = providerInfo.helpText,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        if (providerInfo?.keyCreationUrl?.isNotEmpty() == true) {
-            TextButton(
-                onClick = {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse(providerInfo.keyCreationUrl)),
-                    )
-                },
-                enabled = !isSaving,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                    contentDescription = null,
-                    modifier = Modifier.size(SCAN_ICON_SIZE_DP.dp),
-                )
-                Spacer(modifier = Modifier.width(SCAN_ICON_SPACING_DP.dp))
-                Text("Get API Key")
-            }
-        }
-
-        if (needsUrl) {
-            OutlinedTextField(
-                value = baseUrl,
-                onValueChange = { baseUrl = it },
-                label = { Text("Base URL") },
-                singleLine = true,
-                enabled = !isSaving,
-                keyboardOptions =
-                    KeyboardOptions(
-                        keyboardType = KeyboardType.Uri,
-                        imeAction = if (needsKey) ImeAction.Next else ImeAction.Done,
-                    ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            TextButton(
-                onClick = { showScanSheet = true },
-                enabled = !isSaving,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.WifiFind,
-                    contentDescription = null,
-                    modifier = Modifier.size(SCAN_ICON_SIZE_DP.dp),
-                )
-                Spacer(modifier = Modifier.width(SCAN_ICON_SPACING_DP.dp))
-                Text("Scan Network for Servers")
-            }
-        }
-
-        if (showKeyField || providerId.isBlank()) {
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                label = { Text(if (needsKey) "API Key" else "API Key (optional)") },
-                singleLine = true,
-                enabled = !isSaving,
-                visualTransformation = PasswordVisualTransformation(),
-                trailingIcon = {
-                    IconButton(
-                        onClick = onNavigateToQrScanner,
-                        enabled = !isSaving,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription = "Scan QR code to fill API key"
-                            },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.CameraAlt,
-                            contentDescription = null,
-                        )
-                    }
-                },
-                keyboardOptions =
-                    KeyboardOptions(
-                        keyboardType = KeyboardType.Password,
-                        imeAction = ImeAction.Done,
-                    ),
-                isError = prefixWarning != null && !prefixOverridden,
-                supportingText =
-                    if (prefixWarning != null && !prefixOverridden) {
-                        { Text(prefixWarning!!) }
-                    } else {
-                        null
-                    },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (prefixWarning != null && !prefixOverridden) {
-                TextButton(onClick = { prefixOverridden = true }) {
-                    Text("Use this key anyway")
-                }
-            }
-        }
 
         Row(
             verticalAlignment = Alignment.CenterVertically,

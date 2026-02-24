@@ -44,7 +44,7 @@ private const val SECTION_HEADER_PADDING_DP = 8
  * Material 3 dropdown for selecting an AI provider from the [ProviderRegistry].
  *
  * Items are grouped by [ProviderCategory] with section headers. A filter/search
- * field allows quick navigation among 27+ entries. Unknown provider IDs from
+ * field allows quick navigation among 32 entries. Unknown provider IDs from
  * legacy data display as raw strings with a fallback icon.
  *
  * @param selectedProviderId Currently selected provider ID, or empty string.

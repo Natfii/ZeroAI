@@ -47,7 +47,6 @@ import com.zeroclaw.android.model.ProviderAuthType
 import com.zeroclaw.android.ui.component.CollapsibleSection
 import com.zeroclaw.android.ui.component.ConnectionPickerSection
 import com.zeroclaw.android.ui.component.ModelSuggestionField
-import com.zeroclaw.android.ui.component.ProviderDropdown
 import java.util.UUID
 
 /** Spacing between form fields. */
@@ -154,17 +153,6 @@ fun AddAgentScreen(
             onValueChange = { name = it },
             label = { Text("Nickname") },
             singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
-
-        ProviderDropdown(
-            selectedProviderId = providerId,
-            onProviderSelected = {
-                providerId = it.id
-                selectedConnectionId = null
-                modelName = it.suggestedModels.firstOrNull().orEmpty()
-            },
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
