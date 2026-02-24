@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -23,6 +24,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.zeroclaw.android.ZeroClawApplication
+import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.service.ZeroClawDaemonService
 import com.zeroclaw.android.ui.screen.agents.AddAgentScreen
 import com.zeroclaw.android.ui.screen.agents.AgentDetailScreen
@@ -64,6 +66,8 @@ import com.zeroclaw.android.ui.screen.settings.memory.MemoryBrowserScreen
 import com.zeroclaw.android.ui.screen.settings.tools.ToolsBrowserScreen
 import com.zeroclaw.android.util.AuthResult
 import com.zeroclaw.android.util.BiometricGatekeeper
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Single [NavHost] mapping all route objects to their screen composables.
@@ -156,6 +160,7 @@ fun ZeroClawNavHost(
             val restartRequired by settingsViewModel.restartRequired
                 .collectAsStateWithLifecycle()
             val context = LocalContext.current
+            val restartScope = rememberCoroutineScope()
 
             SettingsScreen(
                 onNavigate = { action ->
@@ -224,19 +229,24 @@ fun ZeroClawNavHost(
                         }
                     context.startService(stopIntent)
                     app.chatMessageRepository.clear()
-                    val startIntent =
-                        Intent(
-                            context,
-                            ZeroClawDaemonService::class.java,
-                        ).apply {
-                            action = ZeroClawDaemonService.ACTION_START
-                        }
-                    context.startForegroundService(startIntent)
                     navController.navigate(DashboardRoute) {
                         popUpTo(navController.graph.startDestinationId) {
                             inclusive = false
                         }
                         launchSingleTop = true
+                    }
+                    restartScope.launch {
+                        app.daemonBridge.serviceState.first {
+                            it == ServiceState.STOPPED || it == ServiceState.ERROR
+                        }
+                        val startIntent =
+                            Intent(
+                                context,
+                                ZeroClawDaemonService::class.java,
+                            ).apply {
+                                action = ZeroClawDaemonService.ACTION_START
+                            }
+                        context.startForegroundService(startIntent)
                     }
                 },
                 edgeMargin = edgeMargin,
