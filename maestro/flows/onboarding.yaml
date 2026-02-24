@@ -4,8 +4,8 @@ tags:
   - onboarding
 ---
 - stopApp
-- launchApp:
-    clearState: true
+- clearState
+- launchApp
 
 # Step 1: Permissions
 - extendedWaitUntil:

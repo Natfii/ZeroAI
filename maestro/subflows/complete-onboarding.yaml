@@ -1,8 +1,8 @@
 appId: com.zeroclaw.android
 ---
 - stopApp
-- launchApp:
-    clearState: true
+- clearState
+- launchApp
 
 # Step 1: Permissions
 - extendedWaitUntil:
