@@ -228,10 +228,16 @@ class ZeroClawDaemonService : Service() {
             val configToml = baseToml + channelsToml + agentsToml
 
             retryPolicy.reset()
+            val validPort =
+                if (settings.port in VALID_PORT_RANGE) {
+                    settings.port
+                } else {
+                    AppSettings.DEFAULT_PORT
+                }
             attemptStart(
                 configToml = configToml,
                 host = settings.host,
-                port = settings.port.toUShort(),
+                port = validPort.toUShort(),
             )
         }
     }
@@ -689,6 +695,7 @@ class ZeroClawDaemonService : Service() {
         private const val WAKE_LOCK_TIMEOUT_MS = 180_000L
         private const val RESTART_DELAY_MS = 5_000L
         private const val RESTART_REQUEST_CODE = 42
+        private val VALID_PORT_RANGE = 1..65535
     }
 }
 

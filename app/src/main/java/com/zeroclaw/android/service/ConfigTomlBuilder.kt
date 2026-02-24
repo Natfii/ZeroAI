@@ -945,17 +945,41 @@ object ConfigTomlBuilder {
         buildString {
             append('"')
             for (ch in value) {
-                when (ch) {
-                    '\\' -> append("\\\\")
-                    '"' -> append("\\\"")
-                    '\n' -> append("\\n")
-                    '\r' -> append("\\r")
-                    '\t' -> append("\\t")
-                    '\b' -> append("\\b")
-                    '\u000C' -> append("\\f")
+                when {
+                    ch == '\\' -> append("\\\\")
+                    ch == '"' -> append("\\\"")
+                    ch == '\n' -> append("\\n")
+                    ch == '\r' -> append("\\r")
+                    ch == '\t' -> append("\\t")
+                    ch == '\b' -> append("\\b")
+                    ch == '\u000C' -> append("\\f")
+                    ch.code in CONTROL_RANGE_START..CONTROL_RANGE_END ||
+                        ch.code == DELETE_CHAR -> {
+                        append("\\u")
+                        append(
+                            ch.code
+                                .toString(HEX_RADIX)
+                                .padStart(UNICODE_PAD_LENGTH, '0'),
+                        )
+                    }
                     else -> append(ch)
                 }
             }
             append('"')
         }
+
+    /** Radix for hexadecimal encoding. */
+    private const val HEX_RADIX = 16
+
+    /** Pad length for Unicode escape sequences. */
+    private const val UNICODE_PAD_LENGTH = 4
+
+    /** Start of the C0 control character range. */
+    private const val CONTROL_RANGE_START = 0x00
+
+    /** End of the C0 control character range. */
+    private const val CONTROL_RANGE_END = 0x1F
+
+    /** ASCII DEL character code. */
+    private const val DELETE_CHAR = 0x7F
 }
