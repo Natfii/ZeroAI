@@ -456,6 +456,293 @@ interface SettingsRepository {
     suspend fun setHttpRequestAllowedDomains(domains: String)
 
     /**
+     * Toggles the web fetch tool.
+     *
+     * @param enabled Whether the web fetch tool is active.
+     */
+    suspend fun setWebFetchEnabled(enabled: Boolean)
+
+    /**
+     * Updates the web fetch allowed domains list.
+     *
+     * @param domains Comma-separated domain names.
+     */
+    suspend fun setWebFetchAllowedDomains(domains: String)
+
+    /**
+     * Updates the web fetch blocked domains list.
+     *
+     * @param domains Comma-separated domain names.
+     */
+    suspend fun setWebFetchBlockedDomains(domains: String)
+
+    /**
+     * Updates the web fetch maximum response size.
+     *
+     * @param size Maximum response body size in bytes.
+     */
+    suspend fun setWebFetchMaxResponseSize(size: Int)
+
+    /**
+     * Updates the web fetch timeout.
+     *
+     * @param secs Request timeout in seconds.
+     */
+    suspend fun setWebFetchTimeoutSecs(secs: Int)
+
+    /**
+     * Toggles the web search tool.
+     *
+     * @param enabled Whether the web search tool is active.
+     */
+    suspend fun setWebSearchEnabled(enabled: Boolean)
+
+    /**
+     * Updates the web search provider.
+     *
+     * @param provider Search provider: "duckduckgo" or "brave".
+     */
+    suspend fun setWebSearchProvider(provider: String)
+
+    /**
+     * Updates the Brave Search API key.
+     *
+     * @param key API key string.
+     */
+    suspend fun setWebSearchBraveApiKey(key: String)
+
+    /**
+     * Updates the web search max results.
+     *
+     * @param max Maximum number of search results (1-10).
+     */
+    suspend fun setWebSearchMaxResults(max: Int)
+
+    /**
+     * Updates the web search timeout.
+     *
+     * @param secs Request timeout in seconds.
+     */
+    suspend fun setWebSearchTimeoutSecs(secs: Int)
+
+    /**
+     * Updates the sandbox enabled mode.
+     *
+     * @param enabled Sandbox mode: "" for auto-detect, "true", or "false".
+     */
+    suspend fun setSecuritySandboxEnabled(enabled: String)
+
+    /**
+     * Updates the sandbox backend.
+     *
+     * @param backend One of "auto", "landlock", "firejail", "bubblewrap", "docker", "none".
+     */
+    suspend fun setSecuritySandboxBackend(backend: String)
+
+    /**
+     * Updates the extra firejail arguments.
+     *
+     * @param args Comma-separated extra arguments for firejail.
+     */
+    suspend fun setSecuritySandboxFirejailArgs(args: String)
+
+    /**
+     * Updates the maximum memory for spawned commands.
+     *
+     * @param mb Maximum memory in MB.
+     */
+    suspend fun setSecurityResourcesMaxMemoryMb(mb: Int)
+
+    /**
+     * Updates the maximum CPU time for spawned commands.
+     *
+     * @param secs Maximum CPU time in seconds.
+     */
+    suspend fun setSecurityResourcesMaxCpuTimeSecs(secs: Int)
+
+    /**
+     * Updates the maximum number of subprocesses.
+     *
+     * @param max Maximum subprocess count.
+     */
+    suspend fun setSecurityResourcesMaxSubprocesses(max: Int)
+
+    /**
+     * Toggles memory monitoring for resource limits.
+     *
+     * @param enabled Whether memory monitoring is active.
+     */
+    suspend fun setSecurityResourcesMemoryMonitoring(enabled: Boolean)
+
+    /**
+     * Toggles security audit logging.
+     *
+     * @param enabled Whether audit logging is active.
+     */
+    suspend fun setSecurityAuditEnabled(enabled: Boolean)
+
+    /**
+     * Toggles OTP gating for sensitive actions.
+     *
+     * @param enabled Whether OTP gating is active.
+     */
+    suspend fun setSecurityOtpEnabled(enabled: Boolean)
+
+    /**
+     * Updates the OTP method.
+     *
+     * @param method One of "totp", "pairing", or "cli-prompt".
+     */
+    suspend fun setSecurityOtpMethod(method: String)
+
+    /**
+     * Updates the OTP token time-to-live.
+     *
+     * @param secs Token TTL in seconds.
+     */
+    suspend fun setSecurityOtpTokenTtlSecs(secs: Int)
+
+    /**
+     * Updates the OTP cache validity duration.
+     *
+     * @param secs Duration in seconds a verified OTP remains valid.
+     */
+    suspend fun setSecurityOtpCacheValidSecs(secs: Int)
+
+    /**
+     * Updates the OTP-gated actions list.
+     *
+     * @param actions Comma-separated list of actions requiring OTP.
+     */
+    suspend fun setSecurityOtpGatedActions(actions: String)
+
+    /**
+     * Updates the OTP-gated domains list.
+     *
+     * @param domains Comma-separated list of domains requiring OTP.
+     */
+    suspend fun setSecurityOtpGatedDomains(domains: String)
+
+    /**
+     * Updates the OTP-gated domain categories list.
+     *
+     * @param categories Comma-separated domain categories requiring OTP.
+     */
+    suspend fun setSecurityOtpGatedDomainCategories(categories: String)
+
+    /**
+     * Toggles the emergency stop feature.
+     *
+     * @param enabled Whether the emergency stop is active.
+     */
+    suspend fun setSecurityEstopEnabled(enabled: Boolean)
+
+    /**
+     * Toggles OTP requirement to resume after emergency stop.
+     *
+     * @param required Whether OTP is required to resume.
+     */
+    suspend fun setSecurityEstopRequireOtpToResume(required: Boolean)
+
+    /**
+     * Updates the Qdrant vector database URL.
+     *
+     * @param url Qdrant endpoint URL.
+     */
+    suspend fun setMemoryQdrantUrl(url: String)
+
+    /**
+     * Updates the Qdrant collection name.
+     *
+     * @param collection Collection identifier.
+     */
+    suspend fun setMemoryQdrantCollection(collection: String)
+
+    /**
+     * Updates the Qdrant API key.
+     *
+     * @param key API key string.
+     */
+    suspend fun setMemoryQdrantApiKey(key: String)
+
+    /**
+     * Updates the embedding routes JSON.
+     *
+     * @param json JSON array of embedding route objects.
+     */
+    suspend fun setEmbeddingRoutesJson(json: String)
+
+    /**
+     * Toggles automatic query classification.
+     *
+     * @param enabled Whether query classification is active.
+     */
+    suspend fun setQueryClassificationEnabled(enabled: Boolean)
+
+    /**
+     * Toggles proxy configuration.
+     *
+     * @param enabled Whether the proxy is active.
+     */
+    suspend fun setProxyEnabled(enabled: Boolean)
+
+    /**
+     * Updates the HTTP proxy URL.
+     *
+     * @param proxy HTTP proxy URL string.
+     */
+    suspend fun setProxyHttpProxy(proxy: String)
+
+    /**
+     * Updates the HTTPS proxy URL.
+     *
+     * @param proxy HTTPS proxy URL string.
+     */
+    suspend fun setProxyHttpsProxy(proxy: String)
+
+    /**
+     * Updates the catch-all proxy URL.
+     *
+     * @param proxy Proxy URL for all protocols.
+     */
+    suspend fun setProxyAllProxy(proxy: String)
+
+    /**
+     * Updates the proxy bypass list.
+     *
+     * @param noProxy Comma-separated domains that bypass the proxy.
+     */
+    suspend fun setProxyNoProxy(noProxy: String)
+
+    /**
+     * Updates the proxy scope.
+     *
+     * @param scope One of "environment", "zeroclaw", or "services".
+     */
+    suspend fun setProxyScope(scope: String)
+
+    /**
+     * Updates the proxy service selectors.
+     *
+     * @param selectors Comma-separated service selectors for proxy routing.
+     */
+    suspend fun setProxyServiceSelectors(selectors: String)
+
+    /**
+     * Updates the provider retry backoff duration.
+     *
+     * @param ms Backoff duration in milliseconds.
+     */
+    suspend fun setReliabilityBackoffMs(ms: Int)
+
+    /**
+     * Updates the reliability API keys JSON.
+     *
+     * @param json JSON object mapping provider names to API keys.
+     */
+    suspend fun setReliabilityApiKeysJson(json: String)
+
+    /**
      * Toggles the session lock gate.
      *
      * @param enabled Whether the app-wide lock is active.

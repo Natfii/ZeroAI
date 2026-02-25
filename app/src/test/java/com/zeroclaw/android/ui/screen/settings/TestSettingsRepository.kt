@@ -144,6 +144,88 @@ internal class TestSettingsRepository : SettingsRepository {
 
     override suspend fun setHttpRequestAllowedDomains(domains: String) = _settings.update { it.copy(httpRequestAllowedDomains = domains) }
 
+    override suspend fun setWebFetchEnabled(enabled: Boolean) = _settings.update { it.copy(webFetchEnabled = enabled) }
+
+    override suspend fun setWebFetchAllowedDomains(domains: String) = _settings.update { it.copy(webFetchAllowedDomains = domains) }
+
+    override suspend fun setWebFetchBlockedDomains(domains: String) = _settings.update { it.copy(webFetchBlockedDomains = domains) }
+
+    override suspend fun setWebFetchMaxResponseSize(size: Int) = _settings.update { it.copy(webFetchMaxResponseSize = size) }
+
+    override suspend fun setWebFetchTimeoutSecs(secs: Int) = _settings.update { it.copy(webFetchTimeoutSecs = secs) }
+
+    override suspend fun setWebSearchEnabled(enabled: Boolean) = _settings.update { it.copy(webSearchEnabled = enabled) }
+
+    override suspend fun setWebSearchProvider(provider: String) = _settings.update { it.copy(webSearchProvider = provider) }
+
+    override suspend fun setWebSearchBraveApiKey(key: String) = _settings.update { it.copy(webSearchBraveApiKey = key) }
+
+    override suspend fun setWebSearchMaxResults(max: Int) = _settings.update { it.copy(webSearchMaxResults = max) }
+
+    override suspend fun setWebSearchTimeoutSecs(secs: Int) = _settings.update { it.copy(webSearchTimeoutSecs = secs) }
+
+    override suspend fun setSecuritySandboxEnabled(enabled: String) = _settings.update { it.copy(securitySandboxEnabled = enabled) }
+
+    override suspend fun setSecuritySandboxBackend(backend: String) = _settings.update { it.copy(securitySandboxBackend = backend) }
+
+    override suspend fun setSecuritySandboxFirejailArgs(args: String) = _settings.update { it.copy(securitySandboxFirejailArgs = args) }
+
+    override suspend fun setSecurityResourcesMaxMemoryMb(mb: Int) = _settings.update { it.copy(securityResourcesMaxMemoryMb = mb) }
+
+    override suspend fun setSecurityResourcesMaxCpuTimeSecs(secs: Int) = _settings.update { it.copy(securityResourcesMaxCpuTimeSecs = secs) }
+
+    override suspend fun setSecurityResourcesMaxSubprocesses(max: Int) = _settings.update { it.copy(securityResourcesMaxSubprocesses = max) }
+
+    override suspend fun setSecurityResourcesMemoryMonitoring(enabled: Boolean) = _settings.update { it.copy(securityResourcesMemoryMonitoring = enabled) }
+
+    override suspend fun setSecurityAuditEnabled(enabled: Boolean) = _settings.update { it.copy(securityAuditEnabled = enabled) }
+
+    override suspend fun setSecurityOtpEnabled(enabled: Boolean) = _settings.update { it.copy(securityOtpEnabled = enabled) }
+
+    override suspend fun setSecurityOtpMethod(method: String) = _settings.update { it.copy(securityOtpMethod = method) }
+
+    override suspend fun setSecurityOtpTokenTtlSecs(secs: Int) = _settings.update { it.copy(securityOtpTokenTtlSecs = secs) }
+
+    override suspend fun setSecurityOtpCacheValidSecs(secs: Int) = _settings.update { it.copy(securityOtpCacheValidSecs = secs) }
+
+    override suspend fun setSecurityOtpGatedActions(actions: String) = _settings.update { it.copy(securityOtpGatedActions = actions) }
+
+    override suspend fun setSecurityOtpGatedDomains(domains: String) = _settings.update { it.copy(securityOtpGatedDomains = domains) }
+
+    override suspend fun setSecurityOtpGatedDomainCategories(categories: String) = _settings.update { it.copy(securityOtpGatedDomainCategories = categories) }
+
+    override suspend fun setSecurityEstopEnabled(enabled: Boolean) = _settings.update { it.copy(securityEstopEnabled = enabled) }
+
+    override suspend fun setSecurityEstopRequireOtpToResume(required: Boolean) = _settings.update { it.copy(securityEstopRequireOtpToResume = required) }
+
+    override suspend fun setMemoryQdrantUrl(url: String) = _settings.update { it.copy(memoryQdrantUrl = url) }
+
+    override suspend fun setMemoryQdrantCollection(collection: String) = _settings.update { it.copy(memoryQdrantCollection = collection) }
+
+    override suspend fun setMemoryQdrantApiKey(key: String) = _settings.update { it.copy(memoryQdrantApiKey = key) }
+
+    override suspend fun setEmbeddingRoutesJson(json: String) = _settings.update { it.copy(embeddingRoutesJson = json) }
+
+    override suspend fun setQueryClassificationEnabled(enabled: Boolean) = _settings.update { it.copy(queryClassificationEnabled = enabled) }
+
+    override suspend fun setProxyEnabled(enabled: Boolean) = _settings.update { it.copy(proxyEnabled = enabled) }
+
+    override suspend fun setProxyHttpProxy(proxy: String) = _settings.update { it.copy(proxyHttpProxy = proxy) }
+
+    override suspend fun setProxyHttpsProxy(proxy: String) = _settings.update { it.copy(proxyHttpsProxy = proxy) }
+
+    override suspend fun setProxyAllProxy(proxy: String) = _settings.update { it.copy(proxyAllProxy = proxy) }
+
+    override suspend fun setProxyNoProxy(noProxy: String) = _settings.update { it.copy(proxyNoProxy = noProxy) }
+
+    override suspend fun setProxyScope(scope: String) = _settings.update { it.copy(proxyScope = scope) }
+
+    override suspend fun setProxyServiceSelectors(selectors: String) = _settings.update { it.copy(proxyServiceSelectors = selectors) }
+
+    override suspend fun setReliabilityBackoffMs(ms: Int) = _settings.update { it.copy(reliabilityBackoffMs = ms) }
+
+    override suspend fun setReliabilityApiKeysJson(json: String) = _settings.update { it.copy(reliabilityApiKeysJson = json) }
+
     override suspend fun setLockEnabled(enabled: Boolean) = _settings.update { it.copy(lockEnabled = enabled) }
 
     override suspend fun setLockTimeoutMinutes(minutes: Int) = _settings.update { it.copy(lockTimeoutMinutes = minutes) }

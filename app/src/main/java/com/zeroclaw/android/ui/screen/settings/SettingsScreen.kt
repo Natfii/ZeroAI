@@ -24,10 +24,12 @@ import androidx.compose.material.icons.outlined.BatteryAlert
 import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.GppGood
 import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Refresh
@@ -182,6 +184,12 @@ internal fun SettingsContent(
             onClick = { onNavigate(SettingsNavAction.SecurityOverview) },
         )
         SettingsListItem(
+            icon = Icons.Outlined.GppGood,
+            title = "Security Advanced",
+            subtitle = "Sandbox, OTP, e-stop, resource limits",
+            onClick = { onNavigate(SettingsNavAction.SecurityAdvanced) },
+        )
+        SettingsListItem(
             icon = Icons.Outlined.Key,
             title = "API Keys",
             subtitle = "Manage provider credentials",
@@ -236,13 +244,19 @@ internal fun SettingsContent(
         SettingsListItem(
             icon = Icons.Outlined.Memory,
             title = "Memory Advanced",
-            subtitle = "Embedding, hygiene, recall weights",
+            subtitle = "Embedding, hygiene, recall weights, Qdrant",
             onClick = { onNavigate(SettingsNavAction.MemoryAdvanced) },
+        )
+        SettingsListItem(
+            icon = Icons.Outlined.Layers,
+            title = "Embedding Routes",
+            subtitle = "Hint-based embedding provider routing",
+            onClick = { onNavigate(SettingsNavAction.EmbeddingRoutes) },
         )
         SettingsListItem(
             icon = Icons.Outlined.Tune,
             title = "Tool Management",
-            subtitle = "Browser, HTTP, Composio",
+            subtitle = "Browser, HTTP, Composio, Web Fetch, Web Search",
             onClick = { onNavigate(SettingsNavAction.ToolManagement) },
         )
         SettingsListItem(

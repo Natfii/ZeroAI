@@ -18,6 +18,8 @@ jobs:
   ci:
     name: CI Gate
     uses: ./.github/workflows/ci.yml
+    with:
+      skip-emu-tests: true
     secrets: inherit
 
   release:
@@ -30,7 +32,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:

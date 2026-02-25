@@ -71,6 +71,47 @@ package com.zeroclaw.android.model
  * @property browserAllowedDomains Comma-separated list of allowed browser domains.
  * @property httpRequestEnabled Whether the HTTP request tool is enabled.
  * @property httpRequestAllowedDomains Comma-separated list of allowed HTTP domains.
+ * @property webFetchEnabled Whether the web fetch tool is active.
+ * @property webFetchAllowedDomains Comma-separated allowed domains for web fetch.
+ * @property webFetchBlockedDomains Comma-separated blocked domains for web fetch.
+ * @property webFetchMaxResponseSize Maximum response body size in bytes.
+ * @property webFetchTimeoutSecs Request timeout in seconds for web fetch.
+ * @property webSearchEnabled Whether the web search tool is active.
+ * @property webSearchProvider Search provider: "duckduckgo" or "brave".
+ * @property webSearchBraveApiKey Brave Search API key (required when provider is "brave").
+ * @property webSearchMaxResults Maximum number of search results (1-10).
+ * @property webSearchTimeoutSecs Request timeout in seconds for web search.
+ * @property securitySandboxEnabled Sandbox mode: "" for auto-detect, "true", or "false".
+ * @property securitySandboxBackend Sandbox backend: "auto", "landlock", "firejail", "bubblewrap", "docker", "none".
+ * @property securitySandboxFirejailArgs Comma-separated extra arguments for firejail.
+ * @property securityResourcesMaxMemoryMb Maximum memory in MB for spawned commands.
+ * @property securityResourcesMaxCpuTimeSecs Maximum CPU time in seconds for spawned commands.
+ * @property securityResourcesMaxSubprocesses Maximum number of subprocesses.
+ * @property securityResourcesMemoryMonitoring Whether memory monitoring is active.
+ * @property securityAuditEnabled Whether security audit logging is active.
+ * @property securityOtpEnabled Whether OTP gating for sensitive actions is active.
+ * @property securityOtpMethod OTP method: "totp", "pairing", or "cli-prompt".
+ * @property securityOtpTokenTtlSecs OTP token time-to-live in seconds.
+ * @property securityOtpCacheValidSecs Duration in seconds a verified OTP remains valid.
+ * @property securityOtpGatedActions Comma-separated list of actions requiring OTP.
+ * @property securityOtpGatedDomains Comma-separated list of domains requiring OTP.
+ * @property securityOtpGatedDomainCategories Comma-separated domain categories requiring OTP.
+ * @property securityEstopEnabled Whether the emergency stop feature is active.
+ * @property securityEstopRequireOtpToResume Whether OTP is required to resume after e-stop.
+ * @property memoryQdrantUrl Qdrant vector database URL.
+ * @property memoryQdrantCollection Qdrant collection name.
+ * @property memoryQdrantApiKey Qdrant API key.
+ * @property embeddingRoutesJson JSON array of embedding route objects.
+ * @property queryClassificationEnabled Whether automatic query classification is active.
+ * @property proxyEnabled Whether proxy configuration is active.
+ * @property proxyHttpProxy HTTP proxy URL.
+ * @property proxyHttpsProxy HTTPS proxy URL.
+ * @property proxyAllProxy Catch-all proxy URL for all protocols.
+ * @property proxyNoProxy Comma-separated list of domains that bypass the proxy.
+ * @property proxyScope Proxy scope: "environment", "zeroclaw", or "services".
+ * @property proxyServiceSelectors Comma-separated service selectors for proxy routing.
+ * @property reliabilityBackoffMs Provider retry backoff duration in milliseconds.
+ * @property reliabilityApiKeysJson JSON object mapping provider names to API keys.
  * @property lockEnabled Android-only. Whether the session lock gate is active.
  * @property lockTimeoutMinutes Android-only. Minutes of background time before re-locking.
  * @property pinHash Android-only. PBKDF2 hash of the user's PIN (Base64-encoded salt+hash).
@@ -145,6 +186,47 @@ data class AppSettings(
     val browserAllowedDomains: String = "",
     val httpRequestEnabled: Boolean = false,
     val httpRequestAllowedDomains: String = "",
+    val webFetchEnabled: Boolean = false,
+    val webFetchAllowedDomains: String = "",
+    val webFetchBlockedDomains: String = "",
+    val webFetchMaxResponseSize: Int = DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE,
+    val webFetchTimeoutSecs: Int = DEFAULT_WEB_FETCH_TIMEOUT_SECS,
+    val webSearchEnabled: Boolean = false,
+    val webSearchProvider: String = DEFAULT_WEB_SEARCH_PROVIDER,
+    val webSearchBraveApiKey: String = "",
+    val webSearchMaxResults: Int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
+    val webSearchTimeoutSecs: Int = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+    val securitySandboxEnabled: String = "",
+    val securitySandboxBackend: String = DEFAULT_SANDBOX_BACKEND,
+    val securitySandboxFirejailArgs: String = "",
+    val securityResourcesMaxMemoryMb: Int = DEFAULT_RESOURCES_MAX_MEMORY_MB,
+    val securityResourcesMaxCpuTimeSecs: Int = DEFAULT_RESOURCES_MAX_CPU_TIME_SECS,
+    val securityResourcesMaxSubprocesses: Int = DEFAULT_RESOURCES_MAX_SUBPROCESSES,
+    val securityResourcesMemoryMonitoring: Boolean = true,
+    val securityAuditEnabled: Boolean = false,
+    val securityOtpEnabled: Boolean = false,
+    val securityOtpMethod: String = DEFAULT_OTP_METHOD,
+    val securityOtpTokenTtlSecs: Int = DEFAULT_OTP_TOKEN_TTL_SECS,
+    val securityOtpCacheValidSecs: Int = DEFAULT_OTP_CACHE_VALID_SECS,
+    val securityOtpGatedActions: String = DEFAULT_OTP_GATED_ACTIONS,
+    val securityOtpGatedDomains: String = "",
+    val securityOtpGatedDomainCategories: String = "",
+    val securityEstopEnabled: Boolean = false,
+    val securityEstopRequireOtpToResume: Boolean = true,
+    val memoryQdrantUrl: String = "",
+    val memoryQdrantCollection: String = DEFAULT_QDRANT_COLLECTION,
+    val memoryQdrantApiKey: String = "",
+    val embeddingRoutesJson: String = "[]",
+    val queryClassificationEnabled: Boolean = false,
+    val proxyEnabled: Boolean = false,
+    val proxyHttpProxy: String = "",
+    val proxyHttpsProxy: String = "",
+    val proxyAllProxy: String = "",
+    val proxyNoProxy: String = "",
+    val proxyScope: String = DEFAULT_PROXY_SCOPE,
+    val proxyServiceSelectors: String = "",
+    val reliabilityBackoffMs: Int = DEFAULT_RELIABILITY_BACKOFF_MS,
+    val reliabilityApiKeysJson: String = "{}",
     val lockEnabled: Boolean = false,
     val lockTimeoutMinutes: Int = DEFAULT_LOCK_TIMEOUT,
     val pinHash: String = "",
@@ -245,6 +327,55 @@ data class AppSettings(
 
         /** Default lock timeout in minutes. */
         const val DEFAULT_LOCK_TIMEOUT = 15
+
+        /** Default web fetch max response size in bytes (500 KB). */
+        const val DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE = 500_000
+
+        /** Default web fetch timeout in seconds. */
+        const val DEFAULT_WEB_FETCH_TIMEOUT_SECS = 30
+
+        /** Default web search provider. */
+        const val DEFAULT_WEB_SEARCH_PROVIDER = "duckduckgo"
+
+        /** Default web search max results. */
+        const val DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
+
+        /** Default web search timeout in seconds. */
+        const val DEFAULT_WEB_SEARCH_TIMEOUT_SECS = 15
+
+        /** Default sandbox backend. */
+        const val DEFAULT_SANDBOX_BACKEND = "auto"
+
+        /** Default resource limit: max memory in MB. */
+        const val DEFAULT_RESOURCES_MAX_MEMORY_MB = 512
+
+        /** Default resource limit: max CPU time in seconds. */
+        const val DEFAULT_RESOURCES_MAX_CPU_TIME_SECS = 300
+
+        /** Default resource limit: max subprocesses. */
+        const val DEFAULT_RESOURCES_MAX_SUBPROCESSES = 32
+
+        /** Default OTP method. */
+        const val DEFAULT_OTP_METHOD = "totp"
+
+        /** Default OTP token TTL in seconds. */
+        const val DEFAULT_OTP_TOKEN_TTL_SECS = 30
+
+        /** Default OTP cache validity in seconds. */
+        const val DEFAULT_OTP_CACHE_VALID_SECS = 300
+
+        /** Default OTP-gated actions (comma-separated). */
+        const val DEFAULT_OTP_GATED_ACTIONS =
+            "shell,file_write,browser_open,browser,memory_forget"
+
+        /** Default Qdrant collection name. */
+        const val DEFAULT_QDRANT_COLLECTION = "zeroclaw_memories"
+
+        /** Default proxy scope. */
+        const val DEFAULT_PROXY_SCOPE = "zeroclaw"
+
+        /** Default reliability backoff duration in milliseconds. */
+        const val DEFAULT_RELIABILITY_BACKOFF_MS = 1000
     }
 }
 

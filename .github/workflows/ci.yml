@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
   workflow_call:
+    inputs:
+      skip-emu-tests:
+        description: "Skip emulator-based tests (screen tests and Maestro E2E)"
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -28,8 +33,8 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
-        working-directory: .
+        run: if ls ../patches/*.patch 1>/dev/null 2>&1; then git apply ../patches/*.patch; fi
+        working-directory: zeroclaw
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -55,7 +60,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:
@@ -82,7 +87,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
@@ -90,6 +95,7 @@ jobs:
 
   screen-test:
     name: Screen Tests
+    if: ${{ !inputs.skip-emu-tests }}
     runs-on: ubuntu-latest
     needs: [test]
     timeout-minutes: 20
@@ -99,7 +105,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:
@@ -136,6 +142,7 @@ jobs:
 
   maestro-test:
     name: Maestro E2E
+    if: ${{ !inputs.skip-emu-tests }}
     runs-on: ubuntu-latest
     needs: [test]
     timeout-minutes: 20
@@ -145,7 +152,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:
@@ -213,13 +220,14 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     needs: [lint-rust, lint-kotlin, cargo-deny, screen-test, maestro-test]
+    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') }}
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:
@@ -264,7 +272,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:
@@ -306,7 +314,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - name: Check version consistency
         run: |
@@ -337,7 +345,7 @@ jobs:
           submodules: recursive
 
       - name: Apply submodule patches
-        run: cd zeroclaw && git apply ../patches/*.patch
+        run: if ls patches/*.patch 1>/dev/null 2>&1; then cd zeroclaw && git apply ../patches/*.patch; fi
 
       - uses: actions/setup-java@v4
         with:

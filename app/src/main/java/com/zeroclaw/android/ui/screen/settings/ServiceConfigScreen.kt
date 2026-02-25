@@ -135,6 +135,7 @@ fun ServiceConfigScreen(
         MemorySection(settings = settings, viewModel = settingsViewModel)
         ReliabilitySection(settings = settings, viewModel = settingsViewModel)
         CostLimitsSection(settings = settings, viewModel = settingsViewModel)
+        ProxySection(settings = settings, viewModel = settingsViewModel)
 
         Spacer(modifier = Modifier.height(16.dp))
     }
@@ -315,6 +316,27 @@ private fun ReliabilitySection(
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
+
+    OutlinedTextField(
+        value = settings.reliabilityBackoffMs.toString(),
+        onValueChange = { value ->
+            value.toIntOrNull()?.let { viewModel.updateReliabilityBackoffMs(it) }
+        },
+        label = { Text("Provider backoff (ms)") },
+        supportingText = { Text("Wait time before retrying a failed provider") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.reliabilityApiKeysJson,
+        onValueChange = { viewModel.updateReliabilityApiKeysJson(it) },
+        label = { Text("Provider API keys (JSON)") },
+        supportingText = { Text("{\"provider\": \"key\", ...}") },
+        minLines = 3,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /**
@@ -405,6 +427,87 @@ private fun CostLimitsSection(
             },
         enabled = settings.costEnabled,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * Proxy configuration section.
+ *
+ * @param settings Current application settings.
+ * @param viewModel The [SettingsViewModel] for persisting changes.
+ */
+@Composable
+private fun ProxySection(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
+    SectionHeader(title = "Proxy")
+
+    SettingsToggleRow(
+        title = "Enable proxy",
+        subtitle = "Route outbound traffic through a proxy",
+        checked = settings.proxyEnabled,
+        onCheckedChange = { viewModel.updateProxyEnabled(it) },
+        contentDescription = "Enable proxy",
+    )
+
+    OutlinedTextField(
+        value = settings.proxyHttpProxy,
+        onValueChange = { viewModel.updateProxyHttpProxy(it) },
+        label = { Text("HTTP proxy") },
+        supportingText = { Text("e.g. http://proxy:8080") },
+        singleLine = true,
+        enabled = settings.proxyEnabled,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.proxyHttpsProxy,
+        onValueChange = { viewModel.updateProxyHttpsProxy(it) },
+        label = { Text("HTTPS proxy") },
+        singleLine = true,
+        enabled = settings.proxyEnabled,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.proxyAllProxy,
+        onValueChange = { viewModel.updateProxyAllProxy(it) },
+        label = { Text("All proxy") },
+        supportingText = { Text("Catch-all for all protocols") },
+        singleLine = true,
+        enabled = settings.proxyEnabled,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.proxyNoProxy,
+        onValueChange = { viewModel.updateProxyNoProxy(it) },
+        label = { Text("No proxy") },
+        supportingText = { Text("Comma-separated bypass domains") },
+        enabled = settings.proxyEnabled,
+        minLines = 2,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.proxyScope,
+        onValueChange = { viewModel.updateProxyScope(it) },
+        label = { Text("Scope") },
+        supportingText = { Text("zeroclaw or system") },
+        singleLine = true,
+        enabled = settings.proxyEnabled,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.proxyServiceSelectors,
+        onValueChange = { viewModel.updateProxyServiceSelectors(it) },
+        label = { Text("Service selectors") },
+        supportingText = { Text("Comma-separated service names for selective routing") },
+        enabled = settings.proxyEnabled,
+        minLines = 2,
         modifier = Modifier.fillMaxWidth(),
     )
 }

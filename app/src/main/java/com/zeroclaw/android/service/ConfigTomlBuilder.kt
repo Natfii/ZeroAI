@@ -136,6 +136,43 @@ data class AgentTomlEntry(
  * @property proxyHttpProxy HTTP proxy URL.
  * @property proxyHttpsProxy HTTPS proxy URL.
  * @property proxyNoProxy List of domains that bypass the proxy.
+ * @property proxyAllProxy Catch-all proxy URL applied to all protocols.
+ * @property proxyScope Proxy scope identifier (e.g. "zeroclaw" or "system").
+ * @property proxyServiceSelectors Service selectors for selective proxy routing.
+ * @property webFetchEnabled Whether the web fetch tool is enabled.
+ * @property webFetchAllowedDomains Allowed domains for web fetch requests.
+ * @property webFetchBlockedDomains Blocked domains for web fetch requests.
+ * @property webFetchMaxResponseSize Maximum response body size in bytes.
+ * @property webFetchTimeoutSecs Timeout for web fetch requests in seconds.
+ * @property webSearchEnabled Whether the web search tool is enabled.
+ * @property webSearchProvider Web search provider name (e.g. "duckduckgo", "brave").
+ * @property webSearchBraveApiKey Brave Search API key for authenticated queries.
+ * @property webSearchMaxResults Maximum number of search results to return.
+ * @property webSearchTimeoutSecs Timeout for web search requests in seconds.
+ * @property securitySandboxEnabled Whether sandboxing is enabled (blank = unset).
+ * @property securitySandboxBackend Sandbox backend name (e.g. "auto", "firejail").
+ * @property securitySandboxFirejailArgs Extra arguments passed to Firejail.
+ * @property securityResourcesMaxMemoryMb Maximum memory allocation in MB.
+ * @property securityResourcesMaxCpuTimeSecs Maximum CPU time in seconds.
+ * @property securityResourcesMaxSubprocesses Maximum number of subprocesses.
+ * @property securityResourcesMemoryMonitoring Whether memory monitoring is active.
+ * @property securityAuditEnabled Whether security audit logging is active.
+ * @property securityOtpEnabled Whether one-time password verification is active.
+ * @property securityOtpMethod OTP method (e.g. "totp", "hotp").
+ * @property securityOtpTokenTtlSecs OTP token time-to-live in seconds.
+ * @property securityOtpCacheValidSecs Duration a validated OTP remains cached in seconds.
+ * @property securityOtpGatedActions Actions that require OTP verification.
+ * @property securityOtpGatedDomains Domains whose actions require OTP verification.
+ * @property securityOtpGatedDomainCategories Domain categories requiring OTP verification.
+ * @property securityEstopEnabled Whether the emergency stop mechanism is active.
+ * @property securityEstopRequireOtpToResume Whether resuming from e-stop requires OTP.
+ * @property memoryQdrantUrl Qdrant vector database connection URL.
+ * @property memoryQdrantCollection Qdrant collection name for memory storage.
+ * @property memoryQdrantApiKey Qdrant API key for authenticated access.
+ * @property embeddingRoutesJson JSON array of embedding route objects.
+ * @property queryClassificationEnabled Whether query classification is active.
+ * @property reliabilityBackoffMs Provider backoff duration in milliseconds.
+ * @property reliabilityApiKeysJson JSON object mapping provider names to API keys.
  */
 @Suppress("LongParameterList")
 data class GlobalTomlConfig(
@@ -214,6 +251,43 @@ data class GlobalTomlConfig(
     val proxyHttpProxy: String = "",
     val proxyHttpsProxy: String = "",
     val proxyNoProxy: List<String> = emptyList(),
+    val proxyAllProxy: String = "",
+    val proxyScope: String = "zeroclaw",
+    val proxyServiceSelectors: List<String> = emptyList(),
+    val webFetchEnabled: Boolean = false,
+    val webFetchAllowedDomains: List<String> = emptyList(),
+    val webFetchBlockedDomains: List<String> = emptyList(),
+    val webFetchMaxResponseSize: Int = DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE,
+    val webFetchTimeoutSecs: Int = DEFAULT_WEB_FETCH_TIMEOUT_SECS,
+    val webSearchEnabled: Boolean = false,
+    val webSearchProvider: String = "duckduckgo",
+    val webSearchBraveApiKey: String = "",
+    val webSearchMaxResults: Int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
+    val webSearchTimeoutSecs: Int = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+    val securitySandboxEnabled: String = "",
+    val securitySandboxBackend: String = "auto",
+    val securitySandboxFirejailArgs: List<String> = emptyList(),
+    val securityResourcesMaxMemoryMb: Int = DEFAULT_RESOURCES_MAX_MEMORY_MB,
+    val securityResourcesMaxCpuTimeSecs: Int = DEFAULT_RESOURCES_MAX_CPU_TIME_SECS,
+    val securityResourcesMaxSubprocesses: Int = DEFAULT_RESOURCES_MAX_SUBPROCESSES,
+    val securityResourcesMemoryMonitoring: Boolean = true,
+    val securityAuditEnabled: Boolean = false,
+    val securityOtpEnabled: Boolean = false,
+    val securityOtpMethod: String = "totp",
+    val securityOtpTokenTtlSecs: Int = DEFAULT_OTP_TOKEN_TTL_SECS,
+    val securityOtpCacheValidSecs: Int = DEFAULT_OTP_CACHE_VALID_SECS,
+    val securityOtpGatedActions: List<String> = DEFAULT_OTP_GATED_ACTIONS,
+    val securityOtpGatedDomains: List<String> = emptyList(),
+    val securityOtpGatedDomainCategories: List<String> = emptyList(),
+    val securityEstopEnabled: Boolean = false,
+    val securityEstopRequireOtpToResume: Boolean = true,
+    val memoryQdrantUrl: String = "",
+    val memoryQdrantCollection: String = "zeroclaw_memories",
+    val memoryQdrantApiKey: String = "",
+    val embeddingRoutesJson: String = "[]",
+    val queryClassificationEnabled: Boolean = false,
+    val reliabilityBackoffMs: Int = DEFAULT_RELIABILITY_BACKOFF_MS,
+    val reliabilityApiKeysJson: String = "{}",
 ) {
     /** Constants for [GlobalTomlConfig]. */
     companion object {
@@ -289,6 +363,46 @@ data class GlobalTomlConfig(
 
         /** Default max image size in MB. */
         const val DEFAULT_MULTIMODAL_MAX_SIZE_MB = 5
+
+        /** Default web fetch max response size in bytes. */
+        const val DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE = 500_000
+
+        /** Default web fetch timeout in seconds. */
+        const val DEFAULT_WEB_FETCH_TIMEOUT_SECS = 30
+
+        /** Default web search max results. */
+        const val DEFAULT_WEB_SEARCH_MAX_RESULTS = 5
+
+        /** Default web search timeout in seconds. */
+        const val DEFAULT_WEB_SEARCH_TIMEOUT_SECS = 15
+
+        /** Default resource limit: max memory in MB. */
+        const val DEFAULT_RESOURCES_MAX_MEMORY_MB = 512
+
+        /** Default resource limit: max CPU time in seconds. */
+        const val DEFAULT_RESOURCES_MAX_CPU_TIME_SECS = 300
+
+        /** Default resource limit: max subprocesses. */
+        const val DEFAULT_RESOURCES_MAX_SUBPROCESSES = 32
+
+        /** Default OTP token TTL in seconds. */
+        const val DEFAULT_OTP_TOKEN_TTL_SECS = 30
+
+        /** Default OTP cache validity in seconds. */
+        const val DEFAULT_OTP_CACHE_VALID_SECS = 300
+
+        /** Default OTP-gated actions. */
+        val DEFAULT_OTP_GATED_ACTIONS =
+            listOf(
+                "shell",
+                "file_write",
+                "browser_open",
+                "browser",
+                "memory_forget",
+            )
+
+        /** Default reliability backoff in milliseconds. */
+        const val DEFAULT_RELIABILITY_BACKOFF_MS = 1000
     }
 }
 
@@ -306,7 +420,7 @@ data class GlobalTomlConfig(
  * - Custom OpenAI-compatible: `"custom:http://host/v1"` (URL in name)
  * - Custom Anthropic-compatible: `"anthropic-custom:http://host"` (URL in name)
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 object ConfigTomlBuilder {
     /**
      * Placeholder API key injected for self-hosted providers (LM Studio,
@@ -429,6 +543,16 @@ object ConfigTomlBuilder {
             appendTranscriptionSection(config)
             appendMultimodalSection(config)
             appendProxySection(config)
+            appendWebFetchSection(config)
+            appendWebSearchSection(config)
+            appendSecuritySandboxSection(config)
+            appendSecurityResourcesSection(config)
+            appendSecurityAuditSection(config)
+            appendSecurityOtpSection(config)
+            appendSecurityEstopSection(config)
+            appendMemoryQdrantSection(config)
+            appendEmbeddingRoutesSection(config)
+            appendQueryClassificationSection(config)
         }
 
     /**
@@ -440,7 +564,11 @@ object ConfigTomlBuilder {
         val hasCustomRetries =
             config.providerRetries != GlobalTomlConfig.DEFAULT_RETRIES
         val hasFallbacks = config.fallbackProviders.isNotEmpty()
-        if (!hasCustomRetries && !hasFallbacks) return
+        val hasCustomBackoff =
+            config.reliabilityBackoffMs != GlobalTomlConfig.DEFAULT_RELIABILITY_BACKOFF_MS
+        val hasApiKeys = config.reliabilityApiKeysJson != "{}"
+        val hasAnyReliability = hasCustomRetries || hasFallbacks || hasCustomBackoff || hasApiKeys
+        if (!hasAnyReliability) return
 
         appendLine()
         appendLine("[reliability]")
@@ -452,6 +580,22 @@ object ConfigTomlBuilder {
                 config.fallbackProviders
                     .joinToString(", ") { tomlString(it) }
             appendLine("fallback_providers = [$list]")
+        }
+        if (config.reliabilityBackoffMs != GlobalTomlConfig.DEFAULT_RELIABILITY_BACKOFF_MS) {
+            appendLine("provider_backoff_ms = ${config.reliabilityBackoffMs}")
+        }
+        if (config.reliabilityApiKeysJson != "{}") {
+            try {
+                val keysObj = org.json.JSONObject(config.reliabilityApiKeysJson)
+                val iter = keysObj.keys()
+                while (iter.hasNext()) {
+                    val provider = iter.next()
+                    val key = keysObj.getString(provider)
+                    appendLine("api_keys.${tomlKey(provider)} = ${tomlString(key)}")
+                }
+            } catch (_: org.json.JSONException) {
+                // Ignore malformed JSON
+            }
         }
     }
 
@@ -656,6 +800,10 @@ object ConfigTomlBuilder {
                 appendLine("hint = ${tomlString(hint)}")
                 appendLine("provider = ${tomlString(provider)}")
                 appendLine("model = ${tomlString(model)}")
+                val apiKey = route.optString("api_key", "")
+                if (apiKey.isNotBlank()) {
+                    appendLine("api_key = ${tomlString(apiKey)}")
+                }
             }
         } catch (_: org.json.JSONException) {
             // Ignore malformed JSON
@@ -762,7 +910,8 @@ object ConfigTomlBuilder {
     /**
      * Appends the `[proxy]` TOML section when proxy is enabled.
      *
-     * Upstream fields: enabled, http_proxy, https_proxy, no_proxy.
+     * Upstream fields: enabled, http_proxy, https_proxy, no_proxy,
+     * all_proxy, scope, service_selectors.
      *
      * @param config Configuration to read proxy values from.
      */
@@ -781,6 +930,255 @@ object ConfigTomlBuilder {
             val list = config.proxyNoProxy.joinToString(", ") { tomlString(it) }
             appendLine("no_proxy = [$list]")
         }
+        if (config.proxyAllProxy.isNotBlank()) {
+            appendLine("all_proxy = ${tomlString(config.proxyAllProxy)}")
+        }
+        if (config.proxyScope != "zeroclaw") {
+            appendLine("scope = ${tomlString(config.proxyScope)}")
+        }
+        if (config.proxyServiceSelectors.isNotEmpty()) {
+            val list = config.proxyServiceSelectors.joinToString(", ") { tomlString(it) }
+            appendLine("service_selectors = [$list]")
+        }
+    }
+
+    /**
+     * Appends the `[web_fetch]` TOML section when web fetch is enabled.
+     *
+     * Upstream fields: enabled, allowed_domains, blocked_domains,
+     * max_response_size, timeout_secs.
+     *
+     * @param config Configuration to read web fetch values from.
+     */
+    private fun StringBuilder.appendWebFetchSection(config: GlobalTomlConfig) {
+        if (!config.webFetchEnabled) return
+        appendLine()
+        appendLine("[web_fetch]")
+        appendLine("enabled = true")
+        if (config.webFetchAllowedDomains.isNotEmpty()) {
+            val list = config.webFetchAllowedDomains.joinToString(", ") { tomlString(it) }
+            appendLine("allowed_domains = [$list]")
+        }
+        if (config.webFetchBlockedDomains.isNotEmpty()) {
+            val list = config.webFetchBlockedDomains.joinToString(", ") { tomlString(it) }
+            appendLine("blocked_domains = [$list]")
+        }
+        if (config.webFetchMaxResponseSize != GlobalTomlConfig.DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE) {
+            appendLine("max_response_size = ${config.webFetchMaxResponseSize}")
+        }
+        if (config.webFetchTimeoutSecs != GlobalTomlConfig.DEFAULT_WEB_FETCH_TIMEOUT_SECS) {
+            appendLine("timeout_secs = ${config.webFetchTimeoutSecs}")
+        }
+    }
+
+    /**
+     * Appends the `[web_search]` TOML section when web search is enabled.
+     *
+     * Upstream fields: enabled, provider, brave_api_key, max_results,
+     * timeout_secs.
+     *
+     * @param config Configuration to read web search values from.
+     */
+    private fun StringBuilder.appendWebSearchSection(config: GlobalTomlConfig) {
+        if (!config.webSearchEnabled) return
+        appendLine()
+        appendLine("[web_search]")
+        appendLine("enabled = true")
+        appendLine("provider = ${tomlString(config.webSearchProvider)}")
+        if (config.webSearchBraveApiKey.isNotBlank()) {
+            appendLine("brave_api_key = ${tomlString(config.webSearchBraveApiKey)}")
+        }
+        if (config.webSearchMaxResults != GlobalTomlConfig.DEFAULT_WEB_SEARCH_MAX_RESULTS) {
+            appendLine("max_results = ${config.webSearchMaxResults}")
+        }
+        if (config.webSearchTimeoutSecs != GlobalTomlConfig.DEFAULT_WEB_SEARCH_TIMEOUT_SECS) {
+            appendLine("timeout_secs = ${config.webSearchTimeoutSecs}")
+        }
+    }
+
+    /**
+     * Appends the `[security.sandbox]` TOML section when non-default values exist.
+     *
+     * Upstream fields: enabled, backend, firejail_args.
+     *
+     * @param config Configuration to read sandbox values from.
+     */
+    private fun StringBuilder.appendSecuritySandboxSection(config: GlobalTomlConfig) {
+        val hasEnabled = config.securitySandboxEnabled.isNotBlank()
+        val hasBackend = config.securitySandboxBackend != "auto"
+        val hasArgs = config.securitySandboxFirejailArgs.isNotEmpty()
+        if (!hasEnabled && !hasBackend && !hasArgs) return
+
+        appendLine()
+        appendLine("[security.sandbox]")
+        if (hasEnabled) {
+            appendLine("enabled = ${config.securitySandboxEnabled}")
+        }
+        if (hasBackend) {
+            appendLine("backend = ${tomlString(config.securitySandboxBackend)}")
+        }
+        if (hasArgs) {
+            val list = config.securitySandboxFirejailArgs.joinToString(", ") { tomlString(it) }
+            appendLine("firejail_args = [$list]")
+        }
+    }
+
+    /**
+     * Appends the `[security.resources]` TOML section when non-default values exist.
+     *
+     * Upstream fields: max_memory_mb, max_cpu_time_seconds, max_subprocesses,
+     * memory_monitoring.
+     *
+     * @param config Configuration to read resource limit values from.
+     */
+    private fun StringBuilder.appendSecurityResourcesSection(config: GlobalTomlConfig) {
+        val hasCustomMemory =
+            config.securityResourcesMaxMemoryMb != GlobalTomlConfig.DEFAULT_RESOURCES_MAX_MEMORY_MB
+        val hasCustomCpu =
+            config.securityResourcesMaxCpuTimeSecs != GlobalTomlConfig.DEFAULT_RESOURCES_MAX_CPU_TIME_SECS
+        val hasCustomSubproc =
+            config.securityResourcesMaxSubprocesses != GlobalTomlConfig.DEFAULT_RESOURCES_MAX_SUBPROCESSES
+        val hasCustomMonitoring = !config.securityResourcesMemoryMonitoring
+        val hasAnyCustomResource =
+            hasCustomMemory || hasCustomCpu || hasCustomSubproc || hasCustomMonitoring
+        if (!hasAnyCustomResource) return
+
+        appendLine()
+        appendLine("[security.resources]")
+        appendLine("max_memory_mb = ${config.securityResourcesMaxMemoryMb}")
+        appendLine("max_cpu_time_seconds = ${config.securityResourcesMaxCpuTimeSecs}")
+        appendLine("max_subprocesses = ${config.securityResourcesMaxSubprocesses}")
+        appendLine("memory_monitoring = ${config.securityResourcesMemoryMonitoring}")
+    }
+
+    /**
+     * Appends the `[security.audit]` TOML section when audit is enabled.
+     *
+     * @param config Configuration to read audit values from.
+     */
+    private fun StringBuilder.appendSecurityAuditSection(config: GlobalTomlConfig) {
+        if (!config.securityAuditEnabled) return
+
+        appendLine()
+        appendLine("[security.audit]")
+        appendLine("enabled = true")
+    }
+
+    /**
+     * Appends the `[security.otp]` TOML section when OTP is enabled.
+     *
+     * Upstream fields: enabled, method, token_ttl_secs, cache_valid_secs,
+     * gated_actions, gated_domains, gated_domain_categories.
+     *
+     * @param config Configuration to read OTP values from.
+     */
+    private fun StringBuilder.appendSecurityOtpSection(config: GlobalTomlConfig) {
+        if (!config.securityOtpEnabled) return
+
+        appendLine()
+        appendLine("[security.otp]")
+        appendLine("enabled = true")
+        appendLine("method = ${tomlString(config.securityOtpMethod)}")
+        appendLine("token_ttl_secs = ${config.securityOtpTokenTtlSecs}")
+        appendLine("cache_valid_secs = ${config.securityOtpCacheValidSecs}")
+        if (config.securityOtpGatedActions.isNotEmpty()) {
+            val list = config.securityOtpGatedActions.joinToString(", ") { tomlString(it) }
+            appendLine("gated_actions = [$list]")
+        }
+        if (config.securityOtpGatedDomains.isNotEmpty()) {
+            val list = config.securityOtpGatedDomains.joinToString(", ") { tomlString(it) }
+            appendLine("gated_domains = [$list]")
+        }
+        if (config.securityOtpGatedDomainCategories.isNotEmpty()) {
+            val list = config.securityOtpGatedDomainCategories.joinToString(", ") { tomlString(it) }
+            appendLine("gated_domain_categories = [$list]")
+        }
+    }
+
+    /**
+     * Appends the `[security.estop]` TOML section when emergency stop is enabled.
+     *
+     * Upstream fields: enabled, require_otp_to_resume.
+     *
+     * @param config Configuration to read e-stop values from.
+     */
+    private fun StringBuilder.appendSecurityEstopSection(config: GlobalTomlConfig) {
+        if (!config.securityEstopEnabled) return
+
+        appendLine()
+        appendLine("[security.estop]")
+        appendLine("enabled = true")
+        appendLine("require_otp_to_resume = ${config.securityEstopRequireOtpToResume}")
+    }
+
+    /**
+     * Appends the `[memory.qdrant]` TOML section when Qdrant is configured.
+     *
+     * Upstream fields: url, collection, api_key.
+     *
+     * @param config Configuration to read Qdrant memory values from.
+     */
+    private fun StringBuilder.appendMemoryQdrantSection(config: GlobalTomlConfig) {
+        if (config.memoryQdrantUrl.isBlank() && config.memoryQdrantApiKey.isBlank()) return
+        appendLine()
+        appendLine("[memory.qdrant]")
+        if (config.memoryQdrantUrl.isNotBlank()) {
+            appendLine("url = ${tomlString(config.memoryQdrantUrl)}")
+        }
+        appendLine("collection = ${tomlString(config.memoryQdrantCollection)}")
+        if (config.memoryQdrantApiKey.isNotBlank()) {
+            appendLine("api_key = ${tomlString(config.memoryQdrantApiKey)}")
+        }
+    }
+
+    /**
+     * Appends `[[embedding_routes]]` TOML array entries from the JSON array.
+     *
+     * Upstream fields: hint, provider, model, dimensions, api_key.
+     *
+     * @param config Configuration to read embedding routes JSON from.
+     */
+    private fun StringBuilder.appendEmbeddingRoutesSection(config: GlobalTomlConfig) {
+        if (config.embeddingRoutesJson == "[]" || config.embeddingRoutesJson.isBlank()) return
+        try {
+            val arr = org.json.JSONArray(config.embeddingRoutesJson)
+            for (i in 0 until arr.length()) {
+                val route = arr.getJSONObject(i)
+                val hint = route.optString("hint", "")
+                val provider = route.optString("provider", "")
+                val model = route.optString("model", "")
+                if (hint.isBlank() || provider.isBlank() || model.isBlank()) continue
+                appendLine()
+                appendLine("[[embedding_routes]]")
+                appendLine("hint = ${tomlString(hint)}")
+                appendLine("provider = ${tomlString(provider)}")
+                appendLine("model = ${tomlString(model)}")
+                val dimensions = route.optInt("dimensions", 0)
+                if (dimensions > 0) {
+                    appendLine("dimensions = $dimensions")
+                }
+                val apiKey = route.optString("api_key", "")
+                if (apiKey.isNotBlank()) {
+                    appendLine("api_key = ${tomlString(apiKey)}")
+                }
+            }
+        } catch (_: org.json.JSONException) {
+            // Ignore malformed JSON
+        }
+    }
+
+    /**
+     * Appends the `[query_classification]` TOML section when enabled.
+     *
+     * Upstream fields: enabled.
+     *
+     * @param config Configuration to read query classification values from.
+     */
+    private fun StringBuilder.appendQueryClassificationSection(config: GlobalTomlConfig) {
+        if (!config.queryClassificationEnabled) return
+        appendLine()
+        appendLine("[query_classification]")
+        appendLine("enabled = true")
     }
 
     /**

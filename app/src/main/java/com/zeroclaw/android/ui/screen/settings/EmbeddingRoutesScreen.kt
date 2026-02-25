@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,25 +47,31 @@ import com.zeroclaw.android.ui.component.SectionHeader
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Default embedding dimensions. */
+private const val DEFAULT_DIMENSIONS = 1536
+
 /**
- * Model routing rules screen for hint-based provider/model selection.
+ * Embedding routing rules screen for hint-based embedding provider selection.
  *
- * Maps to the upstream `[[model_routes]]` TOML array. Each route maps
- * a hint keyword (e.g. "reasoning", "fast") to a specific provider and model.
- * Routes are persisted as a JSON array string in [AppSettings.modelRoutesJson].
+ * Maps to the upstream `[[embedding_routes]]` TOML array. Each route maps
+ * a hint keyword to a specific embedding provider, model, and dimension count.
+ * Routes are persisted as a JSON array string in [AppSettings.embeddingRoutesJson].
  *
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param settingsViewModel The shared [SettingsViewModel].
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
-fun ModelRoutesScreen(
+fun EmbeddingRoutesScreen(
     edgeMargin: Dp,
     settingsViewModel: SettingsViewModel = viewModel(),
     modifier: Modifier = Modifier,
 ) {
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
-    val routes = remember(settings.modelRoutesJson) { parseRoutes(settings.modelRoutesJson) }
+    val routes =
+        remember(settings.embeddingRoutesJson) {
+            parseEmbeddingRoutes(settings.embeddingRoutesJson)
+        }
 
     Column(
         modifier =
@@ -73,10 +81,10 @@ fun ModelRoutesScreen(
     ) {
         Spacer(modifier = Modifier.height(8.dp))
 
-        SectionHeader(title = "Model Routes")
+        SectionHeader(title = "Embedding Routes")
 
         Text(
-            text = "Route requests to specific providers based on hint keywords.",
+            text = "Route embedding requests to specific providers based on hint keywords.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(bottom = 8.dp),
@@ -90,17 +98,21 @@ fun ModelRoutesScreen(
                 items = routes,
                 key = { index, _ -> index },
             ) { index, route ->
-                ModelRouteCard(
+                EmbeddingRouteCard(
                     route = route,
                     onUpdate = { updated ->
                         val newRoutes = routes.toMutableList()
                         newRoutes[index] = updated
-                        settingsViewModel.updateModelRoutesJson(serializeRoutes(newRoutes))
+                        settingsViewModel.updateEmbeddingRoutesJson(
+                            serializeEmbeddingRoutes(newRoutes),
+                        )
                     },
                     onDelete = {
                         val newRoutes = routes.toMutableList()
                         newRoutes.removeAt(index)
-                        settingsViewModel.updateModelRoutesJson(serializeRoutes(newRoutes))
+                        settingsViewModel.updateEmbeddingRoutesJson(
+                            serializeEmbeddingRoutes(newRoutes),
+                        )
                     },
                 )
             }
@@ -108,14 +120,16 @@ fun ModelRoutesScreen(
 
         FilledTonalButton(
             onClick = {
-                val newRoutes = routes + ModelRoute()
-                settingsViewModel.updateModelRoutesJson(serializeRoutes(newRoutes))
+                val newRoutes = routes + EmbeddingRoute()
+                settingsViewModel.updateEmbeddingRoutesJson(
+                    serializeEmbeddingRoutes(newRoutes),
+                )
             },
             modifier =
                 Modifier
                     .fillMaxWidth()
                     .padding(vertical = 16.dp)
-                    .semantics { contentDescription = "Add model route" },
+                    .semantics { contentDescription = "Add embedding route" },
         ) {
             Icon(Icons.Filled.Add, contentDescription = null)
             Text("Add Route", modifier = Modifier.padding(start = 8.dp))
@@ -124,21 +138,22 @@ fun ModelRoutesScreen(
 }
 
 /**
- * Card displaying a single model route with editable fields.
+ * Card displaying a single embedding route with editable fields.
  *
  * @param route The route data to display.
  * @param onUpdate Callback when any field changes.
  * @param onDelete Callback when the delete button is tapped.
  */
 @Composable
-private fun ModelRouteCard(
-    route: ModelRoute,
-    onUpdate: (ModelRoute) -> Unit,
+private fun EmbeddingRouteCard(
+    route: EmbeddingRoute,
+    onUpdate: (EmbeddingRoute) -> Unit,
     onDelete: () -> Unit,
 ) {
     var hint by remember(route) { mutableStateOf(route.hint) }
     var provider by remember(route) { mutableStateOf(route.provider) }
     var model by remember(route) { mutableStateOf(route.model) }
+    var dimensions by remember(route) { mutableStateOf(route.dimensions.toString()) }
     var apiKey by remember(route) { mutableStateOf(route.apiKey) }
 
     Card(
@@ -156,11 +171,13 @@ private fun ModelRouteCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Route", style = MaterialTheme.typography.titleSmall)
+                Text("Embedding Route", style = MaterialTheme.typography.titleSmall)
                 IconButton(
                     onClick = onDelete,
                     modifier =
-                        Modifier.semantics { contentDescription = "Delete route" },
+                        Modifier.semantics {
+                            contentDescription = "Delete embedding route"
+                        },
                 ) {
                     Icon(Icons.Filled.Delete, contentDescription = null)
                 }
@@ -172,7 +189,7 @@ private fun ModelRouteCard(
                     onUpdate(route.copy(hint = it))
                 },
                 label = { Text("Hint") },
-                supportingText = { Text("e.g. reasoning, fast, code") },
+                supportingText = { Text("e.g. default, code, multilingual") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -197,6 +214,17 @@ private fun ModelRouteCard(
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
+                value = dimensions,
+                onValueChange = {
+                    dimensions = it
+                    it.toIntOrNull()?.let { d -> onUpdate(route.copy(dimensions = d)) }
+                },
+                label = { Text("Dimensions") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
                 value = apiKey,
                 onValueChange = {
                     apiKey = it
@@ -213,30 +241,33 @@ private fun ModelRouteCard(
 }
 
 /**
- * In-memory representation of a single model route.
+ * In-memory representation of a single embedding route.
  *
- * @property hint Keyword that triggers this route (e.g. "reasoning").
- * @property provider Provider ID for this route.
- * @property model Model name for this route.
- * @property apiKey Optional per-route API key.
+ * @property hint Keyword that triggers this route.
+ * @property provider Provider ID for embedding.
+ * @property model Model name for embedding.
+ * @property dimensions Vector dimension count.
+ * @property apiKey Optional API key for this route.
  */
-private data class ModelRoute(
+private data class EmbeddingRoute(
     val hint: String = "",
     val provider: String = "",
     val model: String = "",
+    val dimensions: Int = DEFAULT_DIMENSIONS,
     val apiKey: String = "",
 )
 
 @Suppress("TooGenericExceptionCaught")
-private fun parseRoutes(json: String): List<ModelRoute> =
+private fun parseEmbeddingRoutes(json: String): List<EmbeddingRoute> =
     try {
         val arr = JSONArray(json)
         (0 until arr.length()).map { i ->
             val obj = arr.getJSONObject(i)
-            ModelRoute(
+            EmbeddingRoute(
                 hint = obj.optString("hint", ""),
                 provider = obj.optString("provider", ""),
                 model = obj.optString("model", ""),
+                dimensions = obj.optInt("dimensions", DEFAULT_DIMENSIONS),
                 apiKey = obj.optString("api_key", ""),
             )
         }
@@ -244,7 +275,7 @@ private fun parseRoutes(json: String): List<ModelRoute> =
         emptyList()
     }
 
-private fun serializeRoutes(routes: List<ModelRoute>): String {
+private fun serializeEmbeddingRoutes(routes: List<EmbeddingRoute>): String {
     val arr = JSONArray()
     for (route in routes) {
         arr.put(
@@ -252,6 +283,7 @@ private fun serializeRoutes(routes: List<ModelRoute>): String {
                 put("hint", route.hint)
                 put("provider", route.provider)
                 put("model", route.model)
+                put("dimensions", route.dimensions)
                 if (route.apiKey.isNotBlank()) put("api_key", route.apiKey)
             },
         )

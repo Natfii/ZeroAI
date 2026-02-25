@@ -43,6 +43,7 @@ import com.zeroclaw.android.ui.screen.settings.AboutScreen
 import com.zeroclaw.android.ui.screen.settings.AutonomyScreen
 import com.zeroclaw.android.ui.screen.settings.BatterySettingsScreen
 import com.zeroclaw.android.ui.screen.settings.CostDetailScreen
+import com.zeroclaw.android.ui.screen.settings.EmbeddingRoutesScreen
 import com.zeroclaw.android.ui.screen.settings.GatewayScreen
 import com.zeroclaw.android.ui.screen.settings.IdentityScreen
 import com.zeroclaw.android.ui.screen.settings.MemoryAdvancedScreen
@@ -50,6 +51,7 @@ import com.zeroclaw.android.ui.screen.settings.ModelRoutesScreen
 import com.zeroclaw.android.ui.screen.settings.ObservabilityScreen
 import com.zeroclaw.android.ui.screen.settings.PluginRegistryScreen
 import com.zeroclaw.android.ui.screen.settings.SchedulerScreen
+import com.zeroclaw.android.ui.screen.settings.SecurityAdvancedScreen
 import com.zeroclaw.android.ui.screen.settings.SecurityOverviewScreen
 import com.zeroclaw.android.ui.screen.settings.ServiceConfigScreen
 import com.zeroclaw.android.ui.screen.settings.SettingsScreen
@@ -211,6 +213,10 @@ fun ZeroClawNavHost(
                             navController.navigate(ToolsBrowserRoute)
                         SettingsNavAction.MemoryBrowser ->
                             navController.navigate(MemoryBrowserRoute)
+                        SettingsNavAction.SecurityAdvanced ->
+                            navController.navigate(SecurityAdvancedRoute)
+                        SettingsNavAction.EmbeddingRoutes ->
+                            navController.navigate(EmbeddingRoutesRoute)
                     }
                 },
                 onRerunWizard = {
@@ -484,6 +490,14 @@ fun ZeroClawNavHost(
                 },
                 onBack = { navController.popBackStack() },
             )
+        }
+
+        composable<SecurityAdvancedRoute> {
+            SecurityAdvancedScreen(edgeMargin = edgeMargin)
+        }
+
+        composable<EmbeddingRoutesRoute> {
+            EmbeddingRoutesScreen(edgeMargin = edgeMargin)
         }
 
         composable<ToolsBrowserRoute> {

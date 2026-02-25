@@ -341,6 +341,88 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setHttpRequestAllowedDomains(domains: String) { /* no-op */ }
 
+    override suspend fun setWebFetchEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setWebFetchAllowedDomains(domains: String) { /* no-op */ }
+
+    override suspend fun setWebFetchBlockedDomains(domains: String) { /* no-op */ }
+
+    override suspend fun setWebFetchMaxResponseSize(size: Int) { /* no-op */ }
+
+    override suspend fun setWebFetchTimeoutSecs(secs: Int) { /* no-op */ }
+
+    override suspend fun setWebSearchEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setWebSearchProvider(provider: String) { /* no-op */ }
+
+    override suspend fun setWebSearchBraveApiKey(key: String) { /* no-op */ }
+
+    override suspend fun setWebSearchMaxResults(max: Int) { /* no-op */ }
+
+    override suspend fun setWebSearchTimeoutSecs(secs: Int) { /* no-op */ }
+
+    override suspend fun setSecuritySandboxEnabled(enabled: String) { /* no-op */ }
+
+    override suspend fun setSecuritySandboxBackend(backend: String) { /* no-op */ }
+
+    override suspend fun setSecuritySandboxFirejailArgs(args: String) { /* no-op */ }
+
+    override suspend fun setSecurityResourcesMaxMemoryMb(mb: Int) { /* no-op */ }
+
+    override suspend fun setSecurityResourcesMaxCpuTimeSecs(secs: Int) { /* no-op */ }
+
+    override suspend fun setSecurityResourcesMaxSubprocesses(max: Int) { /* no-op */ }
+
+    override suspend fun setSecurityResourcesMemoryMonitoring(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setSecurityAuditEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setSecurityOtpEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setSecurityOtpMethod(method: String) { /* no-op */ }
+
+    override suspend fun setSecurityOtpTokenTtlSecs(secs: Int) { /* no-op */ }
+
+    override suspend fun setSecurityOtpCacheValidSecs(secs: Int) { /* no-op */ }
+
+    override suspend fun setSecurityOtpGatedActions(actions: String) { /* no-op */ }
+
+    override suspend fun setSecurityOtpGatedDomains(domains: String) { /* no-op */ }
+
+    override suspend fun setSecurityOtpGatedDomainCategories(categories: String) { /* no-op */ }
+
+    override suspend fun setSecurityEstopEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setSecurityEstopRequireOtpToResume(required: Boolean) { /* no-op */ }
+
+    override suspend fun setMemoryQdrantUrl(url: String) { /* no-op */ }
+
+    override suspend fun setMemoryQdrantCollection(collection: String) { /* no-op */ }
+
+    override suspend fun setMemoryQdrantApiKey(key: String) { /* no-op */ }
+
+    override suspend fun setEmbeddingRoutesJson(json: String) { /* no-op */ }
+
+    override suspend fun setQueryClassificationEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setProxyEnabled(enabled: Boolean) { /* no-op */ }
+
+    override suspend fun setProxyHttpProxy(proxy: String) { /* no-op */ }
+
+    override suspend fun setProxyHttpsProxy(proxy: String) { /* no-op */ }
+
+    override suspend fun setProxyAllProxy(proxy: String) { /* no-op */ }
+
+    override suspend fun setProxyNoProxy(noProxy: String) { /* no-op */ }
+
+    override suspend fun setProxyScope(scope: String) { /* no-op */ }
+
+    override suspend fun setProxyServiceSelectors(selectors: String) { /* no-op */ }
+
+    override suspend fun setReliabilityBackoffMs(ms: Int) { /* no-op */ }
+
+    override suspend fun setReliabilityApiKeysJson(json: String) { /* no-op */ }
+
     override suspend fun setLockEnabled(enabled: Boolean) { /* no-op */ }
 
     override suspend fun setLockTimeoutMinutes(minutes: Int) { /* no-op */ }

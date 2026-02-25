@@ -14,12 +14,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -31,7 +33,7 @@ import com.zeroclaw.android.ui.component.SettingsToggleRow
 /**
  * Tool management screen for configuring built-in tool integrations.
  *
- * Maps to upstream `[browser]`, `[http_request]`, and `[composio]`
+ * Maps to upstream `[browser]`, `[http_request]`, `[composio]`, `[web_fetch]`, and `[web_search]`
  * TOML sections. Each tool can be toggled on/off with domain
  * allowlists where applicable.
  *
@@ -124,6 +126,124 @@ fun ToolManagementScreen(
             singleLine = true,
             enabled = settings.composioEnabled,
             modifier = Modifier.fillMaxWidth(),
+        )
+
+        SectionHeader(title = "Web Fetch Tool")
+
+        SettingsToggleRow(
+            title = "Enable web fetch",
+            subtitle = "Allow the agent to fetch content from URLs",
+            checked = settings.webFetchEnabled,
+            onCheckedChange = { settingsViewModel.updateWebFetchEnabled(it) },
+            contentDescription = "Enable web fetch tool",
+        )
+
+        OutlinedTextField(
+            value = settings.webFetchAllowedDomains,
+            onValueChange = { settingsViewModel.updateWebFetchAllowedDomains(it) },
+            label = { Text("Allowed domains") },
+            supportingText = { Text("Comma-separated (empty = all domains)") },
+            enabled = settings.webFetchEnabled,
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webFetchBlockedDomains,
+            onValueChange = { settingsViewModel.updateWebFetchBlockedDomains(it) },
+            label = { Text("Blocked domains") },
+            supportingText = { Text("Comma-separated") },
+            enabled = settings.webFetchEnabled,
+            minLines = 2,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webFetchMaxResponseSize.toString(),
+            onValueChange = { v ->
+                v.toIntOrNull()?.let { settingsViewModel.updateWebFetchMaxResponseSize(it) }
+            },
+            label = { Text("Max response size (bytes)") },
+            singleLine = true,
+            enabled = settings.webFetchEnabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webFetchTimeoutSecs.toString(),
+            onValueChange = { v ->
+                v.toIntOrNull()?.let { settingsViewModel.updateWebFetchTimeoutSecs(it) }
+            },
+            label = { Text("Timeout (seconds)") },
+            singleLine = true,
+            enabled = settings.webFetchEnabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        SectionHeader(title = "Web Search Tool")
+
+        SettingsToggleRow(
+            title = "Enable web search",
+            subtitle = "Allow the agent to search the web",
+            checked = settings.webSearchEnabled,
+            onCheckedChange = { settingsViewModel.updateWebSearchEnabled(it) },
+            contentDescription = "Enable web search tool",
+        )
+
+        OutlinedTextField(
+            value = settings.webSearchProvider,
+            onValueChange = { settingsViewModel.updateWebSearchProvider(it) },
+            label = { Text("Search provider") },
+            supportingText = { Text("duckduckgo or brave") },
+            singleLine = true,
+            enabled = settings.webSearchEnabled,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webSearchBraveApiKey,
+            onValueChange = { settingsViewModel.updateWebSearchBraveApiKey(it) },
+            label = { Text("Brave API key") },
+            singleLine = true,
+            enabled = settings.webSearchEnabled,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webSearchMaxResults.toString(),
+            onValueChange = { v ->
+                v.toIntOrNull()?.let { settingsViewModel.updateWebSearchMaxResults(it) }
+            },
+            label = { Text("Max results") },
+            singleLine = true,
+            enabled = settings.webSearchEnabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = settings.webSearchTimeoutSecs.toString(),
+            onValueChange = { v ->
+                v.toIntOrNull()?.let { settingsViewModel.updateWebSearchTimeoutSecs(it) }
+            },
+            label = { Text("Timeout (seconds)") },
+            singleLine = true,
+            enabled = settings.webSearchEnabled,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        SectionHeader(title = "Query Classification")
+
+        SettingsToggleRow(
+            title = "Enable query classification",
+            subtitle = "Classify queries to route them to the best model",
+            checked = settings.queryClassificationEnabled,
+            onCheckedChange = { settingsViewModel.updateQueryClassificationEnabled(it) },
+            contentDescription = "Enable query classification",
         )
 
         Spacer(modifier = Modifier.height(16.dp))

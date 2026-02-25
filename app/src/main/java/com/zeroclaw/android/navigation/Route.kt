@@ -171,6 +171,14 @@ data object ToolsBrowserRoute
 @Serializable
 data object MemoryBrowserRoute
 
+/** Advanced security settings (sandbox, OTP, e-stop). */
+@Serializable
+data object SecurityAdvancedRoute
+
+/** Embedding routes configuration screen. */
+@Serializable
+data object EmbeddingRoutesRoute
+
 /** First-run onboarding wizard. */
 @Serializable
 data object OnboardingRoute

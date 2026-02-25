@@ -76,7 +76,8 @@ fun ChannelSetupStep(
         )
         Spacer(modifier = Modifier.height(DESCRIPTION_SPACING_DP.dp))
 
-        ChannelType.entries.forEach { type ->
+        @Suppress("DEPRECATION")
+        ChannelType.entries.filter { it != ChannelType.WEBHOOK }.forEach { type ->
             val isSelected = selectedType == type
             Card(
                 onClick = {

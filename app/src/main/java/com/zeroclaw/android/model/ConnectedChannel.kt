@@ -401,9 +401,17 @@ enum class ChannelType(
             ),
     ),
 
-    /** Webhook channel. */
+    /**
+     * Webhook channel.
+     *
+     * **Deprecated in ZeroClaw v0.1.7** — the standalone webhook channel
+     * implementation has been removed upstream. Existing configurations
+     * using this type will still be displayed for migration purposes, but
+     * new channels of this type should not be created.
+     */
+    @Deprecated("Removed upstream in v0.1.7. Migrate to gateway webhooks.")
     WEBHOOK(
-        displayName = "Webhook",
+        displayName = "Webhook (deprecated)",
         tomlKey = "webhook",
         fields =
             listOf(

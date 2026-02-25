@@ -25,7 +25,7 @@ static DAEMON: OnceLock<Mutex<Option<DaemonState>>> = OnceLock::new();
 
 /// Mutable state for a running daemon instance.
 ///
-/// Upstream v0.1.6 made `cost`, `health`, `heartbeat`, `cron`, and
+/// Upstream v0.1.6+ made `cost`, `health`, `heartbeat`, `cron`, and
 /// `skills` modules `pub(crate)`, so this struct no longer holds a
 /// `CostTracker`. Cost data is accessed through the gateway REST API.
 struct DaemonState {
@@ -617,9 +617,8 @@ pub(crate) fn doctor_channels_inner(
 
 /// Returns `true` if any real-time channel is configured and needs supervision.
 ///
-/// Updated for upstream v0.1.6 which adds Mattermost, Signal, WATI,
-/// DingTalk, Nostr, QQ, ClawdTalk, Nextcloud Talk, IRC, Feishu, Linq,
-/// and Webhook channels.
+/// Updated for upstream v0.1.7 channel roster. Checks all channel
+/// `Option` fields except CLI (which is not supervised).
 fn has_supervised_channels(config: &Config) -> bool {
     config.channels_config.telegram.is_some()
         || config.channels_config.discord.is_some()
@@ -633,6 +632,7 @@ fn has_supervised_channels(config: &Config) -> bool {
         || config.channels_config.nextcloud_talk.is_some()
         || config.channels_config.email.is_some()
         || config.channels_config.irc.is_some()
+        || config.channels_config.lark.is_some()
         || config.channels_config.feishu.is_some()
         || config.channels_config.dingtalk.is_some()
         || config.channels_config.qq.is_some()

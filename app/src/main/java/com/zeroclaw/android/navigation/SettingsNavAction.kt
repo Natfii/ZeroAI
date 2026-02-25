@@ -79,4 +79,10 @@ sealed interface SettingsNavAction {
 
     /** Navigate to the memory browser screen. */
     data object MemoryBrowser : SettingsNavAction
+
+    /** Navigate to the advanced security configuration screen. */
+    data object SecurityAdvanced : SettingsNavAction
+
+    /** Navigate to the embedding routes configuration screen. */
+    data object EmbeddingRoutes : SettingsNavAction
 }

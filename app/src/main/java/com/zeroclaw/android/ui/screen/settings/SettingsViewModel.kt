@@ -366,6 +366,211 @@ class SettingsViewModel(
         updateDaemonSetting { setHttpRequestAllowedDomains(domains) }
     }
 
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebFetchEnabled */
+    fun updateWebFetchEnabled(enabled: Boolean) {
+        updateDaemonSetting { setWebFetchEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebFetchAllowedDomains */
+    fun updateWebFetchAllowedDomains(domains: String) {
+        updateDaemonSetting { setWebFetchAllowedDomains(domains) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebFetchBlockedDomains */
+    fun updateWebFetchBlockedDomains(domains: String) {
+        updateDaemonSetting { setWebFetchBlockedDomains(domains) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebFetchMaxResponseSize */
+    fun updateWebFetchMaxResponseSize(size: Int) {
+        updateDaemonSetting { setWebFetchMaxResponseSize(size) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebFetchTimeoutSecs */
+    fun updateWebFetchTimeoutSecs(secs: Int) {
+        updateDaemonSetting { setWebFetchTimeoutSecs(secs) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchEnabled */
+    fun updateWebSearchEnabled(enabled: Boolean) {
+        updateDaemonSetting { setWebSearchEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchProvider */
+    fun updateWebSearchProvider(provider: String) {
+        updateDaemonSetting { setWebSearchProvider(provider) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchBraveApiKey */
+    fun updateWebSearchBraveApiKey(key: String) {
+        updateDaemonSetting { setWebSearchBraveApiKey(key) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchMaxResults */
+    fun updateWebSearchMaxResults(max: Int) {
+        updateDaemonSetting { setWebSearchMaxResults(max) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchTimeoutSecs */
+    fun updateWebSearchTimeoutSecs(secs: Int) {
+        updateDaemonSetting { setWebSearchTimeoutSecs(secs) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecuritySandboxEnabled */
+    fun updateSecuritySandboxEnabled(enabled: String) {
+        updateDaemonSetting { setSecuritySandboxEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecuritySandboxBackend */
+    fun updateSecuritySandboxBackend(backend: String) {
+        updateDaemonSetting { setSecuritySandboxBackend(backend) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecuritySandboxFirejailArgs */
+    fun updateSecuritySandboxFirejailArgs(args: String) {
+        updateDaemonSetting { setSecuritySandboxFirejailArgs(args) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityResourcesMaxMemoryMb */
+    fun updateSecurityResourcesMaxMemoryMb(mb: Int) {
+        updateDaemonSetting { setSecurityResourcesMaxMemoryMb(mb) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityResourcesMaxCpuTimeSecs */
+    fun updateSecurityResourcesMaxCpuTimeSecs(secs: Int) {
+        updateDaemonSetting { setSecurityResourcesMaxCpuTimeSecs(secs) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityResourcesMaxSubprocesses */
+    fun updateSecurityResourcesMaxSubprocesses(max: Int) {
+        updateDaemonSetting { setSecurityResourcesMaxSubprocesses(max) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityResourcesMemoryMonitoring */
+    fun updateSecurityResourcesMemoryMonitoring(enabled: Boolean) {
+        updateDaemonSetting { setSecurityResourcesMemoryMonitoring(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityAuditEnabled */
+    fun updateSecurityAuditEnabled(enabled: Boolean) {
+        updateDaemonSetting { setSecurityAuditEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpEnabled */
+    fun updateSecurityOtpEnabled(enabled: Boolean) {
+        updateDaemonSetting { setSecurityOtpEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpMethod */
+    fun updateSecurityOtpMethod(method: String) {
+        updateDaemonSetting { setSecurityOtpMethod(method) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpTokenTtlSecs */
+    fun updateSecurityOtpTokenTtlSecs(secs: Int) {
+        updateDaemonSetting { setSecurityOtpTokenTtlSecs(secs) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpCacheValidSecs */
+    fun updateSecurityOtpCacheValidSecs(secs: Int) {
+        updateDaemonSetting { setSecurityOtpCacheValidSecs(secs) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpGatedActions */
+    fun updateSecurityOtpGatedActions(actions: String) {
+        updateDaemonSetting { setSecurityOtpGatedActions(actions) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpGatedDomains */
+    fun updateSecurityOtpGatedDomains(domains: String) {
+        updateDaemonSetting { setSecurityOtpGatedDomains(domains) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityOtpGatedDomainCategories */
+    fun updateSecurityOtpGatedDomainCategories(categories: String) {
+        updateDaemonSetting { setSecurityOtpGatedDomainCategories(categories) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityEstopEnabled */
+    fun updateSecurityEstopEnabled(enabled: Boolean) {
+        updateDaemonSetting { setSecurityEstopEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecurityEstopRequireOtpToResume */
+    fun updateSecurityEstopRequireOtpToResume(required: Boolean) {
+        updateDaemonSetting { setSecurityEstopRequireOtpToResume(required) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMemoryQdrantUrl */
+    fun updateMemoryQdrantUrl(url: String) {
+        updateDaemonSetting { setMemoryQdrantUrl(url) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMemoryQdrantCollection */
+    fun updateMemoryQdrantCollection(collection: String) {
+        updateDaemonSetting { setMemoryQdrantCollection(collection) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMemoryQdrantApiKey */
+    fun updateMemoryQdrantApiKey(key: String) {
+        updateDaemonSetting { setMemoryQdrantApiKey(key) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setEmbeddingRoutesJson */
+    fun updateEmbeddingRoutesJson(json: String) {
+        updateDaemonSetting { setEmbeddingRoutesJson(json) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setQueryClassificationEnabled */
+    fun updateQueryClassificationEnabled(enabled: Boolean) {
+        updateDaemonSetting { setQueryClassificationEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyEnabled */
+    fun updateProxyEnabled(enabled: Boolean) {
+        updateDaemonSetting { setProxyEnabled(enabled) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyHttpProxy */
+    fun updateProxyHttpProxy(proxy: String) {
+        updateDaemonSetting { setProxyHttpProxy(proxy) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyHttpsProxy */
+    fun updateProxyHttpsProxy(proxy: String) {
+        updateDaemonSetting { setProxyHttpsProxy(proxy) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyAllProxy */
+    fun updateProxyAllProxy(proxy: String) {
+        updateDaemonSetting { setProxyAllProxy(proxy) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyNoProxy */
+    fun updateProxyNoProxy(noProxy: String) {
+        updateDaemonSetting { setProxyNoProxy(noProxy) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyScope */
+    fun updateProxyScope(scope: String) {
+        updateDaemonSetting { setProxyScope(scope) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyServiceSelectors */
+    fun updateProxyServiceSelectors(selectors: String) {
+        updateDaemonSetting { setProxyServiceSelectors(selectors) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setReliabilityBackoffMs */
+    fun updateReliabilityBackoffMs(ms: Int) {
+        updateDaemonSetting { setReliabilityBackoffMs(ms) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setReliabilityApiKeysJson */
+    fun updateReliabilityApiKeysJson(json: String) {
+        updateDaemonSetting { setReliabilityApiKeysJson(json) }
+    }
+
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setLockEnabled */
     fun updateLockEnabled(enabled: Boolean) {
         viewModelScope.launch { repository.setLockEnabled(enabled) }

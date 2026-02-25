@@ -256,7 +256,8 @@ private fun ChannelTypePickerDialog(
         title = { Text("Add Channel") },
         text = {
             Column {
-                ChannelType.entries.forEach { type ->
+                @Suppress("DEPRECATION")
+                ChannelType.entries.filter { it != ChannelType.WEBHOOK }.forEach { type ->
                     val isConfigured = type in configuredTypes
                     TextButton(
                         onClick = { onTypeSelected(type) },

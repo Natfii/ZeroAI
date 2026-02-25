@@ -175,6 +175,79 @@ class DataStoreSettingsRepository(
                 prefs[KEY_THEME]?.let { name ->
                     runCatching { ThemeMode.valueOf(name) }.getOrNull()
                 } ?: ThemeMode.SYSTEM,
+            webFetchEnabled = prefs[KEY_WEB_FETCH_ENABLED] ?: false,
+            webFetchAllowedDomains = prefs[KEY_WEB_FETCH_ALLOWED_DOMAINS] ?: "",
+            webFetchBlockedDomains = prefs[KEY_WEB_FETCH_BLOCKED_DOMAINS] ?: "",
+            webFetchMaxResponseSize =
+                prefs[KEY_WEB_FETCH_MAX_RESPONSE_SIZE]
+                    ?: AppSettings.DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE,
+            webFetchTimeoutSecs =
+                prefs[KEY_WEB_FETCH_TIMEOUT_SECS]
+                    ?: AppSettings.DEFAULT_WEB_FETCH_TIMEOUT_SECS,
+            webSearchEnabled = prefs[KEY_WEB_SEARCH_ENABLED] ?: false,
+            webSearchProvider =
+                prefs[KEY_WEB_SEARCH_PROVIDER]
+                    ?: AppSettings.DEFAULT_WEB_SEARCH_PROVIDER,
+            webSearchBraveApiKey = prefs[KEY_WEB_SEARCH_BRAVE_API_KEY] ?: "",
+            webSearchMaxResults =
+                prefs[KEY_WEB_SEARCH_MAX_RESULTS]
+                    ?: AppSettings.DEFAULT_WEB_SEARCH_MAX_RESULTS,
+            webSearchTimeoutSecs =
+                prefs[KEY_WEB_SEARCH_TIMEOUT_SECS]
+                    ?: AppSettings.DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+            securitySandboxEnabled = prefs[KEY_SECURITY_SANDBOX_ENABLED] ?: "",
+            securitySandboxBackend =
+                prefs[KEY_SECURITY_SANDBOX_BACKEND]
+                    ?: AppSettings.DEFAULT_SANDBOX_BACKEND,
+            securitySandboxFirejailArgs = prefs[KEY_SECURITY_SANDBOX_FIREJAIL_ARGS] ?: "",
+            securityResourcesMaxMemoryMb =
+                prefs[KEY_SECURITY_RESOURCES_MAX_MEMORY]
+                    ?: AppSettings.DEFAULT_RESOURCES_MAX_MEMORY_MB,
+            securityResourcesMaxCpuTimeSecs =
+                prefs[KEY_SECURITY_RESOURCES_MAX_CPU]
+                    ?: AppSettings.DEFAULT_RESOURCES_MAX_CPU_TIME_SECS,
+            securityResourcesMaxSubprocesses =
+                prefs[KEY_SECURITY_RESOURCES_MAX_SUBPROCS]
+                    ?: AppSettings.DEFAULT_RESOURCES_MAX_SUBPROCESSES,
+            securityResourcesMemoryMonitoring = prefs[KEY_SECURITY_RESOURCES_MONITORING] ?: true,
+            securityAuditEnabled = prefs[KEY_SECURITY_AUDIT_ENABLED] ?: false,
+            securityOtpEnabled = prefs[KEY_SECURITY_OTP_ENABLED] ?: false,
+            securityOtpMethod =
+                prefs[KEY_SECURITY_OTP_METHOD]
+                    ?: AppSettings.DEFAULT_OTP_METHOD,
+            securityOtpTokenTtlSecs =
+                prefs[KEY_SECURITY_OTP_TOKEN_TTL]
+                    ?: AppSettings.DEFAULT_OTP_TOKEN_TTL_SECS,
+            securityOtpCacheValidSecs =
+                prefs[KEY_SECURITY_OTP_CACHE_VALID]
+                    ?: AppSettings.DEFAULT_OTP_CACHE_VALID_SECS,
+            securityOtpGatedActions =
+                prefs[KEY_SECURITY_OTP_GATED_ACTIONS]
+                    ?: AppSettings.DEFAULT_OTP_GATED_ACTIONS,
+            securityOtpGatedDomains = prefs[KEY_SECURITY_OTP_GATED_DOMAINS] ?: "",
+            securityOtpGatedDomainCategories = prefs[KEY_SECURITY_OTP_GATED_DOMAIN_CATS] ?: "",
+            securityEstopEnabled = prefs[KEY_SECURITY_ESTOP_ENABLED] ?: false,
+            securityEstopRequireOtpToResume = prefs[KEY_SECURITY_ESTOP_REQUIRE_OTP] ?: true,
+            memoryQdrantUrl = prefs[KEY_MEMORY_QDRANT_URL] ?: "",
+            memoryQdrantCollection =
+                prefs[KEY_MEMORY_QDRANT_COLLECTION]
+                    ?: AppSettings.DEFAULT_QDRANT_COLLECTION,
+            memoryQdrantApiKey = prefs[KEY_MEMORY_QDRANT_API_KEY] ?: "",
+            embeddingRoutesJson = prefs[KEY_EMBEDDING_ROUTES_JSON] ?: "[]",
+            queryClassificationEnabled = prefs[KEY_QUERY_CLASSIFICATION_ENABLED] ?: false,
+            proxyEnabled = prefs[KEY_PROXY_ENABLED] ?: false,
+            proxyHttpProxy = prefs[KEY_PROXY_HTTP_PROXY] ?: "",
+            proxyHttpsProxy = prefs[KEY_PROXY_HTTPS_PROXY] ?: "",
+            proxyAllProxy = prefs[KEY_PROXY_ALL_PROXY] ?: "",
+            proxyNoProxy = prefs[KEY_PROXY_NO_PROXY] ?: "",
+            proxyScope =
+                prefs[KEY_PROXY_SCOPE]
+                    ?: AppSettings.DEFAULT_PROXY_SCOPE,
+            proxyServiceSelectors = prefs[KEY_PROXY_SERVICE_SELECTORS] ?: "",
+            reliabilityBackoffMs =
+                prefs[KEY_RELIABILITY_BACKOFF_MS]
+                    ?: AppSettings.DEFAULT_RELIABILITY_BACKOFF_MS,
+            reliabilityApiKeysJson = prefs[KEY_RELIABILITY_API_KEYS_JSON] ?: "{}",
         )
 
     override suspend fun setHost(host: String) = edit { it[KEY_HOST] = host }
@@ -301,6 +374,88 @@ class DataStoreSettingsRepository(
 
     override suspend fun setHttpRequestAllowedDomains(domains: String) = edit { it[KEY_HTTP_REQ_DOMAINS] = domains }
 
+    override suspend fun setWebFetchEnabled(enabled: Boolean) = edit { it[KEY_WEB_FETCH_ENABLED] = enabled }
+
+    override suspend fun setWebFetchAllowedDomains(domains: String) = edit { it[KEY_WEB_FETCH_ALLOWED_DOMAINS] = domains }
+
+    override suspend fun setWebFetchBlockedDomains(domains: String) = edit { it[KEY_WEB_FETCH_BLOCKED_DOMAINS] = domains }
+
+    override suspend fun setWebFetchMaxResponseSize(size: Int) = edit { it[KEY_WEB_FETCH_MAX_RESPONSE_SIZE] = size }
+
+    override suspend fun setWebFetchTimeoutSecs(secs: Int) = edit { it[KEY_WEB_FETCH_TIMEOUT_SECS] = secs }
+
+    override suspend fun setWebSearchEnabled(enabled: Boolean) = edit { it[KEY_WEB_SEARCH_ENABLED] = enabled }
+
+    override suspend fun setWebSearchProvider(provider: String) = edit { it[KEY_WEB_SEARCH_PROVIDER] = provider }
+
+    override suspend fun setWebSearchBraveApiKey(key: String) = edit { it[KEY_WEB_SEARCH_BRAVE_API_KEY] = key }
+
+    override suspend fun setWebSearchMaxResults(max: Int) = edit { it[KEY_WEB_SEARCH_MAX_RESULTS] = max }
+
+    override suspend fun setWebSearchTimeoutSecs(secs: Int) = edit { it[KEY_WEB_SEARCH_TIMEOUT_SECS] = secs }
+
+    override suspend fun setSecuritySandboxEnabled(enabled: String) = edit { it[KEY_SECURITY_SANDBOX_ENABLED] = enabled }
+
+    override suspend fun setSecuritySandboxBackend(backend: String) = edit { it[KEY_SECURITY_SANDBOX_BACKEND] = backend }
+
+    override suspend fun setSecuritySandboxFirejailArgs(args: String) = edit { it[KEY_SECURITY_SANDBOX_FIREJAIL_ARGS] = args }
+
+    override suspend fun setSecurityResourcesMaxMemoryMb(mb: Int) = edit { it[KEY_SECURITY_RESOURCES_MAX_MEMORY] = mb }
+
+    override suspend fun setSecurityResourcesMaxCpuTimeSecs(secs: Int) = edit { it[KEY_SECURITY_RESOURCES_MAX_CPU] = secs }
+
+    override suspend fun setSecurityResourcesMaxSubprocesses(max: Int) = edit { it[KEY_SECURITY_RESOURCES_MAX_SUBPROCS] = max }
+
+    override suspend fun setSecurityResourcesMemoryMonitoring(enabled: Boolean) = edit { it[KEY_SECURITY_RESOURCES_MONITORING] = enabled }
+
+    override suspend fun setSecurityAuditEnabled(enabled: Boolean) = edit { it[KEY_SECURITY_AUDIT_ENABLED] = enabled }
+
+    override suspend fun setSecurityOtpEnabled(enabled: Boolean) = edit { it[KEY_SECURITY_OTP_ENABLED] = enabled }
+
+    override suspend fun setSecurityOtpMethod(method: String) = edit { it[KEY_SECURITY_OTP_METHOD] = method }
+
+    override suspend fun setSecurityOtpTokenTtlSecs(secs: Int) = edit { it[KEY_SECURITY_OTP_TOKEN_TTL] = secs }
+
+    override suspend fun setSecurityOtpCacheValidSecs(secs: Int) = edit { it[KEY_SECURITY_OTP_CACHE_VALID] = secs }
+
+    override suspend fun setSecurityOtpGatedActions(actions: String) = edit { it[KEY_SECURITY_OTP_GATED_ACTIONS] = actions }
+
+    override suspend fun setSecurityOtpGatedDomains(domains: String) = edit { it[KEY_SECURITY_OTP_GATED_DOMAINS] = domains }
+
+    override suspend fun setSecurityOtpGatedDomainCategories(categories: String) = edit { it[KEY_SECURITY_OTP_GATED_DOMAIN_CATS] = categories }
+
+    override suspend fun setSecurityEstopEnabled(enabled: Boolean) = edit { it[KEY_SECURITY_ESTOP_ENABLED] = enabled }
+
+    override suspend fun setSecurityEstopRequireOtpToResume(required: Boolean) = edit { it[KEY_SECURITY_ESTOP_REQUIRE_OTP] = required }
+
+    override suspend fun setMemoryQdrantUrl(url: String) = edit { it[KEY_MEMORY_QDRANT_URL] = url }
+
+    override suspend fun setMemoryQdrantCollection(collection: String) = edit { it[KEY_MEMORY_QDRANT_COLLECTION] = collection }
+
+    override suspend fun setMemoryQdrantApiKey(key: String) = edit { it[KEY_MEMORY_QDRANT_API_KEY] = key }
+
+    override suspend fun setEmbeddingRoutesJson(json: String) = edit { it[KEY_EMBEDDING_ROUTES_JSON] = json }
+
+    override suspend fun setQueryClassificationEnabled(enabled: Boolean) = edit { it[KEY_QUERY_CLASSIFICATION_ENABLED] = enabled }
+
+    override suspend fun setProxyEnabled(enabled: Boolean) = edit { it[KEY_PROXY_ENABLED] = enabled }
+
+    override suspend fun setProxyHttpProxy(proxy: String) = edit { it[KEY_PROXY_HTTP_PROXY] = proxy }
+
+    override suspend fun setProxyHttpsProxy(proxy: String) = edit { it[KEY_PROXY_HTTPS_PROXY] = proxy }
+
+    override suspend fun setProxyAllProxy(proxy: String) = edit { it[KEY_PROXY_ALL_PROXY] = proxy }
+
+    override suspend fun setProxyNoProxy(noProxy: String) = edit { it[KEY_PROXY_NO_PROXY] = noProxy }
+
+    override suspend fun setProxyScope(scope: String) = edit { it[KEY_PROXY_SCOPE] = scope }
+
+    override suspend fun setProxyServiceSelectors(selectors: String) = edit { it[KEY_PROXY_SERVICE_SELECTORS] = selectors }
+
+    override suspend fun setReliabilityBackoffMs(ms: Int) = edit { it[KEY_RELIABILITY_BACKOFF_MS] = ms }
+
+    override suspend fun setReliabilityApiKeysJson(json: String) = edit { it[KEY_RELIABILITY_API_KEYS_JSON] = json }
+
     override suspend fun setLockEnabled(enabled: Boolean) = edit { it[KEY_LOCK_ENABLED] = enabled }
 
     override suspend fun setLockTimeoutMinutes(minutes: Int) = edit { it[KEY_LOCK_TIMEOUT] = minutes }
@@ -401,5 +556,46 @@ class DataStoreSettingsRepository(
         val KEY_LAST_PLUGIN_SYNC = longPreferencesKey("last_plugin_sync_timestamp")
         val KEY_STRIP_THINKING_TAGS = booleanPreferencesKey("strip_thinking_tags")
         val KEY_THEME = stringPreferencesKey("theme")
+        val KEY_WEB_FETCH_ENABLED = booleanPreferencesKey("web_fetch_enabled")
+        val KEY_WEB_FETCH_ALLOWED_DOMAINS = stringPreferencesKey("web_fetch_allowed_domains")
+        val KEY_WEB_FETCH_BLOCKED_DOMAINS = stringPreferencesKey("web_fetch_blocked_domains")
+        val KEY_WEB_FETCH_MAX_RESPONSE_SIZE = intPreferencesKey("web_fetch_max_response_size")
+        val KEY_WEB_FETCH_TIMEOUT_SECS = intPreferencesKey("web_fetch_timeout_secs")
+        val KEY_WEB_SEARCH_ENABLED = booleanPreferencesKey("web_search_enabled")
+        val KEY_WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
+        val KEY_WEB_SEARCH_BRAVE_API_KEY = stringPreferencesKey("web_search_brave_api_key")
+        val KEY_WEB_SEARCH_MAX_RESULTS = intPreferencesKey("web_search_max_results")
+        val KEY_WEB_SEARCH_TIMEOUT_SECS = intPreferencesKey("web_search_timeout_secs")
+        val KEY_SECURITY_SANDBOX_ENABLED = stringPreferencesKey("security_sandbox_enabled")
+        val KEY_SECURITY_SANDBOX_BACKEND = stringPreferencesKey("security_sandbox_backend")
+        val KEY_SECURITY_SANDBOX_FIREJAIL_ARGS = stringPreferencesKey("security_sandbox_firejail_args")
+        val KEY_SECURITY_RESOURCES_MAX_MEMORY = intPreferencesKey("security_resources_max_memory_mb")
+        val KEY_SECURITY_RESOURCES_MAX_CPU = intPreferencesKey("security_resources_max_cpu_time_secs")
+        val KEY_SECURITY_RESOURCES_MAX_SUBPROCS = intPreferencesKey("security_resources_max_subprocesses")
+        val KEY_SECURITY_RESOURCES_MONITORING = booleanPreferencesKey("security_resources_memory_monitoring")
+        val KEY_SECURITY_AUDIT_ENABLED = booleanPreferencesKey("security_audit_enabled")
+        val KEY_SECURITY_OTP_ENABLED = booleanPreferencesKey("security_otp_enabled")
+        val KEY_SECURITY_OTP_METHOD = stringPreferencesKey("security_otp_method")
+        val KEY_SECURITY_OTP_TOKEN_TTL = intPreferencesKey("security_otp_token_ttl_secs")
+        val KEY_SECURITY_OTP_CACHE_VALID = intPreferencesKey("security_otp_cache_valid_secs")
+        val KEY_SECURITY_OTP_GATED_ACTIONS = stringPreferencesKey("security_otp_gated_actions")
+        val KEY_SECURITY_OTP_GATED_DOMAINS = stringPreferencesKey("security_otp_gated_domains")
+        val KEY_SECURITY_OTP_GATED_DOMAIN_CATS = stringPreferencesKey("security_otp_gated_domain_categories")
+        val KEY_SECURITY_ESTOP_ENABLED = booleanPreferencesKey("security_estop_enabled")
+        val KEY_SECURITY_ESTOP_REQUIRE_OTP = booleanPreferencesKey("security_estop_require_otp_to_resume")
+        val KEY_MEMORY_QDRANT_URL = stringPreferencesKey("memory_qdrant_url")
+        val KEY_MEMORY_QDRANT_COLLECTION = stringPreferencesKey("memory_qdrant_collection")
+        val KEY_MEMORY_QDRANT_API_KEY = stringPreferencesKey("memory_qdrant_api_key")
+        val KEY_EMBEDDING_ROUTES_JSON = stringPreferencesKey("embedding_routes_json")
+        val KEY_QUERY_CLASSIFICATION_ENABLED = booleanPreferencesKey("query_classification_enabled")
+        val KEY_PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
+        val KEY_PROXY_HTTP_PROXY = stringPreferencesKey("proxy_http_proxy")
+        val KEY_PROXY_HTTPS_PROXY = stringPreferencesKey("proxy_https_proxy")
+        val KEY_PROXY_ALL_PROXY = stringPreferencesKey("proxy_all_proxy")
+        val KEY_PROXY_NO_PROXY = stringPreferencesKey("proxy_no_proxy")
+        val KEY_PROXY_SCOPE = stringPreferencesKey("proxy_scope")
+        val KEY_PROXY_SERVICE_SELECTORS = stringPreferencesKey("proxy_service_selectors")
+        val KEY_RELIABILITY_BACKOFF_MS = intPreferencesKey("reliability_backoff_ms")
+        val KEY_RELIABILITY_API_KEYS_JSON = stringPreferencesKey("reliability_api_keys_json")
     }
 }
