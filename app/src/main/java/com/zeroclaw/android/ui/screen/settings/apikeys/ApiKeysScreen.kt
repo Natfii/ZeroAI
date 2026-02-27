@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Verified
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,12 +49,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -62,12 +68,15 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.data.StorageHealth
+import com.zeroclaw.android.data.validation.ProviderValidator
+import com.zeroclaw.android.data.validation.ValidationResult
 import com.zeroclaw.android.model.ApiKey
 import com.zeroclaw.android.model.KeyStatus
-import com.zeroclaw.android.ui.component.ConfirmDeleteDialog
 import com.zeroclaw.android.ui.component.EmptyState
 import com.zeroclaw.android.ui.component.ErrorCard
 import com.zeroclaw.android.ui.component.MaskedText
+import com.zeroclaw.android.ui.component.setup.ValidationIndicator
+import kotlinx.coroutines.launch
 
 /** Minimum passphrase length required for export/import operations. */
 private const val MIN_PASSPHRASE_LENGTH = 8
@@ -154,6 +163,7 @@ fun ApiKeysScreen(
         onRequestBiometric = onRequestBiometric,
         onHideRevealedKey = apiKeysViewModel::hideRevealedKey,
         onDeleteKey = apiKeysViewModel::deleteKey,
+        onCountAgentsForKey = apiKeysViewModel::countAgentsForKey,
         onRotateKey = apiKeysViewModel::rotateKey,
         onExportKeys = apiKeysViewModel::exportKeys,
         onImportKeys = apiKeysViewModel::importKeys,
@@ -173,7 +183,8 @@ fun ApiKeysScreen(
  * @param onNavigateToDetail Navigate to key detail screen.
  * @param onRequestBiometric Request PIN auth for a key.
  * @param onHideRevealedKey Callback to hide the currently revealed key.
- * @param onDeleteKey Callback to delete a key by ID.
+ * @param onDeleteKey Callback to delete a key by ID with optional agent cascade.
+ * @param onCountAgentsForKey Suspend function returning the number of agents using a key's provider.
  * @param onRotateKey Callback to rotate a key with a new value.
  * @param onExportKeys Callback to export keys with a passphrase.
  * @param onImportKeys Callback to import keys from encrypted payload.
@@ -191,7 +202,8 @@ internal fun ApiKeysContent(
     onNavigateToDetail: (String?) -> Unit,
     onRequestBiometric: (keyId: String) -> Unit,
     onHideRevealedKey: () -> Unit,
-    onDeleteKey: (String) -> Unit,
+    onDeleteKey: (String, Boolean) -> Unit,
+    onCountAgentsForKey: suspend (String) -> Int,
     onRotateKey: (String, String) -> Unit,
     onExportKeys: (String, (String) -> Unit) -> Unit,
     onImportKeys: (String, String, (Int) -> Unit) -> Unit,
@@ -201,18 +213,23 @@ internal fun ApiKeysContent(
     modifier: Modifier = Modifier,
 ) {
     var deleteTarget by remember { mutableStateOf<ApiKey?>(null) }
+    var deleteTargetAgentCount by remember { mutableStateOf(0) }
     var rotatingKeyId by remember { mutableStateOf<String?>(null) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    val validationResults = remember { mutableStateMapOf<String, ValidationResult>() }
+    val validationScope = rememberCoroutineScope()
+
+    LaunchedEffect(deleteTarget) {
+        deleteTargetAgentCount = deleteTarget?.let { onCountAgentsForKey(it.id) } ?: 0
+    }
 
     if (deleteTarget != null) {
-        ConfirmDeleteDialog(
-            title = "Delete API Key",
-            message =
-                "Delete the ${deleteTarget?.provider} key? " +
-                    "This action cannot be undone.",
-            onConfirm = {
-                deleteTarget?.let { onDeleteKey(it.id) }
+        ApiKeyDeleteDialog(
+            providerName = deleteTarget?.provider ?: "",
+            agentCount = deleteTargetAgentCount,
+            onConfirm = { alsoDeleteAgents ->
+                deleteTarget?.let { onDeleteKey(it.id, alsoDeleteAgents) }
                 deleteTarget = null
             },
             onDismiss = { deleteTarget = null },
@@ -354,6 +371,9 @@ internal fun ApiKeysContent(
                         isRevealed = state.revealedKeyId == apiKey.id,
                         isUnused = apiKey.id in state.unusedKeyIds,
                         isUnreachable = apiKey.id in state.unreachableKeyIds,
+                        validationResult =
+                            validationResults[apiKey.id]
+                                ?: ValidationResult.Idle,
                         onRevealToggle = {
                             if (state.revealedKeyId == apiKey.id) {
                                 onHideRevealedKey()
@@ -364,6 +384,18 @@ internal fun ApiKeysContent(
                         onEdit = { onNavigateToDetail(apiKey.id) },
                         onRotate = { rotatingKeyId = apiKey.id },
                         onDelete = { deleteTarget = apiKey },
+                        onValidate = {
+                            validationScope.launch {
+                                validationResults[apiKey.id] =
+                                    ValidationResult.Loading
+                                validationResults[apiKey.id] =
+                                    ProviderValidator.validate(
+                                        providerId = apiKey.provider.lowercase(),
+                                        apiKey = apiKey.key,
+                                        baseUrl = apiKey.baseUrl,
+                                    )
+                            }
+                        },
                     )
                 }
                 item { Spacer(modifier = Modifier.height(80.dp)) }
@@ -605,32 +637,39 @@ private fun ImportPassphraseDialog(
 }
 
 /**
- * Single API key list item with masked value and action buttons.
+ * Single API key list item with masked value, action buttons, and inline validation.
  *
  * Shows a warning icon when the key status is [KeyStatus.INVALID],
  * an amber "Unused" label when no configured agent references the
  * key's provider, and an error-colored "Offline" label when the
- * key's base URL failed a reachability probe.
+ * key's base URL failed a reachability probe. A "Validate" button
+ * triggers a live probe via [ProviderValidator] and displays the
+ * result using [ValidationIndicator] below the key.
  *
  * @param apiKey The key to display.
  * @param isRevealed Whether the key value is currently unmasked.
  * @param isUnused Whether no agent currently uses this key's provider.
  * @param isUnreachable Whether the key's base URL failed a reachability probe.
+ * @param validationResult Current inline validation state for this key.
  * @param onRevealToggle Callback to toggle reveal state.
  * @param onEdit Callback to navigate to edit screen.
  * @param onRotate Callback to open the key rotation dialog.
  * @param onDelete Callback to delete this key.
+ * @param onValidate Callback to trigger credential validation.
  */
+@Suppress("LongParameterList")
 @Composable
 private fun ApiKeyItem(
     apiKey: ApiKey,
     isRevealed: Boolean,
     isUnused: Boolean,
     isUnreachable: Boolean,
+    validationResult: ValidationResult,
     onRevealToggle: () -> Unit,
     onEdit: () -> Unit,
     onRotate: () -> Unit,
     onDelete: () -> Unit,
+    onValidate: () -> Unit,
 ) {
     Card(
         modifier =
@@ -740,6 +779,41 @@ private fun ApiKeyItem(
                 Spacer(modifier = Modifier.height(4.dp))
                 ExpiryLabel(expiresAt = apiKey.expiresAt)
             }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                TextButton(
+                    onClick = onValidate,
+                    enabled = validationResult !is ValidationResult.Loading,
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription =
+                                "Validate ${apiKey.provider} key"
+                        },
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Verified,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                    Text(
+                        text =
+                            if (validationResult is ValidationResult.Loading) {
+                                "Validating\u2026"
+                            } else {
+                                "Validate"
+                            },
+                    )
+                }
+            }
+            if (validationResult !is ValidationResult.Idle) {
+                ValidationIndicator(
+                    result = validationResult,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -840,6 +914,78 @@ private fun ExpiryLabel(expiresAt: Long) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * Confirmation dialog for API key deletion with optional agent cascade.
+ *
+ * When [agentCount] is greater than zero, displays a checkbox allowing
+ * the user to also delete agents that reference the same provider. This
+ * prevents orphaned agent entries that reference a provider with no
+ * stored credentials.
+ *
+ * @param providerName Human-readable provider name shown in the dialog.
+ * @param agentCount Number of agents using this provider.
+ * @param onConfirm Callback with whether to also cascade-delete agents.
+ * @param onDismiss Callback when the user cancels the dialog.
+ */
+@Composable
+private fun ApiKeyDeleteDialog(
+    providerName: String,
+    agentCount: Int,
+    onConfirm: (alsoDeleteAgents: Boolean) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var alsoDeleteAgents by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        title = { Text("Delete API Key") },
+        text = {
+            Column {
+                Text(
+                    text =
+                        "Delete the $providerName key? " +
+                            "This action cannot be undone.",
+                )
+                if (agentCount > 0) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { alsoDeleteAgents = !alsoDeleteAgents },
+                    ) {
+                        Checkbox(
+                            checked = alsoDeleteAgents,
+                            onCheckedChange = { alsoDeleteAgents = it },
+                        )
+                        Text(
+                            text =
+                                "Also delete $agentCount agent(s) " +
+                                    "using this provider",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(alsoDeleteAgents) }) {
+                Text(
+                    text = "Delete",
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = "Cancel")
+            }
+        },
+    )
 }
 
 private const val MILLIS_PER_MINUTE = 60_000L

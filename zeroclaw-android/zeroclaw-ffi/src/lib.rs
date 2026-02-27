@@ -144,15 +144,15 @@ pub fn get_component_health(name: String) -> Result<Option<health::FfiComponentH
     })
 }
 
-/// Sends a message to the daemon's gateway and returns the agent response.
+/// Sends a message through the full agent loop and returns the response.
 ///
-/// POSTs to the local HTTP gateway's `/webhook` endpoint and returns
-/// the `response` field from the JSON reply.
+/// Routes through [`zeroclaw::agent::process_message`] which provides
+/// memory recall, tool access, and proper workspace identity injection.
 ///
 /// # Errors
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running,
-/// [`FfiError::SpawnError`] on HTTP or parse failure,
+/// [`FfiError::SpawnError`] if agent processing fails,
 /// [`FfiError::StateCorrupted`] if internal state is poisoned, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
@@ -749,7 +749,7 @@ mod tests {
     #[test]
     fn test_get_version() {
         let version = get_version().unwrap();
-        assert_eq!(version, "0.0.28");
+        assert_eq!(version, "0.0.29");
     }
 
     #[test]
