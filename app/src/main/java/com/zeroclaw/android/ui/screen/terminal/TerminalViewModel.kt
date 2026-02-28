@@ -483,47 +483,6 @@ class TerminalViewModel(
     }
 
     /**
-     * Evaluates a Rhai expression and persists the result.
-     *
-     * Shared execution path for chat messages and vision requests after
-     * the input has already been persisted.
-     *
-     * @param expression The Rhai expression to evaluate.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    private suspend fun executeRhaiExpression(expression: String) {
-        try {
-            val rawResult =
-                withContext(Dispatchers.IO) {
-                    evalRepl(expression)
-                }
-            val cleaned = stripToolCallTags(rawResult)
-            val result =
-                if (cachedSettings.value.stripThinkingTags) {
-                    stripThinkingTags(cleaned)
-                } else {
-                    cleaned
-                }
-            val displayResult =
-                result.ifBlank {
-                    rawResult.trim().ifBlank { EMPTY_RESPONSE_FALLBACK }
-                }
-            repository.append(content = displayResult, entryType = ENTRY_TYPE_RESPONSE)
-            emitRefreshIfNeeded(expression)
-        } catch (e: FfiException) {
-            val sanitized = ErrorSanitizer.sanitizeForUi(e)
-            logRepository.append(LogSeverity.ERROR, TAG, "REPL eval failed: $sanitized")
-            repository.append(content = sanitized, entryType = ENTRY_TYPE_ERROR)
-        } catch (e: Exception) {
-            val sanitized = ErrorSanitizer.sanitizeForUi(e)
-            logRepository.append(LogSeverity.ERROR, TAG, "REPL eval failed: $sanitized")
-            repository.append(content = sanitized, entryType = ENTRY_TYPE_ERROR)
-        } finally {
-            loadingState.value = false
-        }
-    }
-
-    /**
      * Inserts the welcome banner as the first terminal entry.
      */
     @Suppress("TooGenericExceptionCaught")
@@ -563,25 +522,6 @@ class TerminalViewModel(
         val current = _history.value
         if (current.lastOrNull() == text) return
         _history.value = current + text
-    }
-
-    /**
-     * Builds a `send_vision` Rhai expression from text and processed images.
-     *
-     * Constructs Rhai array literals for the base64-encoded image data and
-     * MIME types, then wraps them in a `send_vision(text, images, mimes)` call.
-     *
-     * @param escapedText Rhai-escaped message text.
-     * @param images Processed images to include.
-     * @return A complete Rhai expression string.
-     */
-    private fun buildVisionExpression(
-        escapedText: String,
-        images: List<ProcessedImage>,
-    ): String {
-        val imageArray = images.joinToString(", ") { "\"${it.base64Data}\"" }
-        val mimeArray = images.joinToString(", ") { "\"${it.mimeType}\"" }
-        return "send_vision(\"$escapedText\", [$imageArray], [$mimeArray])"
     }
 
     /**
