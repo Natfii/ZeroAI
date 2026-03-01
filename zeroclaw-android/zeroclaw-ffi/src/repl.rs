@@ -104,6 +104,31 @@ fn build_engine() -> Engine {
         },
     );
 
+    // ── Channel Binding ─────────────────────────────────────────
+
+    engine.register_fn(
+        "bind",
+        |channel: String, user_id: String| -> Result<String, Box<EvalAltResult>> {
+            let field = runtime::bind_channel_identity_inner(channel.clone(), user_id.clone())
+                .map_err(ffi_err)?;
+            if field == "already_bound" {
+                Ok(format!("{user_id} is already bound to {channel}"))
+            } else {
+                Ok(format!(
+                    "Bound {user_id} to {channel} ({field}). Restart daemon to apply."
+                ))
+            }
+        },
+    );
+
+    engine.register_fn(
+        "allowlist",
+        |channel: String| -> Result<String, Box<EvalAltResult>> {
+            let list = runtime::get_channel_allowlist_inner(channel).map_err(ffi_err)?;
+            to_json(&list)
+        },
+    );
+
     // ── Health ────────────────────────────────────────────────────
 
     engine.register_fn("health", || -> Result<String, Box<EvalAltResult>> {
@@ -486,5 +511,17 @@ mod tests {
             result.is_err(),
             "deep recursion must be terminated by sandbox"
         );
+    }
+
+    #[test]
+    fn test_repl_bind_no_daemon() {
+        let result = eval_repl_inner(r#"bind("telegram", "alice")"#.into());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_repl_allowlist_no_daemon() {
+        let result = eval_repl_inner(r#"allowlist("telegram")"#.into());
+        assert!(result.is_err());
     }
 }
