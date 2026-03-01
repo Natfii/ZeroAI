@@ -928,7 +928,11 @@ pub fn session_send(
 /// poisoned, or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn session_cancel() -> Result<(), FfiError> {
-    catch_unwind(session::session_cancel_inner).unwrap_or_else(|e| {
+    catch_unwind(|| {
+        session::session_cancel_inner();
+        Ok(())
+    })
+    .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })

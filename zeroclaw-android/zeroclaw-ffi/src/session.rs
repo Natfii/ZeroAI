@@ -77,6 +77,24 @@ static SESSION: Mutex<Option<Session>> = Mutex::new(None);
 /// to abort at the next check point.
 static CANCEL_TOKEN: Mutex<Option<CancellationToken>> = Mutex::new(None);
 
+/// Locks the [`SESSION`] mutex, recovering from poison if a prior holder panicked.
+///
+/// See [`crate::runtime::lock_daemon`] for the rationale behind poison recovery.
+fn lock_session() -> std::sync::MutexGuard<'static, Option<Session>> {
+    SESSION.lock().unwrap_or_else(|e| {
+        tracing::warn!("Session mutex was poisoned; recovering: {e}");
+        e.into_inner()
+    })
+}
+
+/// Locks the [`CANCEL_TOKEN`] mutex, recovering from poison.
+fn lock_cancel_token() -> std::sync::MutexGuard<'static, Option<CancellationToken>> {
+    CANCEL_TOKEN.lock().unwrap_or_else(|e| {
+        tracing::warn!("Cancel token mutex was poisoned; recovering: {e}");
+        e.into_inner()
+    })
+}
+
 // ── FFI tool implementations ────────────────────────────────────────────
 //
 // Upstream `SecurityPolicy` is `pub(crate)`, so `MemoryStoreTool` and
@@ -341,16 +359,13 @@ impl Drop for SessionStateGuard {
         };
 
         tracing::warn!("SessionStateGuard::drop restoring state after panic");
-        if let Ok(mut guard) = SESSION.lock()
-            && let Some(session) = guard.as_mut()
-        {
+        let mut guard = lock_session();
+        if let Some(session) = guard.as_mut() {
             session.history = history;
             session.tools_registry = tools;
         }
         // Also clear cancel token to prevent stale state.
-        if let Ok(mut guard) = CANCEL_TOKEN.lock() {
-            *guard = None;
-        }
+        *lock_cancel_token() = None;
     }
 }
 
@@ -549,9 +564,7 @@ pub(crate) fn session_start_inner() -> Result<(), FfiError> {
         tools_registry,
     };
 
-    let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+    let mut guard = lock_session();
 
     if guard.is_some() {
         return Err(FfiError::StateError {
@@ -636,9 +649,7 @@ pub(crate) fn session_send_inner(
 
     let cancel_token = CancellationToken::new();
     {
-        let mut ct_guard = CANCEL_TOKEN.lock().map_err(|_| FfiError::StateCorrupted {
-            detail: "cancel token mutex poisoned".into(),
-        })?;
+        let mut ct_guard = lock_cancel_token();
         *ct_guard = Some(cancel_token.clone());
     }
 
@@ -646,9 +657,7 @@ pub(crate) fn session_send_inner(
     // Wrap in a SessionStateGuard so that a panic during processing
     // automatically restores history + tools via Drop.
     let (mut state_guard, config, model, temperature, provider_name, system_prompt) = {
-        let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-            detail: "session mutex poisoned".into(),
-        })?;
+        let mut guard = lock_session();
         let session = guard.as_mut().ok_or_else(|| FfiError::StateError {
             detail: "no active session; call session_start first".into(),
         })?;
@@ -765,13 +774,13 @@ pub(crate) fn session_send_inner(
                 }
             }
 
-            put_session_state_back(history, tools, &system_prompt)?;
+            put_session_state_back(history, tools, &system_prompt);
             clear_cancel_token();
             listener.on_complete(full_response);
             Ok(())
         }
         Err(AgentLoopOutcome::Cancelled) => {
-            put_session_state_back(history, tools, &system_prompt)?;
+            put_session_state_back(history, tools, &system_prompt);
             clear_cancel_token();
             listener.on_cancelled();
             Ok(())
@@ -779,7 +788,7 @@ pub(crate) fn session_send_inner(
         Err(AgentLoopOutcome::Error(msg)) => {
             // Rollback history to pre-send state.
             history.truncate(history_len_before);
-            put_session_state_back(history, tools, &system_prompt)?;
+            put_session_state_back(history, tools, &system_prompt);
             clear_cancel_token();
             listener.on_error(msg.clone());
             Err(FfiError::SpawnError { detail: msg })
@@ -802,9 +811,7 @@ pub(crate) fn session_send_inner(
 /// Returns [`FfiError::StateError`] if no session is active, or
 /// [`FfiError::StateCorrupted`] if the session mutex is poisoned.
 pub(crate) fn session_seed_inner(messages: Vec<SessionMessage>) -> Result<(), FfiError> {
-    let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+    let mut guard = lock_session();
     let session = guard.as_mut().ok_or_else(|| FfiError::StateError {
         detail: "no active session; call session_start first".into(),
     })?;
@@ -845,16 +852,12 @@ pub(crate) fn session_seed_inner(messages: Vec<SessionMessage>) -> Result<(), Ff
 ///
 /// # Errors
 ///
-/// Returns [`FfiError::StateCorrupted`] if the cancel token mutex is poisoned.
-pub(crate) fn session_cancel_inner() -> Result<(), FfiError> {
-    let guard = CANCEL_TOKEN.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "cancel token mutex poisoned".into(),
-    })?;
+pub(crate) fn session_cancel_inner() {
+    let guard = lock_cancel_token();
     if let Some(token) = guard.as_ref() {
         token.cancel();
         tracing::info!("Session send cancelled");
     }
-    Ok(())
 }
 
 /// Clears the active session's conversation history, retaining only the
@@ -869,9 +872,7 @@ pub(crate) fn session_cancel_inner() -> Result<(), FfiError> {
 /// Returns [`FfiError::StateError`] if no session is active, or
 /// [`FfiError::StateCorrupted`] if the session mutex is poisoned.
 pub(crate) fn session_clear_inner() -> Result<(), FfiError> {
-    let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+    let mut guard = lock_session();
     let session = guard.as_mut().ok_or_else(|| FfiError::StateError {
         detail: "no active session; call session_start first".into(),
     })?;
@@ -895,9 +896,7 @@ pub(crate) fn session_clear_inner() -> Result<(), FfiError> {
 /// Returns [`FfiError::StateError`] if no session is active, or
 /// [`FfiError::StateCorrupted`] if the session mutex is poisoned.
 pub(crate) fn session_history_inner() -> Result<Vec<SessionMessage>, FfiError> {
-    let guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+    let guard = lock_session();
     let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
         detail: "no active session; call session_start first".into(),
     })?;
@@ -926,11 +925,9 @@ pub(crate) fn session_history_inner() -> Result<Vec<SessionMessage>, FfiError> {
 /// [`FfiError::StateCorrupted`] if the session mutex is poisoned.
 pub(crate) fn session_destroy_inner() -> Result<(), FfiError> {
     // Cancel any in-flight send.
-    let _ = session_cancel_inner();
+    session_cancel_inner();
 
-    let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+    let mut guard = lock_session();
     if guard.take().is_none() {
         return Err(FfiError::StateError {
             detail: "no active session to destroy".into(),
@@ -1495,22 +1492,17 @@ fn put_session_state_back(
     history: Vec<ChatMessage>,
     tools: Vec<Box<dyn Tool>>,
     _system_prompt: &str,
-) -> Result<(), FfiError> {
-    let mut guard = SESSION.lock().map_err(|_| FfiError::StateCorrupted {
-        detail: "session mutex poisoned".into(),
-    })?;
+) {
+    let mut guard = lock_session();
     if let Some(session) = guard.as_mut() {
         session.history = history;
         session.tools_registry = tools;
     }
-    Ok(())
 }
 
 /// Clears the global [`CANCEL_TOKEN`].
 fn clear_cancel_token() {
-    if let Ok(mut guard) = CANCEL_TOKEN.lock() {
-        *guard = None;
-    }
+    *lock_cancel_token() = None;
 }
 
 /// Builds the Android-appropriate tool description list for the system prompt.
@@ -2144,8 +2136,7 @@ mod tests {
 
     #[test]
     fn test_session_cancel_no_send() {
-        let result = session_cancel_inner();
-        assert!(result.is_ok());
+        session_cancel_inner();
     }
 
     #[test]

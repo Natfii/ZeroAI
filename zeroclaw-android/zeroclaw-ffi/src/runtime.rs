@@ -49,22 +49,32 @@ fn daemon_mutex() -> &'static Mutex<Option<DaemonState>> {
     DAEMON.get_or_init(|| Mutex::new(None))
 }
 
+/// Locks the daemon mutex, recovering from poison if a prior holder panicked.
+///
+/// Rust's `Mutex` becomes permanently "poisoned" when a thread panics
+/// while holding the lock. Without recovery, **every subsequent FFI call
+/// fails forever** because the lock can never be acquired again.
+///
+/// This helper uses [`PoisonError::into_inner`] to reclaim the inner
+/// `MutexGuard` after a panic, logging a warning but allowing the app to
+/// continue operating. The daemon state inside may be stale, but
+/// [`stop_daemon_inner`] can still clear it and [`start_daemon_inner`]
+/// can reinitialise from scratch.
+fn lock_daemon() -> std::sync::MutexGuard<'static, Option<DaemonState>> {
+    daemon_mutex().lock().unwrap_or_else(|e| {
+        tracing::warn!("Daemon mutex was poisoned; recovering: {e}");
+        e.into_inner()
+    })
+}
+
 /// Returns whether the daemon is currently running.
 ///
 /// Acquires the daemon mutex briefly to check if state is `Some`.
 /// Crate-visible so that sibling modules (e.g. `health`) can query
 /// daemon liveness without accessing `DaemonState` directly.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
+#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn is_daemon_running() -> Result<bool, FfiError> {
-    let guard = daemon_mutex()
-        .lock()
-        .map_err(|_| FfiError::StateCorrupted {
-            detail: "daemon mutex poisoned".into(),
-        })?;
-    Ok(guard.is_some())
+    Ok(lock_daemon().is_some())
 }
 
 /// Returns the gateway port if the daemon is running.
@@ -73,15 +83,9 @@ pub(crate) fn is_daemon_running() -> Result<bool, FfiError> {
 ///
 /// # Errors
 ///
-/// Returns [`FfiError::StateError`] if the daemon is not running,
-/// or [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
+/// Returns [`FfiError::StateError`] if the daemon is not running.
 pub(crate) fn get_gateway_port() -> Result<u16, FfiError> {
-    let guard = daemon_mutex()
-        .lock()
-        .map_err(|_| FfiError::StateCorrupted {
-            detail: "daemon mutex poisoned".into(),
-        })?;
-    guard
+    lock_daemon()
         .as_ref()
         .ok_or_else(|| FfiError::StateError {
             detail: "daemon not running".into(),
@@ -93,11 +97,7 @@ pub(crate) fn get_gateway_port() -> Result<u16, FfiError> {
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
 pub(crate) fn with_daemon_config<T>(f: impl FnOnce(&Config) -> T) -> Result<T, FfiError> {
-    let guard = daemon_mutex()
-        .lock()
-        .map_err(|_| FfiError::StateCorrupted {
-            detail: "daemon mutex poisoned".into(),
-        })?;
+    let guard = lock_daemon();
     let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
         detail: "daemon not running".into(),
     })?;
@@ -132,11 +132,7 @@ pub(crate) fn clone_daemon_config() -> Result<Config, FfiError> {
 /// or [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
 #[allow(dead_code)] // Used by session_send_inner, wired in Task 9
 pub(crate) fn clone_daemon_memory() -> Result<Arc<dyn zeroclaw::memory::Memory>, FfiError> {
-    let guard = daemon_mutex()
-        .lock()
-        .map_err(|_| FfiError::StateCorrupted {
-            detail: "daemon mutex poisoned".into(),
-        })?;
+    let guard = lock_daemon();
     let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
         detail: "daemon not running".into(),
     })?;
@@ -164,11 +160,7 @@ pub(crate) fn with_memory<T>(
     f: impl FnOnce(&dyn zeroclaw::memory::Memory, &Runtime) -> Result<T, FfiError>,
 ) -> Result<T, FfiError> {
     let memory_arc = {
-        let guard = daemon_mutex()
-            .lock()
-            .map_err(|_| FfiError::StateCorrupted {
-                detail: "daemon mutex poisoned".into(),
-            })?;
+        let guard = lock_daemon();
         let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
             detail: "daemon not running".into(),
         })?;
@@ -268,11 +260,7 @@ pub(crate) fn start_daemon_inner(
 
     let runtime = get_or_create_runtime()?;
 
-    let mut guard = daemon_mutex()
-        .lock()
-        .map_err(|e| FfiError::StateCorrupted {
-            detail: format!("daemon mutex poisoned: {e}"),
-        })?;
+    let mut guard = lock_daemon();
 
     if guard.is_some() {
         return Err(FfiError::StateError {
@@ -372,11 +360,7 @@ pub(crate) fn start_daemon_inner(
 pub(crate) fn stop_daemon_inner() -> Result<(), FfiError> {
     let runtime = get_or_create_runtime()?;
 
-    let mut guard = daemon_mutex()
-        .lock()
-        .map_err(|e| FfiError::StateCorrupted {
-            detail: format!("daemon mutex poisoned: {e}"),
-        })?;
+    let mut guard = lock_daemon();
 
     let state = guard.take().ok_or_else(|| FfiError::StateError {
         detail: "daemon not running".to_string(),
@@ -407,12 +391,7 @@ pub(crate) fn stop_daemon_inner() -> Result<(), FfiError> {
 /// Returns [`FfiError::StateCorrupted`] if the daemon mutex is poisoned,
 /// or [`FfiError::SpawnError`] if the health snapshot cannot be serialised.
 pub(crate) fn get_status_inner() -> Result<String, FfiError> {
-    let guard = daemon_mutex()
-        .lock()
-        .map_err(|e| FfiError::StateCorrupted {
-            detail: format!("daemon mutex poisoned: {e}"),
-        })?;
-
+    let guard = lock_daemon();
     let daemon_running = guard.is_some();
     drop(guard);
 
