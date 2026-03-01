@@ -31,6 +31,7 @@ import com.zeroclaw.android.util.BatteryOptimization
 import com.zeroclaw.ffi.FfiException
 import com.zeroclaw.ffi.doctorChannels
 import com.zeroclaw.ffi.getStatus
+import com.zeroclaw.ffi.queryRuntimeTraces
 import com.zeroclaw.ffi.validateConfig
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -203,6 +204,58 @@ class DoctorValidator(
                     title = "Channel diagnostics",
                     status = CheckStatus.FAIL,
                     detail = "Failed to run channel checks: ${e.message}",
+                ),
+            )
+        }
+
+    /**
+     * Checks for recent error events in runtime traces.
+     *
+     * Queries the daemon's JSONL trace file for events matching "error"
+     * and reports the count and latest message. Returns a passing check
+     * if no error events are found or tracing is unavailable.
+     *
+     * @return Diagnostic checks for the runtime traces category.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun runTraceChecks(): List<DiagnosticCheck> =
+        try {
+            val json =
+                withContext(ioDispatcher) {
+                    queryRuntimeTraces("error", null, TRACE_ERROR_LIMIT)
+                }
+            val array = JSONArray(json)
+            if (array.length() == 0) {
+                listOf(
+                    DiagnosticCheck(
+                        id = "traces-errors",
+                        category = DiagnosticCategory.RUNTIME_TRACES,
+                        title = "Recent errors",
+                        status = CheckStatus.PASS,
+                        detail = "No error events in runtime traces",
+                    ),
+                )
+            } else {
+                val latest = array.getJSONObject(array.length() - 1)
+                val msg = latest.optString("message", "Unknown error")
+                listOf(
+                    DiagnosticCheck(
+                        id = "traces-errors",
+                        category = DiagnosticCategory.RUNTIME_TRACES,
+                        title = "Recent errors",
+                        status = CheckStatus.WARN,
+                        detail = "${array.length()} error event(s). Latest: $msg",
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            listOf(
+                DiagnosticCheck(
+                    id = "traces-errors",
+                    category = DiagnosticCategory.RUNTIME_TRACES,
+                    title = "Runtime traces",
+                    status = CheckStatus.PASS,
+                    detail = "Tracing not available: ${e.message}",
                 ),
             )
         }
@@ -544,6 +597,7 @@ class DoctorValidator(
         private const val BYTES_PER_MB = 1_048_576L
         private const val LOW_STORAGE_THRESHOLD_MB = 50L
         private const val WARN_STORAGE_THRESHOLD_MB = 200L
+        private const val TRACE_ERROR_LIMIT: UInt = 5u
 
         /**
          * Formats an uptime duration in seconds to a human-readable string.

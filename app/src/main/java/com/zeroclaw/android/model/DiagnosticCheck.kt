@@ -42,6 +42,9 @@ enum class DiagnosticCategory {
     /** Channel connectivity and health checks. */
     CHANNELS,
 
+    /** Runtime trace analysis for error detection. */
+    RUNTIME_TRACES,
+
     /** System-level prerequisites (battery, storage, permissions). */
     SYSTEM,
 }

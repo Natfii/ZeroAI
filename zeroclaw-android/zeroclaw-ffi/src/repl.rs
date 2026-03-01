@@ -354,6 +354,24 @@ fn build_engine() -> Engine {
         Ok("ok".into())
     });
 
+    // ── Traces ──────────────────────────────────────────────────
+
+    engine.register_fn(
+        "traces",
+        |limit: i64| -> Result<String, Box<EvalAltResult>> {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            crate::traces::query_traces_inner(None, None, limit as u32).map_err(ffi_err)
+        },
+    );
+
+    engine.register_fn(
+        "traces_filter",
+        |filter: String, limit: i64| -> Result<String, Box<EvalAltResult>> {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            crate::traces::query_traces_inner(Some(filter), None, limit as u32).map_err(ffi_err)
+        },
+    );
+
     engine
 }
 
@@ -543,6 +561,18 @@ mod tests {
     #[test]
     fn test_repl_allowlist_no_daemon() {
         let result = eval_repl_inner(r#"allowlist("telegram")"#.into());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_repl_traces_no_daemon() {
+        let result = eval_repl_inner("traces(10)".into());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_repl_traces_filter_no_daemon() {
+        let result = eval_repl_inner(r#"traces_filter("error", 5)"#.into());
         assert!(result.is_err());
     }
 }

@@ -102,6 +102,10 @@ class DoctorViewModel(
             accumulated.addAll(channelChecks)
             _checks.value = accumulated.toList()
 
+            val traceChecks = validator.runTraceChecks()
+            accumulated.addAll(traceChecks)
+            _checks.value = accumulated.toList()
+
             val systemChecks = validator.runSystemChecks()
             accumulated.addAll(systemChecks)
             _checks.value = accumulated.toList()

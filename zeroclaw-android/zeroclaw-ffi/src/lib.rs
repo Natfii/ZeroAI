@@ -29,6 +29,7 @@ mod session;
 mod skills;
 mod streaming;
 mod tools_browse;
+mod traces;
 mod types;
 mod vision;
 mod workspace;
@@ -888,6 +889,38 @@ pub fn memory_count() -> Result<u32, FfiError> {
 #[uniffi::export]
 pub fn eval_repl(expression: String) -> Result<String, FfiError> {
     catch_unwind(AssertUnwindSafe(|| repl::eval_repl_inner(expression))).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Queries runtime trace events from the daemon's JSONL trace file.
+///
+/// Returns a JSON array of trace event objects, newest last.
+/// Returns `"[]"` if tracing is disabled or no events match.
+///
+/// # Arguments
+///
+/// * `filter` - Optional case-insensitive substring match on message/payload.
+/// * `event_type` - Optional exact match on event_type (e.g. `"tool_call"`, `"model_reply"`).
+/// * `limit` - Maximum events to return.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::SpawnError`] on I/O or serialisation failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn query_runtime_traces(
+    filter: Option<String>,
+    event_type: Option<String>,
+    limit: u32,
+) -> Result<String, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        traces::query_traces_inner(filter, event_type, limit)
+    }))
+    .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
