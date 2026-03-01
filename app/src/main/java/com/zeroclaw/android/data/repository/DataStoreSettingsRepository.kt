@@ -211,6 +211,13 @@ class DataStoreSettingsRepository(
             webSearchTimeoutSecs =
                 prefs[KEY_WEB_SEARCH_TIMEOUT_SECS]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+            multimodalMaxImages =
+                prefs[KEY_MULTIMODAL_MAX_IMAGES]
+                    ?: AppSettings.DEFAULT_MULTIMODAL_MAX_IMAGES,
+            multimodalMaxImageSizeMb =
+                prefs[KEY_MULTIMODAL_MAX_IMAGE_SIZE_MB]
+                    ?: AppSettings.DEFAULT_MULTIMODAL_MAX_IMAGE_SIZE_MB,
+            multimodalAllowRemoteFetch = prefs[KEY_MULTIMODAL_ALLOW_REMOTE_FETCH] ?: false,
             securitySandboxEnabled = prefs[KEY_SECURITY_SANDBOX_ENABLED] ?: "",
             securitySandboxBackend =
                 prefs[KEY_SECURITY_SANDBOX_BACKEND]
@@ -411,6 +418,12 @@ class DataStoreSettingsRepository(
 
     override suspend fun setWebSearchTimeoutSecs(secs: Int) = edit { it[KEY_WEB_SEARCH_TIMEOUT_SECS] = secs }
 
+    override suspend fun setMultimodalMaxImages(max: Int) = edit { it[KEY_MULTIMODAL_MAX_IMAGES] = max }
+
+    override suspend fun setMultimodalMaxImageSizeMb(mb: Int) = edit { it[KEY_MULTIMODAL_MAX_IMAGE_SIZE_MB] = mb }
+
+    override suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean) = edit { it[KEY_MULTIMODAL_ALLOW_REMOTE_FETCH] = enabled }
+
     override suspend fun setSecuritySandboxEnabled(enabled: String) = edit { it[KEY_SECURITY_SANDBOX_ENABLED] = enabled }
 
     override suspend fun setSecuritySandboxBackend(backend: String) = edit { it[KEY_SECURITY_SANDBOX_BACKEND] = backend }
@@ -603,6 +616,9 @@ class DataStoreSettingsRepository(
         val KEY_WEB_SEARCH_BRAVE_API_KEY = stringPreferencesKey("web_search_brave_api_key")
         val KEY_WEB_SEARCH_MAX_RESULTS = intPreferencesKey("web_search_max_results")
         val KEY_WEB_SEARCH_TIMEOUT_SECS = intPreferencesKey("web_search_timeout_secs")
+        val KEY_MULTIMODAL_MAX_IMAGES = intPreferencesKey("multimodal_max_images")
+        val KEY_MULTIMODAL_MAX_IMAGE_SIZE_MB = intPreferencesKey("multimodal_max_image_size_mb")
+        val KEY_MULTIMODAL_ALLOW_REMOTE_FETCH = booleanPreferencesKey("multimodal_allow_remote_fetch")
         val KEY_SECURITY_SANDBOX_ENABLED = stringPreferencesKey("security_sandbox_enabled")
         val KEY_SECURITY_SANDBOX_BACKEND = stringPreferencesKey("security_sandbox_backend")
         val KEY_SECURITY_SANDBOX_FIREJAIL_ARGS = stringPreferencesKey("security_sandbox_firejail_args")

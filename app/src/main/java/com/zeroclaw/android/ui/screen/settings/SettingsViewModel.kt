@@ -416,6 +416,21 @@ class SettingsViewModel(
         updateDaemonSetting { setWebSearchTimeoutSecs(secs) }
     }
 
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMultimodalMaxImages */
+    fun updateMultimodalMaxImages(max: Int) {
+        updateDaemonSetting { setMultimodalMaxImages(max) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMultimodalMaxImageSizeMb */
+    fun updateMultimodalMaxImageSizeMb(mb: Int) {
+        updateDaemonSetting { setMultimodalMaxImageSizeMb(mb) }
+    }
+
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMultimodalAllowRemoteFetch */
+    fun updateMultimodalAllowRemoteFetch(enabled: Boolean) {
+        updateDaemonSetting { setMultimodalAllowRemoteFetch(enabled) }
+    }
+
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setSecuritySandboxEnabled */
     fun updateSecuritySandboxEnabled(enabled: String) {
         updateDaemonSetting { setSecuritySandboxEnabled(enabled) }

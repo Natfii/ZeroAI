@@ -44,10 +44,10 @@ import com.zeroclaw.android.ui.screen.settings.SettingsViewModel
 private val WEB_SEARCH_ENGINES = listOf("duckduckgo", "brave")
 
 /**
- * Web access configuration screen for web fetch, web search, and HTTP request tools.
+ * Web access configuration screen for web fetch, web search, HTTP request, and vision tools.
  *
- * Maps to upstream `[tools.web_fetch]`, `[tools.web_search]`, and `[tools.http_request]`
- * TOML sections.
+ * Maps to upstream `[tools.web_fetch]`, `[tools.web_search]`, `[tools.http_request]`,
+ * and `[multimodal]` TOML sections.
  *
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param settingsViewModel The shared [SettingsViewModel].
@@ -74,6 +74,7 @@ fun WebAccessScreen(
         WebFetchSection(settings = settings, viewModel = settingsViewModel)
         WebSearchSection(settings = settings, viewModel = settingsViewModel)
         HttpRequestSection(settings = settings, viewModel = settingsViewModel)
+        VisionSection(settings = settings, viewModel = settingsViewModel)
 
         Spacer(modifier = Modifier.height(16.dp))
     }
@@ -286,5 +287,54 @@ private fun HttpRequestSection(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 4.dp),
+    )
+}
+
+/**
+ * Vision / multimodal configuration section.
+ *
+ * Controls image limits and remote fetch behaviour for multimodal
+ * messages. Maps to upstream `[multimodal]` TOML section.
+ *
+ * @param settings Current application settings.
+ * @param viewModel The [SettingsViewModel] for persisting changes.
+ */
+@Composable
+private fun VisionSection(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
+    SectionHeader(title = "Vision")
+
+    OutlinedTextField(
+        value = settings.multimodalMaxImages.toString(),
+        onValueChange = { v ->
+            v.toIntOrNull()?.let { viewModel.updateMultimodalMaxImages(it) }
+        },
+        label = { Text("Max images per request") },
+        supportingText = { Text("Number of images allowed (1\u201316)") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    OutlinedTextField(
+        value = settings.multimodalMaxImageSizeMb.toString(),
+        onValueChange = { v ->
+            v.toIntOrNull()?.let { viewModel.updateMultimodalMaxImageSizeMb(it) }
+        },
+        label = { Text("Max image size (MB)") },
+        supportingText = { Text("Maximum file size per image (1\u201320)") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    SettingsToggleRow(
+        title = "Allow remote fetch",
+        subtitle = "Let the agent download images from remote URLs for vision",
+        checked = settings.multimodalAllowRemoteFetch,
+        onCheckedChange = { viewModel.updateMultimodalAllowRemoteFetch(it) },
+        contentDescription = "Allow remote image fetch for vision",
     )
 }

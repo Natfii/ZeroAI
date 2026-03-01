@@ -361,6 +361,12 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setWebSearchTimeoutSecs(secs: Int) { /* no-op */ }
 
+    override suspend fun setMultimodalMaxImages(max: Int) { /* no-op */ }
+
+    override suspend fun setMultimodalMaxImageSizeMb(mb: Int) { /* no-op */ }
+
+    override suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean) { /* no-op */ }
+
     override suspend fun setSecuritySandboxEnabled(enabled: String) { /* no-op */ }
 
     override suspend fun setSecuritySandboxBackend(backend: String) { /* no-op */ }

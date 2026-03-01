@@ -81,6 +81,9 @@ package com.zeroclaw.android.model
  * @property webSearchBraveApiKey Brave Search API key (required when provider is "brave").
  * @property webSearchMaxResults Maximum number of search results (1-10).
  * @property webSearchTimeoutSecs Request timeout in seconds for web search.
+ * @property multimodalMaxImages Maximum images allowed per multimodal request (1-16).
+ * @property multimodalMaxImageSizeMb Maximum image size in MB for multimodal input (1-20).
+ * @property multimodalAllowRemoteFetch Whether the agent can fetch remote image URLs for vision.
  * @property securitySandboxEnabled Sandbox mode: "" for auto-detect, "true", or "false".
  * @property securitySandboxBackend Sandbox backend: "auto", "landlock", "firejail", "bubblewrap", "docker", "none".
  * @property securitySandboxFirejailArgs Comma-separated extra arguments for firejail.
@@ -196,6 +199,9 @@ data class AppSettings(
     val webSearchBraveApiKey: String = "",
     val webSearchMaxResults: Int = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     val webSearchTimeoutSecs: Int = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+    val multimodalMaxImages: Int = DEFAULT_MULTIMODAL_MAX_IMAGES,
+    val multimodalMaxImageSizeMb: Int = DEFAULT_MULTIMODAL_MAX_IMAGE_SIZE_MB,
+    val multimodalAllowRemoteFetch: Boolean = false,
     val securitySandboxEnabled: String = "",
     val securitySandboxBackend: String = DEFAULT_SANDBOX_BACKEND,
     val securitySandboxFirejailArgs: String = "",
@@ -342,6 +348,12 @@ data class AppSettings(
 
         /** Default web search timeout in seconds. */
         const val DEFAULT_WEB_SEARCH_TIMEOUT_SECS = 15
+
+        /** Default max images per multimodal request. */
+        const val DEFAULT_MULTIMODAL_MAX_IMAGES = 4
+
+        /** Default max image size in MB for multimodal input. */
+        const val DEFAULT_MULTIMODAL_MAX_IMAGE_SIZE_MB = 5
 
         /** Default sandbox backend. */
         const val DEFAULT_SANDBOX_BACKEND = "auto"

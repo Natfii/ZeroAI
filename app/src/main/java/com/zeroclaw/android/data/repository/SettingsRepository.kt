@@ -526,6 +526,27 @@ interface SettingsRepository {
     suspend fun setWebSearchTimeoutSecs(secs: Int)
 
     /**
+     * Updates the maximum number of images per multimodal request.
+     *
+     * @param max Maximum images (1-16).
+     */
+    suspend fun setMultimodalMaxImages(max: Int)
+
+    /**
+     * Updates the maximum image size for multimodal input.
+     *
+     * @param mb Maximum image size in MB (1-20).
+     */
+    suspend fun setMultimodalMaxImageSizeMb(mb: Int)
+
+    /**
+     * Toggles remote image URL fetching for multimodal/vision.
+     *
+     * @param enabled Whether the agent can fetch remote image URLs.
+     */
+    suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean)
+
+    /**
      * Updates the sandbox enabled mode.
      *
      * @param enabled Sandbox mode: "" for auto-detect, "true", or "false".
