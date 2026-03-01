@@ -247,6 +247,7 @@ class DaemonServiceBridge(
         _serviceState.value = ServiceState.STARTING
         try {
             withContext(ioDispatcher) {
+                ensureStopped()
                 migrateOldWorkspace()
                 startDaemon(configToml, dataDir, host, port)
             }
@@ -283,6 +284,25 @@ class DaemonServiceBridge(
     private fun isDaemonAlreadyRunning(e: FfiException): Boolean =
         e is FfiException.StateException &&
             e.errorDetail().contains("already running", ignoreCase = true)
+
+    /**
+     * Ensures no previous daemon instance is running before a fresh start.
+     *
+     * Calls [stopDaemon] and swallows the "not running" error that fires
+     * when no daemon exists. This guarantees the Rust tokio runtime is
+     * fully shut down — killing orphaned tasks like Telegram typing
+     * indicator loops that survive a simple handle abort.
+     *
+     * Must be called from [Dispatchers.IO].
+     */
+    private fun ensureStopped() {
+        @Suppress("TooGenericExceptionCaught")
+        try {
+            stopDaemon()
+        } catch (e: Throwable) {
+            Log.d(TAG, "ensureStopped: ${e.message}")
+        }
+    }
 
     /**
      * Stops the running daemon.

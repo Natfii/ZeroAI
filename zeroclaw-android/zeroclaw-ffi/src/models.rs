@@ -38,9 +38,9 @@ pub(crate) fn discover_models_inner(
     api_key: String,
     base_url: Option<String>,
 ) -> Result<String, FfiError> {
-    let runtime = crate::runtime::get_or_create_runtime()?;
+    let handle = crate::runtime::get_or_create_runtime()?;
 
-    runtime.block_on(async {
+    handle.block_on(async {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))
             .build()

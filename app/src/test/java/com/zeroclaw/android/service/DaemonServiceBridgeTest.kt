@@ -40,6 +40,7 @@ class DaemonServiceBridgeTest {
     @BeforeEach
     fun setUp() {
         mockkStatic("com.zeroclaw.ffi.Zeroclaw_androidKt")
+        every { com.zeroclaw.ffi.stopDaemon() } returns Unit
         bridge = DaemonServiceBridge("/tmp/test", ioDispatcher = UnconfinedTestDispatcher())
     }
 

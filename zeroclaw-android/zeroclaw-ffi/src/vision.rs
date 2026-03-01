@@ -12,7 +12,7 @@
 //! Gemini `GenerateContent`.
 
 use crate::error::FfiError;
-use crate::runtime::{get_or_create_runtime, with_daemon_config};
+use crate::runtime::with_daemon_config;
 use serde_json::{Value, json};
 use tokio::time::Duration;
 
@@ -286,8 +286,8 @@ pub(crate) fn send_vision_message_inner(
             ),
         })?;
 
-    let runtime = get_or_create_runtime()?;
-    runtime.block_on(dispatch_vision_request(
+    let handle = crate::runtime::get_or_create_runtime()?;
+    handle.block_on(dispatch_vision_request(
         &vision_provider,
         &text,
         &image_data,

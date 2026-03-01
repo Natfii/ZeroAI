@@ -9,16 +9,18 @@ use chrono::Utc;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use tokio::runtime::Runtime;
+use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use zeroclaw::Config;
 
-/// Single tokio runtime shared across all FFI calls.
+/// Tokio runtime, recreated on each daemon lifecycle.
 ///
-/// Created on first `start_daemon` call, never destroyed. Tokio runtimes
-/// are expensive to create/destroy, so we keep one for the process lifetime.
-static RUNTIME: OnceLock<Runtime> = OnceLock::new();
+/// Stored in a `Mutex<Option<Runtime>>` so that [`stop_daemon_inner`] can
+/// take ownership and call [`Runtime::shutdown_timeout`], which kills all
+/// spawned tasks — including orphaned typing-indicator loops that upstream
+/// channels leave behind after abort.
+static RUNTIME: Mutex<Option<Runtime>> = Mutex::new(None);
 
 /// Guarded daemon state. `None` when the daemon is not running.
 static DAEMON: OnceLock<Mutex<Option<DaemonState>>> = OnceLock::new();
@@ -142,11 +144,11 @@ pub(crate) fn clone_daemon_memory() -> Result<Arc<dyn zeroclaw::memory::Memory>,
     Ok(Arc::clone(memory))
 }
 
-/// Runs a closure with a reference to the memory backend and the tokio
-/// runtime handle.
+/// Runs a closure with a reference to the memory backend and a tokio
+/// runtime [`Handle`].
 ///
-/// The closure receives the `Arc<dyn Memory>` and a `&Runtime` so it
-/// can call async memory methods via `runtime.block_on(...)`. Since FFI
+/// The closure receives the `Arc<dyn Memory>` and a `&Handle` so it
+/// can call async memory methods via `handle.block_on(...)`. Since FFI
 /// calls originate from Kotlin's IO dispatcher (not from our tokio
 /// runtime), `block_on` is safe and will not deadlock.
 ///
@@ -157,7 +159,7 @@ pub(crate) fn clone_daemon_memory() -> Result<Arc<dyn zeroclaw::memory::Memory>,
 /// Returns [`FfiError::StateError`] if the daemon is not running or the
 /// memory backend was not initialised.
 pub(crate) fn with_memory<T>(
-    f: impl FnOnce(&dyn zeroclaw::memory::Memory, &Runtime) -> Result<T, FfiError>,
+    f: impl FnOnce(&dyn zeroclaw::memory::Memory, &Handle) -> Result<T, FfiError>,
 ) -> Result<T, FfiError> {
     let memory_arc = {
         let guard = lock_daemon();
@@ -168,22 +170,35 @@ pub(crate) fn with_memory<T>(
             detail: "memory backend not available".into(),
         })?)
     }; // guard dropped here
-    let runtime = get_or_create_runtime()?;
-    f(memory_arc.as_ref(), runtime)
+    let handle = get_or_create_runtime()?;
+    f(memory_arc.as_ref(), &handle)
 }
 
-/// Returns a reference to the tokio runtime, creating it on first access.
+/// Locks the runtime mutex, recovering from poison if a prior holder panicked.
 ///
-/// Uses the `get()`+`set()` pattern because `OnceLock::get_or_try_init`
-/// is unstable on Rust 1.93. The final `expect` is safe because we
-/// just called `set()` successfully.
+/// Same pattern as [`lock_daemon`]: uses [`PoisonError::into_inner`] to
+/// reclaim the guard after a panic, allowing the next caller to create a
+/// fresh runtime.
+fn lock_runtime() -> std::sync::MutexGuard<'static, Option<Runtime>> {
+    RUNTIME.lock().unwrap_or_else(|e| {
+        tracing::warn!("Runtime mutex was poisoned; recovering: {e}");
+        e.into_inner()
+    })
+}
+
+/// Returns a [`Handle`] to the tokio runtime, creating it on first access.
+///
+/// The returned `Handle` is an owned, cloneable token that keeps the
+/// runtime alive and supports [`Handle::block_on`] with the same API as
+/// [`Runtime::block_on`]. Callers should use `handle.block_on(...)`.
 ///
 /// # Errors
 ///
 /// Returns [`FfiError::SpawnError`] if the tokio runtime builder fails.
-pub(crate) fn get_or_create_runtime() -> Result<&'static Runtime, FfiError> {
-    if let Some(rt) = RUNTIME.get() {
-        return Ok(rt);
+pub(crate) fn get_or_create_runtime() -> Result<Handle, FfiError> {
+    let mut guard = lock_runtime();
+    if let Some(rt) = guard.as_ref() {
+        return Ok(rt.handle().clone());
     }
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -192,10 +207,9 @@ pub(crate) fn get_or_create_runtime() -> Result<&'static Runtime, FfiError> {
         .map_err(|e| FfiError::SpawnError {
             detail: format!("failed to create tokio runtime: {e}"),
         })?;
-    let _ = RUNTIME.set(rt);
-    RUNTIME.get().ok_or_else(|| FfiError::StateCorrupted {
-        detail: "runtime not initialized after set".to_string(),
-    })
+    let handle = rt.handle().clone();
+    *guard = Some(rt);
+    Ok(handle)
 }
 
 /// Starts the `ZeroClaw` daemon with the provided configuration.
@@ -260,7 +274,7 @@ pub(crate) fn start_daemon_inner(
         detail: format!("failed to create workspace dir: {e}"),
     })?;
 
-    let runtime = get_or_create_runtime()?;
+    let handle = get_or_create_runtime()?;
 
     let mut guard = lock_daemon();
 
@@ -293,7 +307,7 @@ pub(crate) fn start_daemon_inner(
 
     let stored_config = config.clone();
 
-    let handles = runtime.block_on(async {
+    let handles = handle.block_on(async {
         crate::ffi_health::mark_component_ok("daemon");
 
         let mut handles: Vec<JoinHandle<()>> = Vec::new();
@@ -352,34 +366,50 @@ pub(crate) fn start_daemon_inner(
     Ok(())
 }
 
-/// Stops a running `ZeroClaw` daemon by signaling shutdown and aborting
-/// all component supervisor tasks.
+/// Stops a running `ZeroClaw` daemon by aborting all component supervisor
+/// tasks and shutting down the tokio runtime.
+///
+/// Shutting down the runtime (via [`Runtime::shutdown_timeout`]) kills
+/// **all** spawned tasks, including orphaned typing-indicator loops and
+/// channel listener tasks that survive the component abort. Without this,
+/// Telegram's `start_typing` refresh task would continue sending
+/// `sendChatAction` every 4 seconds indefinitely after stop.
+///
+/// A fresh runtime is created on the next [`start_daemon_inner`] call.
 ///
 /// # Errors
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running,
 /// or [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
 pub(crate) fn stop_daemon_inner() -> Result<(), FfiError> {
-    let runtime = get_or_create_runtime()?;
-
     let mut guard = lock_daemon();
 
     let state = guard.take().ok_or_else(|| FfiError::StateError {
         detail: "daemon not running".to_string(),
     })?;
 
-    for handle in &state.handles {
-        handle.abort();
+    for task in &state.handles {
+        task.abort();
     }
 
-    runtime.block_on(async {
-        for handle in state.handles {
-            let _ = handle.await;
-        }
-    });
+    // Take ownership of the runtime so we can shut it down after awaiting
+    // the aborted handles. Other FFI calls that need a runtime during this
+    // window will create a fresh one (acceptable — no daemon state exists).
+    let rt = { lock_runtime().take() };
+
+    if let Some(rt) = rt {
+        rt.block_on(async {
+            for task in state.handles {
+                let _ = task.await;
+            }
+        });
+
+        // Kill orphaned tasks: typing indicators, channel listeners, etc.
+        rt.shutdown_timeout(Duration::from_secs(5));
+    }
 
     crate::ffi_health::mark_component_error("daemon", "shutdown requested");
-    tracing::info!("ZeroClaw daemon stopped");
+    tracing::info!("ZeroClaw daemon stopped (runtime shut down)");
 
     Ok(())
 }
@@ -434,10 +464,10 @@ pub(crate) fn send_message_inner(message: String) -> Result<String, FfiError> {
         });
     }
 
-    let runtime = get_or_create_runtime()?;
+    let handle = get_or_create_runtime()?;
     let config = with_daemon_config(Config::clone)?;
 
-    runtime.block_on(async {
+    handle.block_on(async {
         zeroclaw::agent::process_message(config, &message)
             .await
             .map_err(|e| FfiError::SpawnError {
@@ -620,9 +650,9 @@ pub(crate) fn doctor_channels_inner(
     config.workspace_dir = data_path.join("workspace");
     config.config_path = data_path.join("config.toml");
 
-    let runtime = get_or_create_runtime()?;
+    let handle = get_or_create_runtime()?;
 
-    let results = runtime.block_on(async {
+    let results = handle.block_on(async {
         match tokio::time::timeout(
             Duration::from_secs(30),
             zeroclaw::channels::doctor_channels(config),

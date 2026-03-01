@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use zeroclaw::providers::traits::StreamOptions;
 
 use crate::error::FfiError;
-use crate::runtime::{get_or_create_runtime, with_daemon_config};
+use crate::runtime::with_daemon_config;
 
 /// Global cancellation flag for the current streaming operation.
 ///
@@ -69,7 +69,7 @@ pub(crate) fn send_message_streaming_inner(
 ) -> Result<(), FfiError> {
     CANCEL_FLAG.store(false, Ordering::SeqCst);
 
-    let rt = get_or_create_runtime()?;
+    let rt = crate::runtime::get_or_create_runtime()?;
 
     let (model, temperature, provider) = with_daemon_config(|config| {
         let model = config

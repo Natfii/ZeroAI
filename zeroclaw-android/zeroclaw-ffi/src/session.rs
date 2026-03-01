@@ -37,7 +37,7 @@ use zeroclaw::providers::{ChatMessage, ChatRequest, Provider};
 use zeroclaw::tools::{Tool, ToolResult, ToolSpec};
 
 use crate::error::FfiError;
-use crate::runtime::{clone_daemon_config, clone_daemon_memory, get_or_create_runtime};
+use crate::runtime::{clone_daemon_config, clone_daemon_memory};
 
 /// Maximum user message size in bytes (1 MiB).
 const MAX_MESSAGE_BYTES: usize = 1_048_576;
@@ -676,9 +676,9 @@ pub(crate) fn session_send_inner(
 
     let (history, tools) = state_guard.state_mut();
     let history_len_before = history.len();
-    let runtime = get_or_create_runtime()?;
+    let handle = crate::runtime::get_or_create_runtime()?;
 
-    let result: Result<String, AgentLoopOutcome> = runtime.block_on(async {
+    let result: Result<String, AgentLoopOutcome> = handle.block_on(async {
         // Build memory context (best-effort; skip if memory unavailable).
         let mem_context = match clone_daemon_memory() {
             Ok(mem) => {
@@ -749,7 +749,7 @@ pub(crate) fn session_send_inner(
     match result {
         Ok(full_response) => {
             // Run compaction on the history (best-effort).
-            if let Ok(true) = runtime.block_on(async {
+            if let Ok(true) = handle.block_on(async {
                 let provider =
                     zeroclaw::providers::create_provider(&provider_name, config.api_key.as_deref())
                         .ok();
