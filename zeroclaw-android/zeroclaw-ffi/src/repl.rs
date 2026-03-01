@@ -161,6 +161,10 @@ fn build_engine() -> Engine {
         },
     );
 
+    engine.register_fn("doctor", || -> Result<String, Box<EvalAltResult>> {
+        runtime::doctor_channels_inner(String::new(), String::new()).map_err(ffi_err)
+    });
+
     engine.register_fn(
         "doctor",
         |config_toml: String, data_dir: String| -> Result<String, Box<EvalAltResult>> {
@@ -175,6 +179,17 @@ fn build_engine() -> Engine {
         to_json(&summary)
     });
 
+    engine.register_fn("cost_daily", || -> Result<Dynamic, Box<EvalAltResult>> {
+        let today = chrono::Utc::now().date_naive();
+        let value = cost::get_daily_cost_inner(
+            chrono::Datelike::year(&today),
+            chrono::Datelike::month(&today),
+            chrono::Datelike::day(&today),
+        )
+        .map_err(ffi_err)?;
+        Ok(Dynamic::from_float(value))
+    });
+
     engine.register_fn(
         "cost_daily",
         |year: i64, month: i64, day: i64| -> Result<Dynamic, Box<EvalAltResult>> {
@@ -184,6 +199,17 @@ fn build_engine() -> Engine {
             Ok(Dynamic::from_float(value))
         },
     );
+
+    engine.register_fn("cost_monthly", || -> Result<Dynamic, Box<EvalAltResult>> {
+        let now = chrono::Utc::now();
+        #[allow(clippy::cast_possible_wrap)]
+        let value = cost::get_monthly_cost_inner(
+            chrono::Datelike::year(&now),
+            chrono::Datelike::month(&now),
+        )
+        .map_err(ffi_err)?;
+        Ok(Dynamic::from_float(value))
+    });
 
     engine.register_fn(
         "cost_monthly",

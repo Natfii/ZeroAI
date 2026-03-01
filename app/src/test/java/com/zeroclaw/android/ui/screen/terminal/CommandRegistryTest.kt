@@ -148,5 +148,171 @@ class CommandRegistryTest {
             assertTrue(result is CommandResult.RhaiExpression)
             assertEquals("version()", (result as CommandResult.RhaiExpression).expression)
         }
+
+        @Test
+        @DisplayName("doctor without args calls zero-arg overload")
+        fun `doctor without args calls zero-arg overload`() {
+            val result = CommandRegistry.parseAndTranslate("/doctor")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("doctor()", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("doctor with args passes config and data dir")
+        fun `doctor with args passes config and data dir`() {
+            val result = CommandRegistry.parseAndTranslate("/doctor config.toml /data")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "doctor(\"config.toml\", \"/data\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("cost daily without args calls zero-arg overload")
+        fun `cost daily without args calls zero-arg overload`() {
+            val result = CommandRegistry.parseAndTranslate("/cost daily")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("cost_daily()", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("cost monthly without args calls zero-arg overload")
+        fun `cost monthly without args calls zero-arg overload`() {
+            val result = CommandRegistry.parseAndTranslate("/cost monthly")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("cost_monthly()", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("cost monthly with args generates correct expression")
+        fun `cost monthly with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/cost monthly 2026 3")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "cost_monthly(2026, 3)",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("config generates correct expression")
+        fun `config generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/config")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("config()", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("traces without args uses default limit")
+        fun `traces without args uses default limit`() {
+            val result = CommandRegistry.parseAndTranslate("/traces")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("traces(20)", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("traces with filter generates filter expression")
+        fun `traces with filter generates filter expression`() {
+            val result = CommandRegistry.parseAndTranslate("/traces error")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "traces_filter(\"error\", 20)",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("bind with args generates correct expression")
+        fun `bind with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/bind telegram alice")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "bind(\"telegram\", \"alice\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("allowlist generates correct expression")
+        fun `allowlist generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/allowlist telegram")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "allowlist(\"telegram\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("swap with args generates correct expression")
+        fun `swap with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/swap anthropic claude-sonnet-4")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "swap_provider(\"anthropic\", \"claude-sonnet-4\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("models generates correct expression")
+        fun `models generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/models anthropic")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "models(\"anthropic\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("auth generates correct expression")
+        fun `auth generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/auth")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals("auth_list()", (result as CommandResult.RhaiExpression).expression)
+        }
+
+        @Test
+        @DisplayName("auth remove with args generates correct expression")
+        fun `auth remove with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/auth remove openai default")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "auth_remove(\"openai\", \"default\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("cron at with args generates correct expression")
+        fun `cron at with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/cron at 2026-12-31T23:59:59Z echo done")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "cron_add_at(\"2026-12-31T23:59:59Z\", \"echo done\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("cron every with args generates correct expression")
+        fun `cron every with args generates correct expression`() {
+            val result = CommandRegistry.parseAndTranslate("/cron every 60000 echo tick")
+            assertTrue(result is CommandResult.RhaiExpression)
+            assertEquals(
+                "cron_add_every(60000, \"echo tick\")",
+                (result as CommandResult.RhaiExpression).expression,
+            )
+        }
+
+        @Test
+        @DisplayName("prefix match includes new commands")
+        fun `prefix match includes new commands`() {
+            val results = CommandRegistry.matches("tr")
+            val names = results.map { it.name }
+            assertTrue(names.contains("traces"))
+        }
     }
 }

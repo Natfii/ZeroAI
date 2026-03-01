@@ -79,6 +79,9 @@ object CommandRegistry {
     /** Default limit for memory recall results. */
     private const val DEFAULT_RECALL_LIMIT = 20
 
+    /** Default limit for trace queries when the user omits the argument. */
+    private const val DEFAULT_TRACE_LIMIT = 20
+
     /** All registered slash commands, in display order. */
     val commands: List<SlashCommand> = buildCommandList()
 
@@ -189,7 +192,7 @@ object CommandRegistry {
      *
      * @return All commands in display order.
      */
-    @Suppress("LongMethod", "CognitiveComplexMethod")
+    @Suppress("LongMethod", "CognitiveComplexMethod", "CyclomaticComplexMethod")
     private fun buildCommandList(): List<SlashCommand> =
         listOf(
             SlashCommand(
@@ -217,36 +220,36 @@ object CommandRegistry {
             SlashCommand(
                 name = "doctor",
                 description = "Run diagnostic checks",
-                usage = "<config_path> <data_dir>",
+                usage = "[config_path] [data_dir]",
                 toExpression = { args ->
                     if (args.size >= 2) {
                         "doctor(${rhaiString(args[0])}, ${rhaiString(args[1])})"
                     } else {
-                        "doctor(\"\", \"\")"
+                        "doctor()"
                     }
                 },
             ),
             SlashCommand(
                 name = "cost daily",
-                description = "Show cost for a specific day",
-                usage = "<year> <month> <day>",
+                description = "Show cost for a specific day (defaults to today)",
+                usage = "[year] [month] [day]",
                 toExpression = { args ->
                     if (args.size >= 3) {
                         "cost_daily(${args[0]}, ${args[1]}, ${args[2]})"
                     } else {
-                        "cost_daily(0, 0, 0)"
+                        "cost_daily()"
                     }
                 },
             ),
             SlashCommand(
                 name = "cost monthly",
-                description = "Show cost for a specific month",
-                usage = "<year> <month>",
+                description = "Show cost for a specific month (defaults to current)",
+                usage = "[year] [month]",
                 toExpression = { args ->
                     if (args.size >= 2) {
                         "cost_monthly(${args[0]}, ${args[1]})"
                     } else {
-                        "cost_monthly(0, 0)"
+                        "cost_monthly()"
                     }
                 },
             ),
@@ -405,6 +408,120 @@ object CommandRegistry {
                 name = "memory count",
                 description = "Show total memory count",
                 toExpression = { "memory_count()" },
+            ),
+            SlashCommand(
+                name = "config",
+                description = "Show running daemon config",
+                toExpression = { "config()" },
+            ),
+            SlashCommand(
+                name = "validate",
+                description = "Validate a TOML config string",
+                usage = "<toml>",
+                toExpression = { args ->
+                    val toml = args.joinToString(" ")
+                    "validate_config(${rhaiString(toml)})"
+                },
+            ),
+            SlashCommand(
+                name = "traces",
+                description = "Show recent traces, optionally filtered",
+                usage = "[filter]",
+                toExpression = { args ->
+                    if (args.isEmpty()) {
+                        "traces($DEFAULT_TRACE_LIMIT)"
+                    } else {
+                        val filter = args.joinToString(" ")
+                        "traces_filter(${rhaiString(filter)}, $DEFAULT_TRACE_LIMIT)"
+                    }
+                },
+            ),
+            SlashCommand(
+                name = "bind",
+                description = "Bind a user identity to a channel",
+                usage = "<channel> <user_id>",
+                toExpression = { args ->
+                    if (args.size >= 2) {
+                        val channel = args[0]
+                        val userId = args.drop(1).joinToString(" ")
+                        "bind(${rhaiString(channel)}, ${rhaiString(userId)})"
+                    } else {
+                        "bind(\"\", \"\")"
+                    }
+                },
+            ),
+            SlashCommand(
+                name = "allowlist",
+                description = "Show channel allowlist",
+                usage = "<channel>",
+                toExpression = { args ->
+                    "allowlist(${rhaiString(args.firstOrNull().orEmpty())})"
+                },
+            ),
+            SlashCommand(
+                name = "swap",
+                description = "Swap the active provider and model",
+                usage = "<provider> <model>",
+                toExpression = { args ->
+                    if (args.size >= 2) {
+                        "swap_provider(${rhaiString(args[0])}, ${rhaiString(args[1])})"
+                    } else {
+                        "swap_provider(\"\", \"\")"
+                    }
+                },
+            ),
+            SlashCommand(
+                name = "models",
+                description = "List available models for a provider",
+                usage = "<provider>",
+                toExpression = { args ->
+                    "models(${rhaiString(args.firstOrNull().orEmpty())})"
+                },
+            ),
+            SlashCommand(
+                name = "auth remove",
+                description = "Remove an auth profile",
+                usage = "<provider> <profile>",
+                toExpression = { args ->
+                    if (args.size >= 2) {
+                        "auth_remove(${rhaiString(args[0])}, ${rhaiString(args[1])})"
+                    } else {
+                        "auth_remove(\"\", \"\")"
+                    }
+                },
+            ),
+            SlashCommand(
+                name = "auth",
+                description = "List auth profiles",
+                toExpression = { "auth_list()" },
+            ),
+            SlashCommand(
+                name = "cron at",
+                description = "Schedule a job at a specific time",
+                usage = "<timestamp> <command>",
+                toExpression = { args ->
+                    if (args.size >= 2) {
+                        val timestamp = args.first()
+                        val command = args.drop(1).joinToString(" ")
+                        "cron_add_at(${rhaiString(timestamp)}, ${rhaiString(command)})"
+                    } else {
+                        "cron_add_at(\"\", \"\")"
+                    }
+                },
+            ),
+            SlashCommand(
+                name = "cron every",
+                description = "Schedule a repeating job at an interval",
+                usage = "<ms> <command>",
+                toExpression = { args ->
+                    if (args.size >= 2) {
+                        val ms = args.first()
+                        val command = args.drop(1).joinToString(" ")
+                        "cron_add_every($ms, ${rhaiString(command)})"
+                    } else {
+                        "cron_add_every(0, \"\")"
+                    }
+                },
             ),
             SlashCommand(
                 name = "help",

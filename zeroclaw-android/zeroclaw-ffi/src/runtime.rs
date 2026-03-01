@@ -624,12 +624,16 @@ pub(crate) fn validate_config_inner(config_toml: String) -> Result<String, FfiEr
     }
 }
 
-/// Runs channel health checks without starting the daemon.
+/// Runs channel health checks.
 ///
-/// Parses the TOML config, overrides paths with `data_dir` (same as
-/// [`start_daemon_inner`]), then calls the upstream
-/// `channels::doctor_channels()` with a 10-second timeout per channel.
-/// Returns a JSON array of `{"name":"...", "status":"healthy|unhealthy|timeout"}`.
+/// When `config_toml` is empty, uses the running daemon's config
+/// (requires the daemon to be started). When `config_toml` is
+/// provided, parses it and overrides paths with `data_dir` (same as
+/// [`start_daemon_inner`]).
+///
+/// Calls upstream `channels::doctor_channels()` with a 30-second
+/// timeout. Returns a JSON array of
+/// `{"name":"...", "status":"healthy|unhealthy|timeout"}`.
 ///
 /// Uses the shared [`RUNTIME`] for async execution but does NOT acquire
 /// the [`DAEMON`] mutex.
@@ -637,18 +641,24 @@ pub(crate) fn validate_config_inner(config_toml: String) -> Result<String, FfiEr
 /// # Errors
 ///
 /// Returns [`FfiError::ConfigError`] on TOML parse or path failure,
-/// or [`FfiError::SpawnError`] on channel-check or serialisation failure.
+/// [`FfiError::StateError`] if `config_toml` is empty and the daemon
+/// is not running, or [`FfiError::SpawnError`] on serialisation failure.
 pub(crate) fn doctor_channels_inner(
     config_toml: String,
     data_dir: String,
 ) -> Result<String, FfiError> {
-    let mut config: Config = toml::from_str(&config_toml).map_err(|e| FfiError::ConfigError {
-        detail: format!("failed to parse config TOML: {e}"),
-    })?;
-
-    let data_path = PathBuf::from(&data_dir);
-    config.workspace_dir = data_path.join("workspace");
-    config.config_path = data_path.join("config.toml");
+    let config: Config = if config_toml.is_empty() {
+        clone_daemon_config()?
+    } else {
+        let mut parsed: Config =
+            toml::from_str(&config_toml).map_err(|e| FfiError::ConfigError {
+                detail: format!("failed to parse config TOML: {e}"),
+            })?;
+        let data_path = PathBuf::from(&data_dir);
+        parsed.workspace_dir = data_path.join("workspace");
+        parsed.config_path = data_path.join("config.toml");
+        parsed
+    };
 
     let handle = get_or_create_runtime()?;
 
