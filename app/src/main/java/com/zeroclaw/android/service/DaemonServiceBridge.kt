@@ -73,6 +73,32 @@ class DaemonServiceBridge(
     private val _serviceState = MutableStateFlow(ServiceState.STOPPED)
 
     /**
+     * Probes the Rust FFI to check whether the daemon is already running
+     * and synchronises [serviceState] accordingly.
+     *
+     * Must be called from a background dispatcher because [getStatus] is a
+     * blocking FFI call. Safe to call from the main thread when wrapped in
+     * [withContext].
+     *
+     * This is designed to be called once from [ZeroClawApplication.onCreate]
+     * so the UI never starts with a stale [ServiceState.STOPPED] when the
+     * daemon is actually alive (e.g. after process death with the foreground
+     * service still running via [START_STICKY]).
+     */
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun syncState() {
+        try {
+            val status = withContext(ioDispatcher) { pollStatus() }
+            if (status.running && _serviceState.value != ServiceState.RUNNING) {
+                Log.i(TAG, "syncState: daemon already running (uptime=${status.uptimeSeconds}s)")
+                _serviceState.value = ServiceState.RUNNING
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "syncState: daemon not running (${e.message})")
+        }
+    }
+
+    /**
      * Current lifecycle state of the daemon.
      *
      * Transitions follow the sequence:

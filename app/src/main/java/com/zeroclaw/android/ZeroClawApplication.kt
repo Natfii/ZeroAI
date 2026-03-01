@@ -244,6 +244,7 @@ class ZeroClawApplication :
         sessionLockManager = SessionLockManager(settingsRepository.settings, ioScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(sessionLockManager)
 
+        syncDaemonState(ioScope)
         migrateStaleOAuthEntries(ioScope)
         schedulePluginSyncIfEnabled(ioScope)
     }
@@ -268,6 +269,23 @@ class ZeroClawApplication :
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to verify crate version: ${e.message}")
+        }
+    }
+
+    /**
+     * Probes the Rust FFI layer to detect whether the daemon is already running.
+     *
+     * This handles the case where the foreground service kept the daemon alive
+     * across a process death (via [START_STICKY]) but the newly created
+     * [DaemonServiceBridge] defaults to [ServiceState.STOPPED]. Without this
+     * probe, the UI would show the daemon as offline and attempts to start it
+     * would fail with "daemon already running".
+     *
+     * @param scope Background scope for the non-blocking probe.
+     */
+    private fun syncDaemonState(scope: CoroutineScope) {
+        scope.launch {
+            daemonBridge.syncState()
         }
     }
 
