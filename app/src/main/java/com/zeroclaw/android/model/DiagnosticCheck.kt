@@ -39,6 +39,9 @@ enum class DiagnosticCategory {
     /** Daemon and component health checks. */
     DAEMON_HEALTH,
 
+    /** Channel connectivity and health checks. */
+    CHANNELS,
+
     /** System-level prerequisites (battery, storage, permissions). */
     SYSTEM,
 }

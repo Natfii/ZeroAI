@@ -29,12 +29,14 @@ import com.zeroclaw.android.model.isExpired
 import com.zeroclaw.android.model.isOAuthToken
 import com.zeroclaw.android.util.BatteryOptimization
 import com.zeroclaw.ffi.FfiException
+import com.zeroclaw.ffi.doctorChannels
 import com.zeroclaw.ffi.getStatus
 import com.zeroclaw.ffi.validateConfig
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -172,6 +174,40 @@ class DoctorValidator(
         }
 
     /**
+     * Checks channel connectivity via the FFI [doctorChannels] function.
+     *
+     * Parses the TOML config and probes each configured channel for
+     * health without starting the daemon. Results are returned as
+     * individual [DiagnosticCheck] entries per channel.
+     *
+     * @param configToml The current TOML config string.
+     * @param dataDir The daemon data directory path.
+     * @return List of diagnostic checks for the channels category.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    suspend fun runChannelChecks(
+        configToml: String,
+        dataDir: String,
+    ): List<DiagnosticCheck> =
+        try {
+            val json =
+                withContext(ioDispatcher) {
+                    doctorChannels(configToml, dataDir)
+                }
+            parseChannelDiagnostics(json)
+        } catch (e: Exception) {
+            listOf(
+                DiagnosticCheck(
+                    id = "channels-error",
+                    category = DiagnosticCategory.CHANNELS,
+                    title = "Channel diagnostics",
+                    status = CheckStatus.FAIL,
+                    detail = "Failed to run channel checks: ${e.message}",
+                ),
+            )
+        }
+
+    /**
      * Checks system-level prerequisites: battery optimization, OEM
      * detection, storage space, and notification permission (Android 13+).
      *
@@ -184,6 +220,30 @@ class DoctorValidator(
         checks.add(checkStorage())
         checkNotificationPermission()?.let { checks.add(it) }
         return checks
+    }
+
+    private fun parseChannelDiagnostics(json: String): List<DiagnosticCheck> {
+        val array = JSONArray(json)
+        return (0 until array.length()).map { i ->
+            val obj = array.getJSONObject(i)
+            val name = obj.optString("name", "unknown")
+            val status = obj.optString("status", "unhealthy")
+            val detail = obj.optString("detail", "")
+            val healthy = status == "healthy"
+            DiagnosticCheck(
+                id = "channel-$name",
+                category = DiagnosticCategory.CHANNELS,
+                title = "Channel: $name",
+                status = if (healthy) CheckStatus.PASS else CheckStatus.FAIL,
+                detail =
+                    when {
+                        healthy -> "Connected"
+                        status == "timeout" -> "Health check timed out"
+                        detail.isNotBlank() -> detail
+                        else -> "Not responding"
+                    },
+            )
+        }
     }
 
     private fun checkNameUniqueness(agents: List<Agent>): DiagnosticCheck {
