@@ -10,6 +10,7 @@ import android.util.Log
 import com.zeroclaw.android.data.local.dao.PluginDao
 import com.zeroclaw.android.data.local.entity.PluginEntity
 import com.zeroclaw.android.data.local.entity.toModel
+import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.OfficialPlugins
 import com.zeroclaw.android.model.Plugin
 import com.zeroclaw.android.model.RemotePlugin
@@ -70,6 +71,31 @@ class RoomPluginRepository(
             }
         val updatedConfig = currentConfig + (key to value)
         dao.updateConfigJson(pluginId, json.encodeToString(updatedConfig))
+    }
+
+    /**
+     * Synchronises the enabled state of official plugins with [AppSettings].
+     *
+     * [AppSettings] is the source of truth for official plugin enabled
+     * state because it drives [ConfigTomlBuilder][com.zeroclaw.android.service.ConfigTomlBuilder].
+     * This method updates the Room entity to match.
+     *
+     * @param settings Current application settings to sync from.
+     */
+    override suspend fun syncOfficialPluginStates(settings: AppSettings) {
+        val mapping = mapOf(
+            OfficialPlugins.WEB_SEARCH to settings.webSearchEnabled,
+            OfficialPlugins.WEB_FETCH to settings.webFetchEnabled,
+            OfficialPlugins.HTTP_REQUEST to settings.httpRequestEnabled,
+            OfficialPlugins.BROWSER to settings.browserEnabled,
+            OfficialPlugins.COMPOSIO to settings.composioEnabled,
+            OfficialPlugins.VISION to true,
+            OfficialPlugins.TRANSCRIPTION to settings.transcriptionEnabled,
+            OfficialPlugins.QUERY_CLASSIFICATION to settings.queryClassificationEnabled,
+        )
+        for ((id, enabled) in mapping) {
+            dao.setEnabled(id, enabled)
+        }
     }
 
     /** Constants for [RoomPluginRepository]. */

@@ -83,6 +83,20 @@ interface PluginDao {
     suspend fun toggleEnabled(id: String)
 
     /**
+     * Sets the enabled state of the plugin with the given [id].
+     *
+     * Used by bidirectional sync to align Room with [AppSettings] state.
+     *
+     * @param id Unique plugin identifier.
+     * @param enabled New enabled state.
+     */
+    @Query("UPDATE plugins SET is_enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(
+        id: String,
+        enabled: Boolean,
+    )
+
+    /**
      * Updates the JSON config field for the given plugin.
      *
      * @param id Unique plugin identifier.

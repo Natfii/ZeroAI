@@ -6,6 +6,7 @@
 
 package com.zeroclaw.android.data.repository
 
+import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.Plugin
 import com.zeroclaw.android.model.RemotePlugin
 import kotlinx.coroutines.flow.Flow
@@ -80,4 +81,14 @@ interface PluginRepository {
      * @param remotePlugins List of plugin metadata from the remote registry.
      */
     suspend fun mergeRemotePlugins(remotePlugins: List<RemotePlugin>)
+
+    /**
+     * Synchronises the enabled state of official plugins with [AppSettings].
+     *
+     * [AppSettings] is the source of truth for official plugin enabled
+     * state. This method updates the Room entity to match.
+     *
+     * @param settings Current application settings to sync from.
+     */
+    suspend fun syncOfficialPluginStates(settings: AppSettings)
 }

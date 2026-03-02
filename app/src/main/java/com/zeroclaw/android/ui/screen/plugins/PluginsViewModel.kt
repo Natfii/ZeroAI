@@ -53,6 +53,14 @@ class PluginsViewModel(
     private val repository = app.pluginRepository
     private val settingsRepository = app.settingsRepository
 
+    init {
+        viewModelScope.launch {
+            settingsRepository.settings.first().let { settings ->
+                repository.syncOfficialPluginStates(settings)
+            }
+        }
+    }
+
     private val _selectedTab = MutableStateFlow(TAB_INSTALLED)
 
     /** Currently selected tab index. */
