@@ -456,6 +456,20 @@ interface SettingsRepository {
     suspend fun setHttpRequestAllowedDomains(domains: String)
 
     /**
+     * Sets the HTTP request maximum response body size in bytes.
+     *
+     * @param size Maximum response size in bytes.
+     */
+    suspend fun setHttpRequestMaxResponseSize(size: Int)
+
+    /**
+     * Sets the HTTP request timeout in seconds.
+     *
+     * @param secs Timeout in seconds.
+     */
+    suspend fun setHttpRequestTimeoutSecs(secs: Int)
+
+    /**
      * Toggles the web fetch tool.
      *
      * @param enabled Whether the web fetch tool is active.
@@ -734,6 +748,27 @@ interface SettingsRepository {
      * @param enabled Whether query classification is active.
      */
     suspend fun setQueryClassificationEnabled(enabled: Boolean)
+
+    /**
+     * Toggles the open-skills community repository.
+     *
+     * @param enabled Whether open-skills is enabled.
+     */
+    suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean)
+
+    /**
+     * Sets the custom open-skills directory path.
+     *
+     * @param dir Directory path or empty for default.
+     */
+    suspend fun setSkillsOpenSkillsDir(dir: String)
+
+    /**
+     * Sets the skill prompt injection mode.
+     *
+     * @param mode Injection mode: "full" or "compact".
+     */
+    suspend fun setSkillsPromptInjectionMode(mode: String)
 
     /**
      * Toggles proxy configuration.

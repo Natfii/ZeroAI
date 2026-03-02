@@ -124,6 +124,8 @@ data class AgentTomlEntry(
  * @property browserAllowedDomains Allowed browser domains list.
  * @property httpRequestEnabled Whether the HTTP request tool is enabled.
  * @property httpRequestAllowedDomains Allowed HTTP domains list.
+ * @property httpRequestMaxResponseSize Maximum response body size in bytes for HTTP requests.
+ * @property httpRequestTimeoutSecs Request timeout in seconds for HTTP requests.
  * @property transcriptionEnabled Whether audio transcription is active.
  * @property transcriptionApiUrl Transcription API endpoint URL.
  * @property transcriptionModel Transcription model name.
@@ -171,6 +173,9 @@ data class AgentTomlEntry(
  * @property memoryQdrantApiKey Qdrant API key for authenticated access.
  * @property embeddingRoutesJson JSON array of embedding route objects.
  * @property queryClassificationEnabled Whether query classification is active.
+ * @property skillsOpenSkillsEnabled Whether the open-skills community repository is enabled.
+ * @property skillsOpenSkillsDir Custom directory for open-skills repository.
+ * @property skillsPromptInjectionMode Skill prompt injection mode: "full" or "compact".
  * @property reliabilityBackoffMs Provider backoff duration in milliseconds.
  * @property reliabilityApiKeysJson JSON object mapping provider names to API keys.
  */
@@ -239,6 +244,8 @@ data class GlobalTomlConfig(
     val browserAllowedDomains: List<String> = emptyList(),
     val httpRequestEnabled: Boolean = false,
     val httpRequestAllowedDomains: List<String> = emptyList(),
+    val httpRequestMaxResponseSize: Int = DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE,
+    val httpRequestTimeoutSecs: Int = DEFAULT_HTTP_REQUEST_TIMEOUT_SECS,
     val transcriptionEnabled: Boolean = false,
     val transcriptionApiUrl: String = DEFAULT_TRANSCRIPTION_API_URL,
     val transcriptionModel: String = DEFAULT_TRANSCRIPTION_MODEL,
@@ -286,6 +293,9 @@ data class GlobalTomlConfig(
     val memoryQdrantApiKey: String = "",
     val embeddingRoutesJson: String = "[]",
     val queryClassificationEnabled: Boolean = false,
+    val skillsOpenSkillsEnabled: Boolean = false,
+    val skillsOpenSkillsDir: String = "",
+    val skillsPromptInjectionMode: String = "full",
     val reliabilityBackoffMs: Int = DEFAULT_RELIABILITY_BACKOFF_MS,
     val reliabilityApiKeysJson: String = "{}",
 ) {
@@ -403,6 +413,12 @@ data class GlobalTomlConfig(
 
         /** Default reliability backoff in milliseconds. */
         const val DEFAULT_RELIABILITY_BACKOFF_MS = 500
+
+        /** Default HTTP request max response size in bytes (1 MB). */
+        const val DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE = 1_000_000
+
+        /** Default HTTP request timeout in seconds. */
+        const val DEFAULT_HTTP_REQUEST_TIMEOUT_SECS = 30
     }
 }
 
@@ -553,6 +569,7 @@ object ConfigTomlBuilder {
             appendMemoryQdrantSection(config)
             appendEmbeddingRoutesSection(config)
             appendQueryClassificationSection(config)
+            appendSkillsSection(config)
         }
 
     /**
@@ -880,6 +897,12 @@ object ConfigTomlBuilder {
             val list = config.httpRequestAllowedDomains.joinToString(", ") { tomlString(it) }
             appendLine("allowed_domains = [$list]")
         }
+        if (config.httpRequestMaxResponseSize != GlobalTomlConfig.DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE) {
+            appendLine("max_response_size = ${config.httpRequestMaxResponseSize.coerceAtLeast(0)}")
+        }
+        if (config.httpRequestTimeoutSecs != GlobalTomlConfig.DEFAULT_HTTP_REQUEST_TIMEOUT_SECS) {
+            appendLine("timeout_secs = ${config.httpRequestTimeoutSecs.coerceAtLeast(0)}")
+        }
     }
 
     /**
@@ -1194,6 +1217,34 @@ object ConfigTomlBuilder {
         appendLine()
         appendLine("[query_classification]")
         appendLine("enabled = true")
+    }
+
+    /**
+     * Appends the `[skills]` TOML section when non-default values exist.
+     *
+     * Upstream fields: open_skills_enabled, open_skills_dir, prompt_injection_mode.
+     *
+     * @param config Configuration to read skills values from.
+     */
+    private fun StringBuilder.appendSkillsSection(config: GlobalTomlConfig) {
+        val hasNonDefault = config.skillsOpenSkillsEnabled ||
+            config.skillsOpenSkillsDir.isNotBlank() ||
+            config.skillsPromptInjectionMode != "full"
+        if (!hasNonDefault) return
+
+        appendLine()
+        appendLine("[skills]")
+        if (config.skillsOpenSkillsEnabled) {
+            appendLine("open_skills_enabled = true")
+        }
+        if (config.skillsOpenSkillsDir.isNotBlank()) {
+            appendLine("open_skills_dir = ${tomlString(config.skillsOpenSkillsDir)}")
+        }
+        if (config.skillsPromptInjectionMode != "full") {
+            appendLine(
+                "prompt_injection_mode = ${tomlString(config.skillsPromptInjectionMode)}",
+            )
+        }
     }
 
     /**

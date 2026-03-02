@@ -71,6 +71,8 @@ package com.zeroclaw.android.model
  * @property browserAllowedDomains Comma-separated list of allowed browser domains.
  * @property httpRequestEnabled Whether the HTTP request tool is enabled.
  * @property httpRequestAllowedDomains Comma-separated list of allowed HTTP domains.
+ * @property httpRequestMaxResponseSize Maximum response body size in bytes for HTTP requests.
+ * @property httpRequestTimeoutSecs Request timeout in seconds for HTTP requests.
  * @property webFetchEnabled Whether the web fetch tool is active.
  * @property webFetchAllowedDomains Comma-separated allowed domains for web fetch.
  * @property webFetchBlockedDomains Comma-separated blocked domains for web fetch.
@@ -111,6 +113,9 @@ package com.zeroclaw.android.model
  * @property memoryQdrantApiKey Qdrant API key.
  * @property embeddingRoutesJson JSON array of embedding route objects.
  * @property queryClassificationEnabled Whether automatic query classification is active.
+ * @property skillsOpenSkillsEnabled Whether the open-skills community repository is enabled.
+ * @property skillsOpenSkillsDir Custom directory for open-skills repository. Empty uses default.
+ * @property skillsPromptInjectionMode Skill prompt injection mode: "full" or "compact".
  * @property proxyEnabled Whether proxy configuration is active.
  * @property proxyHttpProxy HTTP proxy URL.
  * @property proxyHttpsProxy HTTPS proxy URL.
@@ -194,6 +199,8 @@ data class AppSettings(
     val browserAllowedDomains: String = "",
     val httpRequestEnabled: Boolean = false,
     val httpRequestAllowedDomains: String = "",
+    val httpRequestMaxResponseSize: Int = DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE,
+    val httpRequestTimeoutSecs: Int = DEFAULT_HTTP_REQUEST_TIMEOUT_SECS,
     val webFetchEnabled: Boolean = false,
     val webFetchAllowedDomains: String = "",
     val webFetchBlockedDomains: String = "",
@@ -234,6 +241,9 @@ data class AppSettings(
     val memoryQdrantApiKey: String = "",
     val embeddingRoutesJson: String = "[]",
     val queryClassificationEnabled: Boolean = false,
+    val skillsOpenSkillsEnabled: Boolean = false,
+    val skillsOpenSkillsDir: String = "",
+    val skillsPromptInjectionMode: String = "full",
     val proxyEnabled: Boolean = false,
     val proxyHttpProxy: String = "",
     val proxyHttpsProxy: String = "",
@@ -343,6 +353,12 @@ data class AppSettings(
 
         /** Default lock timeout in minutes. */
         const val DEFAULT_LOCK_TIMEOUT = 15
+
+        /** Default HTTP request max response size in bytes (1 MB). */
+        const val DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE = 1_000_000
+
+        /** Default HTTP request timeout in seconds. */
+        const val DEFAULT_HTTP_REQUEST_TIMEOUT_SECS = 30
 
         /** Default web fetch max response size in bytes (500 KB). */
         const val DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE = 500_000

@@ -173,6 +173,12 @@ class DataStoreSettingsRepository(
             browserAllowedDomains = prefs[KEY_BROWSER_DOMAINS] ?: "",
             httpRequestEnabled = prefs[KEY_HTTP_REQ_ENABLED] ?: false,
             httpRequestAllowedDomains = prefs[KEY_HTTP_REQ_DOMAINS] ?: "",
+            httpRequestMaxResponseSize =
+                prefs[KEY_HTTP_REQUEST_MAX_RESPONSE_SIZE]
+                    ?: AppSettings.DEFAULT_HTTP_REQUEST_MAX_RESPONSE_SIZE,
+            httpRequestTimeoutSecs =
+                prefs[KEY_HTTP_REQUEST_TIMEOUT_SECS]
+                    ?: AppSettings.DEFAULT_HTTP_REQUEST_TIMEOUT_SECS,
             lockEnabled = prefs[KEY_LOCK_ENABLED] ?: false,
             lockTimeoutMinutes =
                 prefs[KEY_LOCK_TIMEOUT]
@@ -269,6 +275,9 @@ class DataStoreSettingsRepository(
             memoryQdrantApiKey = securePrefs.getString(SEC_MEMORY_QDRANT_API_KEY, "") ?: "",
             embeddingRoutesJson = prefs[KEY_EMBEDDING_ROUTES_JSON] ?: "[]",
             queryClassificationEnabled = prefs[KEY_QUERY_CLASSIFICATION_ENABLED] ?: false,
+            skillsOpenSkillsEnabled = prefs[KEY_SKILLS_OPEN_SKILLS_ENABLED] ?: false,
+            skillsOpenSkillsDir = prefs[KEY_SKILLS_OPEN_SKILLS_DIR] ?: "",
+            skillsPromptInjectionMode = prefs[KEY_SKILLS_PROMPT_INJECTION_MODE] ?: "full",
             proxyEnabled = prefs[KEY_PROXY_ENABLED] ?: false,
             proxyHttpProxy = prefs[KEY_PROXY_HTTP_PROXY] ?: "",
             proxyHttpsProxy = prefs[KEY_PROXY_HTTPS_PROXY] ?: "",
@@ -409,6 +418,10 @@ class DataStoreSettingsRepository(
 
     override suspend fun setHttpRequestAllowedDomains(domains: String) = edit { it[KEY_HTTP_REQ_DOMAINS] = domains }
 
+    override suspend fun setHttpRequestMaxResponseSize(size: Int) = edit { it[KEY_HTTP_REQUEST_MAX_RESPONSE_SIZE] = size }
+
+    override suspend fun setHttpRequestTimeoutSecs(secs: Int) = edit { it[KEY_HTTP_REQUEST_TIMEOUT_SECS] = secs }
+
     override suspend fun setWebFetchEnabled(enabled: Boolean) = edit { it[KEY_WEB_FETCH_ENABLED] = enabled }
 
     override suspend fun setWebFetchAllowedDomains(domains: String) = edit { it[KEY_WEB_FETCH_ALLOWED_DOMAINS] = domains }
@@ -488,6 +501,12 @@ class DataStoreSettingsRepository(
     override suspend fun setEmbeddingRoutesJson(json: String) = edit { it[KEY_EMBEDDING_ROUTES_JSON] = json }
 
     override suspend fun setQueryClassificationEnabled(enabled: Boolean) = edit { it[KEY_QUERY_CLASSIFICATION_ENABLED] = enabled }
+
+    override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) = edit { it[KEY_SKILLS_OPEN_SKILLS_ENABLED] = enabled }
+
+    override suspend fun setSkillsOpenSkillsDir(dir: String) = edit { it[KEY_SKILLS_OPEN_SKILLS_DIR] = dir }
+
+    override suspend fun setSkillsPromptInjectionMode(mode: String) = edit { it[KEY_SKILLS_PROMPT_INJECTION_MODE] = mode }
 
     override suspend fun setProxyEnabled(enabled: Boolean) = edit { it[KEY_PROXY_ENABLED] = enabled }
 
@@ -667,6 +686,11 @@ class DataStoreSettingsRepository(
         val KEY_MEMORY_QDRANT_API_KEY = stringPreferencesKey("memory_qdrant_api_key")
         val KEY_EMBEDDING_ROUTES_JSON = stringPreferencesKey("embedding_routes_json")
         val KEY_QUERY_CLASSIFICATION_ENABLED = booleanPreferencesKey("query_classification_enabled")
+        val KEY_HTTP_REQUEST_MAX_RESPONSE_SIZE = intPreferencesKey("http_request_max_response_size")
+        val KEY_HTTP_REQUEST_TIMEOUT_SECS = intPreferencesKey("http_request_timeout_secs")
+        val KEY_SKILLS_OPEN_SKILLS_ENABLED = booleanPreferencesKey("skills_open_skills_enabled")
+        val KEY_SKILLS_OPEN_SKILLS_DIR = stringPreferencesKey("skills_open_skills_dir")
+        val KEY_SKILLS_PROMPT_INJECTION_MODE = stringPreferencesKey("skills_prompt_injection_mode")
         val KEY_PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
         val KEY_PROXY_HTTP_PROXY = stringPreferencesKey("proxy_http_proxy")
         val KEY_PROXY_HTTPS_PROXY = stringPreferencesKey("proxy_https_proxy")
