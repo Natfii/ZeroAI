@@ -40,6 +40,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -53,6 +54,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.model.Plugin
 import com.zeroclaw.android.ui.component.CategoryBadge
 import com.zeroclaw.android.ui.component.EmptyState
+import com.zeroclaw.android.ui.component.OfficialPluginBadge
+import com.zeroclaw.android.ui.component.PluginSectionHeader
 
 /**
  * Aggregated state for the plugins content composable.
@@ -269,6 +272,19 @@ private fun PluginTabContent(
                     "No plugins match your search"
                 },
         )
+    } else if (selectedTab == TAB_INSTALLED) {
+        val officialPlugins by remember(plugins) {
+            derivedStateOf { plugins.filter { it.isOfficial } }
+        }
+        val communityPlugins by remember(plugins) {
+            derivedStateOf { plugins.filter { !it.isOfficial } }
+        }
+        InstalledTabContent(
+            officialPlugins = officialPlugins,
+            communityPlugins = communityPlugins,
+            onToggle = onToggle,
+            onNavigateToDetail = onNavigateToDetail,
+        )
     } else {
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -278,10 +294,6 @@ private fun PluginTabContent(
                 key = { it.id },
                 contentType = { "plugin" },
             ) { plugin ->
-                val onToggleItem =
-                    remember(plugin.id) {
-                        { onToggle(plugin.id) }
-                    }
                 val onInstallItem =
                     remember(plugin.id) {
                         { onInstall(plugin.id) }
@@ -292,8 +304,77 @@ private fun PluginTabContent(
                     }
                 PluginListItem(
                     plugin = plugin,
-                    onToggle = onToggleItem,
+                    onToggle = {},
                     onInstall = onInstallItem,
+                    onClick = onClickItem,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Content for the Installed tab with two sections: Official Tools and
+ * Installed Plugins.
+ *
+ * Uses [PluginSectionHeader] to separate the sections and
+ * [OfficialPluginBadge] on official plugin items.
+ *
+ * @param officialPlugins Official built-in plugins.
+ * @param communityPlugins Community-installed plugins.
+ * @param onToggle Callback when a plugin's enable switch is toggled.
+ * @param onNavigateToDetail Callback to navigate to plugin detail.
+ */
+@Composable
+private fun InstalledTabContent(
+    officialPlugins: List<Plugin>,
+    communityPlugins: List<Plugin>,
+    onToggle: (String) -> Unit,
+    onNavigateToDetail: (String) -> Unit,
+) {
+    LazyColumn(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (officialPlugins.isNotEmpty()) {
+            item(key = "header-official", contentType = "section-header") {
+                PluginSectionHeader(
+                    title = "Official Tools",
+                    count = officialPlugins.size,
+                )
+            }
+            items(
+                items = officialPlugins,
+                key = { it.id },
+                contentType = { "official-plugin" },
+            ) { plugin ->
+                val onToggleItem = remember(plugin.id) { { onToggle(plugin.id) } }
+                val onClickItem = remember(plugin.id) { { onNavigateToDetail(plugin.id) } }
+                PluginListItem(
+                    plugin = plugin,
+                    onToggle = onToggleItem,
+                    onInstall = {},
+                    onClick = onClickItem,
+                )
+            }
+        }
+        if (communityPlugins.isNotEmpty()) {
+            item(key = "header-community", contentType = "section-header") {
+                PluginSectionHeader(
+                    title = "Installed Plugins",
+                    count = communityPlugins.size,
+                )
+            }
+            items(
+                items = communityPlugins,
+                key = { it.id },
+                contentType = { "community-plugin" },
+            ) { plugin ->
+                val onToggleItem = remember(plugin.id) { { onToggle(plugin.id) } }
+                val onClickItem = remember(plugin.id) { { onNavigateToDetail(plugin.id) } }
+                PluginListItem(
+                    plugin = plugin,
+                    onToggle = onToggleItem,
+                    onInstall = {},
                     onClick = onClickItem,
                 )
             }
@@ -305,7 +386,8 @@ private fun PluginTabContent(
  * Single plugin row in the list.
  *
  * Shows an "Update available" badge when the plugin is installed and
- * a newer remote version exists.
+ * a newer remote version exists. Shows [OfficialPluginBadge] for
+ * official built-in plugins.
  *
  * @param plugin The plugin to display.
  * @param onToggle Callback when the enable switch is toggled.
@@ -343,6 +425,10 @@ private fun PluginListItem(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     CategoryBadge(category = plugin.category)
+                    if (plugin.isOfficial) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OfficialPluginBadge()
+                    }
                     if (hasUpdate) {
                         Spacer(modifier = Modifier.width(8.dp))
                         Box(
