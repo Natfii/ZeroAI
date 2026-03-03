@@ -33,6 +33,7 @@ mod streaming;
 mod tools_browse;
 mod traces;
 mod types;
+mod url_helpers;
 mod vision;
 mod workspace;
 
