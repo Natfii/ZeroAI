@@ -11,13 +11,15 @@
 //! of the workspace skills directory. Install and remove operations
 //! are not available until the upstream exposes a gateway API for them.
 
+use std::collections::HashMap;
+
 use crate::error::FfiError;
 
 /// A skill loaded from the workspace skills directory.
 ///
-/// Fields are populated by scanning `skill.toml` manifests from the
-/// workspace directory, since the upstream `Skill` type is no longer
-/// accessible from outside the crate.
+/// Fields are populated by scanning `SKILL.toml` (or `skill.toml`)
+/// manifests from the workspace directory, since the upstream `Skill`
+/// type is no longer accessible from outside the crate.
 #[derive(Debug, Clone, serde::Serialize, uniffi::Record)]
 pub struct FfiSkill {
     /// Display name of the skill.
@@ -77,12 +79,73 @@ pub(crate) struct ToolManifest {
     pub(crate) kind: String,
     #[serde(default)]
     pub(crate) command: String,
+    /// Optional named arguments for the tool (upstream `SkillTool.args`).
+    #[serde(default)]
+    pub(crate) args: HashMap<String, String>,
+}
+
+/// Wrapper for the upstream nested `[skill]` section format.
+///
+/// Upstream `SKILL.toml` files wrap skill metadata under a `[skill]`
+/// table key, with `[[tools]]` at the top level. This struct enables
+/// serde to parse that format before falling back to the flat layout.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct WrappedSkillManifest {
+    /// The nested `[skill]` section containing skill metadata.
+    pub(crate) skill: SkillManifest,
+    /// Top-level `[[tools]]` array (outside the `[skill]` section).
+    #[serde(default)]
+    pub(crate) tools: Vec<ToolManifest>,
+}
+
+/// Resolves the manifest file path for a skill directory.
+///
+/// Tries `SKILL.toml` first (upstream convention), then falls back
+/// to `skill.toml` for backward compatibility. Returns `None` if
+/// neither file exists.
+fn resolve_manifest_path(skill_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let upper = skill_dir.join("SKILL.toml");
+    if upper.is_file() {
+        return Some(upper);
+    }
+    let lower = skill_dir.join("skill.toml");
+    if lower.is_file() {
+        return Some(lower);
+    }
+    None
+}
+
+/// Parses a TOML manifest string into a `(SkillManifest, Vec<ToolManifest>)`.
+///
+/// Tries the upstream nested `[skill]` section format first, then
+/// falls back to the flat format for backward compatibility.
+fn parse_manifest(content: &str) -> Option<(SkillManifest, Vec<ToolManifest>)> {
+    if let Ok(wrapped) = toml::from_str::<WrappedSkillManifest>(content) {
+        return Some((wrapped.skill, wrapped.tools));
+    }
+    if let Ok(flat) = toml::from_str::<SkillManifest>(content) {
+        let tools = flat.tools;
+        let skill = SkillManifest {
+            tools: Vec::new(),
+            ..flat
+        };
+        return Some((skill, tools));
+    }
+    None
+}
+
+/// Returns `true` if a tool command contains path traversal sequences.
+fn has_path_traversal(command: &str) -> bool {
+    command.contains("..")
 }
 
 /// Scans the workspace skills directory for skill manifests.
 ///
-/// Reads `skill.toml` from each subdirectory of `{workspace}/skills/`.
-/// Returns an empty vec if the directory doesn't exist or has no skills.
+/// Reads `SKILL.toml` (or `skill.toml` as fallback) from each
+/// subdirectory of `{workspace}/skills/`. Tools whose command
+/// contains `..` are silently dropped (path traversal prevention).
+/// Returns an empty vec if the directory doesn't exist or has no
+/// skills.
 pub(crate) fn load_skills_from_workspace(
     workspace_dir: &std::path::Path,
 ) -> Vec<(SkillManifest, Vec<ToolManifest>)> {
@@ -97,25 +160,26 @@ pub(crate) fn load_skills_from_workspace(
         if !path.is_dir() {
             continue;
         }
-        let manifest_path = path.join("skill.toml");
-        if let Ok(content) = std::fs::read_to_string(&manifest_path)
-            && let Ok(manifest) = toml::from_str::<SkillManifest>(&content)
-        {
-            let tools = manifest.tools;
-            let skill = SkillManifest {
-                name: if manifest.name.is_empty() {
-                    entry.file_name().to_string_lossy().into_owned()
-                } else {
-                    manifest.name
-                },
-                description: manifest.description,
-                version: manifest.version,
-                author: manifest.author,
-                tags: manifest.tags,
-                tools: Vec::new(),
-            };
-            result.push((skill, tools));
+        let Some(manifest_path) = resolve_manifest_path(&path) else {
+            continue;
+        };
+        let Ok(content) = std::fs::read_to_string(&manifest_path) else {
+            continue;
+        };
+        let Some((mut skill, tools)) = parse_manifest(&content) else {
+            continue;
+        };
+
+        if skill.name.is_empty() {
+            skill.name = entry.file_name().to_string_lossy().into_owned();
         }
+
+        let safe_tools: Vec<ToolManifest> = tools
+            .into_iter()
+            .filter(|t| !has_path_traversal(&t.command))
+            .collect();
+
+        result.push((skill, safe_tools));
     }
     result
 }
@@ -232,10 +296,10 @@ fn install_skill_from_url(url: &str, skills_dir: &std::path::Path) -> Result<(),
         });
     }
 
-    if !dest.join("skill.toml").exists() {
+    if resolve_manifest_path(&dest).is_none() {
         let _ = std::fs::remove_dir_all(&dest);
         return Err(FfiError::ConfigError {
-            detail: format!("cloned repository has no skill.toml manifest: {url}"),
+            detail: format!("cloned repository has no SKILL.toml or skill.toml manifest: {url}"),
         });
     }
 
@@ -251,9 +315,9 @@ fn install_skill_from_path(source: &str, skills_dir: &std::path::Path) -> Result
         });
     }
 
-    if !src_path.join("skill.toml").exists() {
+    if resolve_manifest_path(src_path).is_none() {
         return Err(FfiError::ConfigError {
-            detail: format!("source directory has no skill.toml manifest: {source}"),
+            detail: format!("source directory has no SKILL.toml or skill.toml manifest: {source}"),
         });
     }
 
@@ -408,7 +472,7 @@ mod tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             FfiError::ConfigError { detail } => {
-                assert!(detail.contains("no skill.toml"));
+                assert!(detail.contains("no SKILL.toml or skill.toml"));
             }
             other => panic!("expected ConfigError, got {other:?}"),
         }
@@ -476,10 +540,11 @@ mod tests {
     }
 
     #[test]
-    fn test_load_skills_with_manifest() {
-        let temp = std::env::temp_dir().join("zeroclaw_test_skills_manifest");
+    fn test_load_skills_with_flat_manifest() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_flat");
+        let _ = std::fs::remove_dir_all(&temp);
         let skill_dir = temp.join("skills").join("test-skill");
-        let _ = std::fs::create_dir_all(&skill_dir);
+        std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("skill.toml"),
             r#"
@@ -503,6 +568,321 @@ command = "echo a"
         assert_eq!(result[0].0.name, "test-skill");
         assert_eq!(result[0].1.len(), 1);
         assert_eq!(result[0].1[0].name, "tool-a");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_load_skills_uppercase_filename() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_upper");
+        let _ = std::fs::remove_dir_all(&temp);
+        let skill_dir = temp.join("skills").join("upper-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.toml"),
+            r#"
+name = "upper-skill"
+description = "Skill with uppercase filename"
+version = "2.0.0"
+
+[[tools]]
+name = "tool-upper"
+description = "Upper tool"
+kind = "shell"
+command = "echo upper"
+"#,
+        )
+        .unwrap();
+
+        let result = load_skills_from_workspace(&temp);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0.name, "upper-skill");
+        assert_eq!(result[0].0.version, "2.0.0");
+        assert_eq!(result[0].1.len(), 1);
+        assert_eq!(result[0].1[0].name, "tool-upper");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// On case-sensitive filesystems (Linux, Android) `SKILL.toml` is
+    /// preferred over `skill.toml` when both exist. On case-insensitive
+    /// filesystems (Windows/NTFS) the two names alias to the same file,
+    /// so we simply verify that at least one is found.
+    #[test]
+    fn test_load_skills_uppercase_preferred_over_lowercase() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_priority");
+        let _ = std::fs::remove_dir_all(&temp);
+        let skill_dir = temp.join("skills").join("prio-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let upper = skill_dir.join("SKILL.toml");
+        let lower = skill_dir.join("skill.toml");
+
+        std::fs::write(&upper, "name = \"from-upper\"\nversion = \"1.0.0\"\n").unwrap();
+        std::fs::write(&lower, "name = \"from-lower\"\nversion = \"1.0.0\"\n").unwrap();
+
+        let case_sensitive = upper.exists() && lower.exists() && {
+            let u = std::fs::read_to_string(&upper).unwrap();
+            let l = std::fs::read_to_string(&lower).unwrap();
+            u != l
+        };
+
+        let result = load_skills_from_workspace(&temp);
+        assert_eq!(result.len(), 1);
+
+        if case_sensitive {
+            assert_eq!(result[0].0.name, "from-upper");
+        } else {
+            assert!(result[0].0.name == "from-upper" || result[0].0.name == "from-lower");
+        }
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_load_skills_nested_skill_section() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_nested");
+        let _ = std::fs::remove_dir_all(&temp);
+        let skill_dir = temp.join("skills").join("nested-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.toml"),
+            r#"
+[skill]
+name = "nested-skill"
+description = "A nested-format skill"
+version = "3.0.0"
+author = "upstream"
+tags = ["nested", "test"]
+
+[[tools]]
+name = "tool-nested"
+description = "Nested tool"
+kind = "http"
+command = "https://example.com/api"
+"#,
+        )
+        .unwrap();
+
+        let result = load_skills_from_workspace(&temp);
+        assert_eq!(result.len(), 1);
+        let (skill, tools) = &result[0];
+        assert_eq!(skill.name, "nested-skill");
+        assert_eq!(skill.description, "A nested-format skill");
+        assert_eq!(skill.version, "3.0.0");
+        assert_eq!(skill.author.as_deref(), Some("upstream"));
+        assert_eq!(skill.tags, vec!["nested", "test"]);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "tool-nested");
+        assert_eq!(tools[0].kind, "http");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_tool_args_parsed() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_args");
+        let _ = std::fs::remove_dir_all(&temp);
+        let skill_dir = temp.join("skills").join("args-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.toml"),
+            r#"
+name = "args-skill"
+version = "1.0.0"
+
+[[tools]]
+name = "tool-with-args"
+description = "Tool with args"
+kind = "shell"
+command = "curl"
+
+[tools.args]
+url = "https://example.com"
+method = "GET"
+"#,
+        )
+        .unwrap();
+
+        let result = load_skills_from_workspace(&temp);
+        assert_eq!(result.len(), 1);
+        let tool = &result[0].1[0];
+        assert_eq!(tool.name, "tool-with-args");
+        assert_eq!(tool.args.len(), 2);
+        assert_eq!(tool.args.get("url").unwrap(), "https://example.com");
+        assert_eq!(tool.args.get("method").unwrap(), "GET");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_tool_args_default_empty() {
+        let content = r#"
+name = "no-args"
+version = "1.0.0"
+
+[[tools]]
+name = "simple-tool"
+description = "No args"
+kind = "shell"
+command = "echo hello"
+"#;
+        let (_, tools) = parse_manifest(content).unwrap();
+        assert_eq!(tools.len(), 1);
+        assert!(tools[0].args.is_empty());
+    }
+
+    #[test]
+    fn test_path_traversal_in_tool_command_rejected() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_skills_traversal");
+        let _ = std::fs::remove_dir_all(&temp);
+        let skill_dir = temp.join("skills").join("traverse-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.toml"),
+            r#"
+name = "traverse-skill"
+version = "1.0.0"
+
+[[tools]]
+name = "safe-tool"
+description = "Safe"
+kind = "shell"
+command = "echo safe"
+
+[[tools]]
+name = "evil-tool"
+description = "Evil"
+kind = "shell"
+command = "../../etc/passwd"
+
+[[tools]]
+name = "also-evil"
+description = "Also evil"
+kind = "shell"
+command = "cat ../secret.txt"
+"#,
+        )
+        .unwrap();
+
+        let result = load_skills_from_workspace(&temp);
+        assert_eq!(result.len(), 1);
+        let tools = &result[0].1;
+        assert_eq!(tools.len(), 1, "only the safe tool should remain");
+        assert_eq!(tools[0].name, "safe-tool");
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_has_path_traversal() {
+        assert!(has_path_traversal("../../etc/passwd"));
+        assert!(has_path_traversal("cat ../secret"));
+        assert!(has_path_traversal("ls .."));
+        assert!(!has_path_traversal("echo hello"));
+        assert!(!has_path_traversal("/usr/bin/ls"));
+        assert!(!has_path_traversal("curl https://example.com"));
+    }
+
+    #[test]
+    fn test_parse_manifest_nested_format() {
+        let content = r#"
+[skill]
+name = "nested"
+description = "Nested format"
+version = "1.0.0"
+
+[[tools]]
+name = "t1"
+description = "Tool 1"
+kind = "shell"
+command = "echo 1"
+"#;
+        let (skill, tools) = parse_manifest(content).unwrap();
+        assert_eq!(skill.name, "nested");
+        assert_eq!(skill.description, "Nested format");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "t1");
+    }
+
+    #[test]
+    fn test_parse_manifest_flat_format() {
+        let content = r#"
+name = "flat"
+description = "Flat format"
+version = "2.0.0"
+
+[[tools]]
+name = "t2"
+description = "Tool 2"
+kind = "script"
+command = "run.sh"
+"#;
+        let (skill, tools) = parse_manifest(content).unwrap();
+        assert_eq!(skill.name, "flat");
+        assert_eq!(skill.description, "Flat format");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "t2");
+    }
+
+    #[test]
+    fn test_parse_manifest_invalid_toml() {
+        let content = "this is {{ not valid toml";
+        assert!(parse_manifest(content).is_none());
+    }
+
+    /// Verifies manifest resolution with only `skill.toml` present,
+    /// then checks that `SKILL.toml` is found when added. On
+    /// case-insensitive filesystems both names alias to the same
+    /// file, so we just verify a path is returned.
+    #[test]
+    fn test_resolve_manifest_path_prefers_uppercase() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_resolve_manifest");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&temp).unwrap();
+
+        assert!(resolve_manifest_path(&temp).is_none());
+
+        std::fs::write(temp.join("skill.toml"), "name = \"low\"\n").unwrap();
+        let path = resolve_manifest_path(&temp).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.eq_ignore_ascii_case("skill.toml"),
+            "expected skill.toml variant, got {name}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("SKILL.toml"), "name = \"up\"\n").unwrap();
+        let path = resolve_manifest_path(&temp).unwrap();
+        let name = path.file_name().unwrap().to_string_lossy();
+        assert!(
+            name.eq_ignore_ascii_case("skill.toml"),
+            "expected SKILL.toml variant, got {name}"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_install_skill_from_local_path_uppercase_manifest() {
+        let temp = std::env::temp_dir().join("zeroclaw_test_install_upper");
+        let source_dir = temp.join("upper-source");
+        let _ = std::fs::remove_dir_all(&temp);
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(
+            source_dir.join("SKILL.toml"),
+            "name = \"upper-install\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+
+        let skills_dir = temp.join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+
+        let result = install_skill_from_path(&source_dir.to_string_lossy(), &skills_dir);
+        assert!(result.is_ok());
+        assert!(skills_dir.join("upper-source").join("SKILL.toml").exists());
 
         let _ = std::fs::remove_dir_all(&temp);
     }
