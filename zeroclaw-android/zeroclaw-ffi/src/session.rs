@@ -1999,33 +1999,23 @@ fn clear_cancel_token() {
 /// Builds the Android-appropriate tool description list for the system prompt.
 ///
 /// Returns `(tool_name, description)` pairs matching the subset of tools
-/// available on Android. Hardware peripherals, composio, and screenshot
-/// tools are excluded because they require desktop-only capabilities.
+/// available in an Android agent session. This is a strict subset of the
+/// tools available via daemon channel routing.
 ///
-/// Conditional tools (`browser_open`, `delegate`) are included only when
-/// their corresponding config sections are enabled/non-empty.
+/// Session tools include: memory (store/recall/forget), cron (add/list/remove),
+/// and optionally web_fetch, http_request, browser_open, and delegate.
+///
+/// Shell and file I/O tools (`shell`, `file_read`, `file_write`) are NOT
+/// included here — those tools are only available via daemon channel tools
+/// and cannot be executed within a session context.
+///
+/// Hardware peripherals, composio, and screenshot tools are excluded because
+/// they require desktop-only capabilities.
+///
+/// Conditional tools (`web_fetch`, `http_request`, `browser_open`, `delegate`)
+/// are included only when their corresponding config sections are enabled/non-empty.
 fn build_android_tool_descs(config: &zeroclaw::Config) -> Vec<(String, String)> {
     let mut descs: Vec<(String, String)> = vec![
-        (
-            "shell".into(),
-            "Execute terminal commands. Use when: running local checks, \
-             build/test commands, diagnostics. Don't use when: a safer \
-             dedicated tool exists, or command is destructive without approval."
-                .into(),
-        ),
-        (
-            "file_read".into(),
-            "Read file contents. Use when: inspecting project files, \
-             configs, logs. Don't use when: a targeted search is enough."
-                .into(),
-        ),
-        (
-            "file_write".into(),
-            "Write file contents. Use when: applying focused edits, \
-             scaffolding files, updating docs/code. Don't use when: \
-             side effects are unclear or file ownership is uncertain."
-                .into(),
-        ),
         (
             "memory_store".into(),
             "Save to memory. Use when: preserving durable preferences, \
@@ -2074,6 +2064,27 @@ fn build_android_tool_descs(config: &zeroclaw::Config) -> Vec<(String, String)> 
             "delegate".into(),
             "Delegate a sub-task to a specialized agent. Use when: task \
              needs different model/capability, or to parallelize work."
+                .into(),
+        ));
+    }
+
+    if config.web_fetch.enabled {
+        descs.push((
+            "web_fetch".into(),
+            "Fetch a web page and return its content as clean text. \
+             Use when: gathering web content, reading documentation, \
+             checking APIs. Don't use when: making API calls with custom \
+             headers (use http_request instead)."
+                .into(),
+        ));
+    }
+
+    if config.http_request.enabled {
+        descs.push((
+            "http_request".into(),
+            "Make HTTP requests to external APIs with custom methods and \
+             headers. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS. \
+             Use when: calling REST APIs, webhooks, external services."
                 .into(),
         ));
     }
