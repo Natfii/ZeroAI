@@ -76,7 +76,7 @@ pub fn init_logging() {
                     "debug,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn,tower=warn",
                 )
             } else {
-                EnvFilter::new("warn")
+                EnvFilter::new("info,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn,tower=warn")
             };
 
             if let Ok(layer) = tracing_android::layer("zeroai_ffi") {
@@ -3052,7 +3052,7 @@ mod tests {
     #[test]
     fn test_get_version() {
         let version = get_version().unwrap();
-        assert_eq!(version, "0.1.0");
+        assert_eq!(version, "0.1.1");
     }
 
     #[test]
@@ -3357,6 +3357,6 @@ mod tests {
         assert!(panic_result.is_err());
 
         let version = get_version().unwrap();
-        assert_eq!(version, "0.1.0");
+        assert_eq!(version, "0.1.1");
     }
 }
