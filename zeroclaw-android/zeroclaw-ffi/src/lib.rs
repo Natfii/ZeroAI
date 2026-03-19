@@ -76,7 +76,9 @@ pub fn init_logging() {
                     "debug,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn,tower=warn",
                 )
             } else {
-                EnvFilter::new("info,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn,tower=warn")
+                EnvFilter::new(
+                    "info,hyper=warn,hyper_util=warn,reqwest=warn,rustls=warn,h2=warn,tower=warn",
+                )
             };
 
             if let Ok(layer) = tracing_android::layer("zeroai_ffi") {
