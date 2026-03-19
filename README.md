@@ -36,11 +36,10 @@
 
 **Zero** is an Android AI agent app built with Kotlin, Rust, and UniFFI. It runs a
 long-lived on-device service, exposes tools through a native [Zeroclaw] Rust core, and provides a
+
 Compose UI for configuring and operating the agent.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/9b839513-0e19-409c-a34d-4a0856cacdd3" alt="Zero screenshots" width="33%" />
-</p>
+<p align="Center"><img src="https://github.com/user-attachments/assets/429db2eb-602b-4696-a414-46dc8dd744e0" alt="Zero screenshots" width="33%" /> <img src="https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80" alt="Zero screenshots" width="33%" /></p>
 
 ## Project status
 
@@ -115,10 +114,6 @@ That means your in-app Zero can live inside the app, speak through connected cha
 - vision / multimodal support
 - smart message routing + provider cascade
 - Twitter/X browsing via authenticated cookies
-
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80" alt="Zero screenshots" width="33%" />
-</p>
 
 ### Core systems
 
