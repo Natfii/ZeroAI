@@ -917,6 +917,8 @@ class TerminalViewModel(
             }
 
             val chatProviderConfigured = isChatProviderConfigured()
+            if (handleManagedAuthFallback(chatProviderConfigured)) return@launch
+
             val decision =
                 decideDefaultChatRouting(
                     hasConfiguredCloudProvider = chatProviderConfigured,
@@ -936,7 +938,7 @@ class TerminalViewModel(
 
             if (!chatProviderConfigured) {
                 repository.append(
-                    content = unsupportedManagedChatWarning() ?: NO_PROVIDER_WARNING,
+                    content = NO_PROVIDER_WARNING,
                     entryType = ENTRY_TYPE_SYSTEM,
                 )
                 return@launch
@@ -944,6 +946,19 @@ class TerminalViewModel(
 
             executeAgentTurn(displayText, images)
         }
+    }
+
+    /**
+     * Shows a warning when only managed (non-daemon) auth is connected.
+     *
+     * @return `true` if the warning was shown and the caller should abort.
+     */
+    private suspend fun handleManagedAuthFallback(chatProviderConfigured: Boolean): Boolean {
+        if (chatProviderConfigured) return false
+        val warning = unsupportedManagedChatWarning() ?: return false
+        logRepository.append(LogSeverity.DEBUG, TAG, "Managed auth connected but not daemon-usable")
+        repository.append(content = warning, entryType = ENTRY_TYPE_SYSTEM)
+        return true
     }
 
     /**

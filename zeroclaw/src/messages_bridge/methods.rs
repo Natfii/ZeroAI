@@ -100,6 +100,47 @@ pub async fn list_conversations(
     .await
 }
 
+/// Sends a `ListMessagesRequest` to fetch message history for a conversation.
+///
+/// Uses [`rpc::ActionType::ListMessages`] to request up to `count` messages
+/// from the specified conversation. The response arrives asynchronously on
+/// the long-poll stream.
+///
+/// # Errors
+///
+/// Returns [`BugleHttpError`] on transport failure or non-2xx server
+/// response.
+pub async fn list_messages(
+    http: &BugleHttpClient,
+    crypto_keys: &BugleCryptoKeys,
+    auth_token: &[u8],
+    ttl: i64,
+    device_pair: &DevicePair,
+    session_id: &str,
+    conversation_id: &str,
+    count: i64,
+) -> Result<(), BugleHttpError> {
+    let inner_request = client::ListMessagesRequest {
+        conversation_id: conversation_id.to_owned(),
+        count,
+        cursor: None,
+    };
+
+    send_rpc_action_with_session(
+        http,
+        crypto_keys,
+        auth_token,
+        ttl,
+        device_pair,
+        rpc::ActionType::ListMessages,
+        rpc::MessageType::BugleAnnotation,
+        &inner_request,
+        session_id,
+        None,
+    )
+    .await
+}
+
 /// Refreshes the Tachyon auth token via the `RegisterRefresh` endpoint.
 ///
 /// After QR pairing, the relay token only authorises `ReceiveMessages`.

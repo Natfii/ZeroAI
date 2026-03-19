@@ -213,7 +213,7 @@ impl Tool for ReadMessagesTool {
         };
 
         // Query messages from the store.
-        let messages = match store.query_messages(&matched.id, effective_since, limit) {
+        let mut messages = match store.query_messages(&matched.id, effective_since, limit) {
             Ok(msgs) => msgs,
             Err(e) => {
                 return Ok(ToolResult {
@@ -223,6 +223,36 @@ impl Tool for ReadMessagesTool {
                 });
             }
         };
+
+        // Auto-fetch history if store is empty for this conversation.
+        if messages.is_empty() {
+            match super::session::fetch_conversation_history(
+                &matched.id,
+                limit.into(),
+            )
+            .await
+            {
+                Ok(fetched) => {
+                    tracing::info!(
+                        target: "messages_bridge::tool",
+                        conversation_id = %matched.id,
+                        count = fetched.len(),
+                        "auto-fetched message history"
+                    );
+                    // Re-query from store (fetch_conversation_history stores them).
+                    messages = store
+                        .query_messages(&matched.id, effective_since, limit)
+                        .unwrap_or_default();
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        target: "messages_bridge::tool",
+                        conversation_id = %matched.id,
+                        "failed to auto-fetch history: {e}"
+                    );
+                }
+            }
+        }
 
         if messages.is_empty() {
             return Ok(ToolResult {

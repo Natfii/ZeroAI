@@ -191,4 +191,39 @@ class SlotAwareAgentConfigTest {
         assertEquals("openai", SlotAwareAgentConfig.configProvider("chatgpt"))
         assertEquals("openai", SlotAwareAgentConfig.configProvider("codex"))
     }
+
+    @Test
+    fun `resolveEffectiveDefaults uses first enabled agent when none have usable credentials`() =
+        runTest {
+            val staleSettings =
+                AppSettings(
+                    defaultProvider = "ollama",
+                    defaultModel = "ollama/llama3",
+                )
+            val agents =
+                listOf(
+                    Agent(
+                        id = "ollama",
+                        slotId = "ollama",
+                        name = "Ollama",
+                        provider = "ollama",
+                        modelName = "llama3",
+                        isEnabled = false,
+                    ),
+                    Agent(
+                        id = "openai-api",
+                        slotId = "openai-api",
+                        name = "OpenAI",
+                        provider = "openai",
+                        modelName = "gpt-4o",
+                        isEnabled = true,
+                    ),
+                )
+
+            val resolved =
+                SlotAwareAgentConfig.resolveEffectiveDefaults(staleSettings, agents) { false }
+
+            assertEquals("openai", resolved.defaultProvider)
+            assertEquals("gpt-4o", resolved.defaultModel)
+        }
 }

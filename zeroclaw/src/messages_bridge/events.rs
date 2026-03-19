@@ -62,6 +62,13 @@ pub enum BridgeEvent {
         /// The raw [`events::AlertType`] integer value.
         alert_type: i32,
     },
+    /// Message history response for a conversation.
+    MessageHistory {
+        /// Conversation ID this history belongs to.
+        conversation_id: String,
+        /// Messages in the response (newest first from server).
+        messages: Vec<BridgedMessage>,
+    },
 }
 
 /// Processes an incoming RPC message from the long-poll stream.
@@ -132,6 +139,7 @@ fn dispatch_action(action: i32, payload: &[u8]) -> Option<BridgeEvent> {
 
     match rpc::ActionType::try_from(action) {
         Ok(rpc::ActionType::ListConversations) => handle_conversation_list(payload),
+        Ok(rpc::ActionType::ListMessages) => handle_message_list(payload),
         Ok(rpc::ActionType::MessageUpdates) => handle_message_updates(payload),
         Ok(rpc::ActionType::ConversationUpdates) => handle_conversation_updates(payload),
         Ok(rpc::ActionType::BrowserPresenceCheck) => Some(BridgeEvent::BrowserPresenceCheck),
@@ -172,6 +180,39 @@ fn handle_conversation_list(payload: &[u8]) -> Option<BridgeEvent> {
         .collect();
 
     Some(BridgeEvent::ConversationListSync { conversations })
+}
+
+/// Decodes a message list response into a [`BridgeEvent::MessageHistory`].
+fn handle_message_list(payload: &[u8]) -> Option<BridgeEvent> {
+    let response = match super::proto::client::ListMessagesResponse::decode(payload) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("failed to decode ListMessagesResponse: {e}");
+            return None;
+        }
+    };
+
+    let messages: Vec<BridgedMessage> = response
+        .messages
+        .iter()
+        .map(proto_message_to_bridged)
+        .collect();
+
+    let conversation_id = messages
+        .first()
+        .map(|m| m.conversation_id.clone())
+        .unwrap_or_default();
+
+    debug!(
+        count = messages.len(),
+        conversation_id = %conversation_id,
+        "decoded message history response"
+    );
+
+    Some(BridgeEvent::MessageHistory {
+        conversation_id,
+        messages,
+    })
 }
 
 /// Decodes a conversation update payload into a [`BridgeEvent::ConversationListSync`].

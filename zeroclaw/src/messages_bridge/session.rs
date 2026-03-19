@@ -58,6 +58,20 @@ struct BridgeSession {
     longpoll_handle: Option<tokio::task::JoinHandle<()>>,
     /// Handle for the pairing watcher task (waits for QR scan completion).
     pairing_watcher_handle: Option<tokio::task::JoinHandle<()>>,
+    /// RPC credentials retained after pairing for on-demand requests.
+    rpc_http: Option<BugleHttpClient>,
+    /// Crypto keys for encrypting RPC payloads.
+    rpc_crypto: Option<BugleCryptoKeys>,
+    /// Tachyon auth token for authenticated RPCs.
+    rpc_auth_token: Option<Vec<u8>>,
+    /// Tachyon TTL for RPCs.
+    rpc_ttl: i64,
+    /// Device pair for RPC routing.
+    rpc_device_pair: Option<DevicePair>,
+    /// Session ID for RPC requests.
+    rpc_session_id: Option<String>,
+    /// Pending history response sender (set by [`fetch_conversation_history`]).
+    history_response_tx: Option<oneshot::Sender<Vec<super::types::BridgedMessage>>>,
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -85,6 +99,13 @@ pub fn start_session(data_dir: &Path) -> Result<(), anyhow::Error> {
         shutdown_tx: None,
         longpoll_handle: None,
         pairing_watcher_handle: None,
+        rpc_http: None,
+        rpc_crypto: None,
+        rpc_auth_token: None,
+        rpc_ttl: 0,
+        rpc_device_pair: None,
+        rpc_session_id: None,
+        history_response_tx: None,
     });
 
     info!(
@@ -382,6 +403,20 @@ pub fn complete_pairing(paired_device: PairedDevice) {
                 );
             }
         }
+
+        // Store RPC credentials for on-demand requests (e.g. fetch_conversation_history).
+        {
+            let mut guard = BRIDGE_SESSION.lock();
+            if let Some(s) = guard.as_mut() {
+                s.rpc_crypto = Some(fetch_crypto);
+                s.rpc_auth_token = Some(active_token);
+                s.rpc_ttl = active_ttl;
+                s.rpc_device_pair = Some(fetch_devices);
+                s.rpc_session_id = Some(session_id);
+                // Create a fresh HTTP client for ad-hoc RPCs.
+                s.rpc_http = BugleHttpClient::new().ok();
+            }
+        }
     });
 
     session.longpoll_handle = Some(longpoll_handle);
@@ -391,6 +426,97 @@ pub fn complete_pairing(paired_device: PairedDevice) {
         target: "messages_bridge::session",
         "pairing complete, long-poll listener started"
     );
+}
+
+/// Fetches message history for a conversation via the `ListMessages` RPC.
+///
+/// Sends the RPC request and waits for the response to arrive on the
+/// long-poll stream (routed via [`BridgeEvent::MessageHistory`]). Returns
+/// the messages on success, or an error on timeout or missing credentials.
+///
+/// # Errors
+///
+/// Returns an error if the bridge is not paired, RPC credentials are
+/// unavailable, the request fails, or the 10-second timeout expires.
+pub async fn fetch_conversation_history(
+    conversation_id: &str,
+    count: i64,
+) -> Result<Vec<super::types::BridgedMessage>, anyhow::Error> {
+    // Extract RPC credentials and set up the response channel.
+    let (rx, http, crypto, token, ttl, devices, session_id) = {
+        let mut guard = BRIDGE_SESSION.lock();
+        let session = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no active bridge session"))?;
+
+        let http = session
+            .rpc_http
+            .take()
+            .or_else(|| BugleHttpClient::new().ok())
+            .ok_or_else(|| anyhow::anyhow!("failed to create HTTP client"))?;
+
+        let crypto = session
+            .rpc_crypto
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("RPC credentials not available (bridge not fully paired)"))?;
+        let token = session
+            .rpc_auth_token
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("auth token not available"))?;
+        let ttl = session.rpc_ttl;
+        let devices = session
+            .rpc_device_pair
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("device pair not available"))?;
+        let session_id = session
+            .rpc_session_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("session ID not available"))?;
+
+        let (tx, rx) = oneshot::channel();
+        session.history_response_tx = Some(tx);
+
+        (rx, http, crypto, token, ttl, devices, session_id)
+    };
+    // Lock dropped here — safe to await.
+
+    // Send the ListMessages RPC.
+    methods::list_messages(
+        &http,
+        &crypto,
+        &token,
+        ttl,
+        &devices,
+        &session_id,
+        conversation_id,
+        count,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("ListMessages RPC failed: {e}"))?;
+
+    info!(
+        target: "messages_bridge::session",
+        conversation_id,
+        count,
+        "ListMessages request sent, awaiting response"
+    );
+
+    // Return the HTTP client to the session for future use.
+    {
+        let mut guard = BRIDGE_SESSION.lock();
+        if let Some(s) = guard.as_mut() {
+            s.rpc_http = Some(http);
+        }
+    }
+
+    // Wait for the response with a 10-second timeout.
+    match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
+        Ok(Ok(messages)) => Ok(messages),
+        Ok(Err(_)) => Err(anyhow::anyhow!("history response channel closed")),
+        Err(_) => Err(anyhow::anyhow!(
+            "timed out waiting for message history (10s)"
+        )),
+    }
 }
 
 /// Disconnects the bridge, stopping the long-poll listener.
@@ -868,6 +994,34 @@ async fn consume_bridge_events(
                     alert_type,
                     "user alert received"
                 );
+            }
+            BridgeEvent::MessageHistory {
+                conversation_id,
+                messages,
+            } => {
+                info!(
+                    target: "messages_bridge::session",
+                    conversation_id = %conversation_id,
+                    count = messages.len(),
+                    "received message history"
+                );
+                // Store messages in the database.
+                if let Err(e) = store.store_messages(&messages) {
+                    tracing::error!(
+                        target: "messages_bridge::session",
+                        "failed to store message history: {e}"
+                    );
+                }
+                // Send to the waiting fetch_conversation_history caller.
+                let tx = {
+                    let mut guard = BRIDGE_SESSION.lock();
+                    guard
+                        .as_mut()
+                        .and_then(|s| s.history_response_tx.take())
+                };
+                if let Some(tx) = tx {
+                    let _ = tx.send(messages);
+                }
             }
         }
     }

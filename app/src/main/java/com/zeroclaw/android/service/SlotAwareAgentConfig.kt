@@ -53,20 +53,28 @@ object SlotAwareAgentConfig {
      * Resolves effective default provider/model from the slot-aware agent list.
      *
      * The first configured agent with usable credentials wins, preferring fixed
-     * slot rows over legacy rows.
+     * slot rows over legacy rows. When no agent has usable credentials, the
+     * first enabled agent's provider is used so the daemon surfaces a clear
+     * "missing key" error instead of silently falling through to stale
+     * DataStore defaults (which may reference a disabled provider).
      */
     suspend fun resolveEffectiveDefaults(
         settings: AppSettings,
         agents: List<Agent>,
         hasUsableCredentials: suspend (Agent) -> Boolean,
     ): AppSettings {
-        val primary =
-            orderedConfiguredAgents(agents).firstOrNull { agent ->
-                hasUsableCredentials(agent)
-            } ?: return settings
+        val ordered = orderedConfiguredAgents(agents)
+        val primary = ordered.firstOrNull { agent -> hasUsableCredentials(agent) }
+        if (primary != null) {
+            return settings.copy(
+                defaultProvider = configProvider(primary),
+                defaultModel = primary.modelName,
+            )
+        }
+        val firstEnabled = ordered.firstOrNull() ?: return settings
         return settings.copy(
-            defaultProvider = configProvider(primary),
-            defaultModel = primary.modelName,
+            defaultProvider = configProvider(firstEnabled),
+            defaultModel = firstEnabled.modelName,
         )
     }
 
