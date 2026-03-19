@@ -1,23 +1,8 @@
 # Zero
 
-<p align="center">
-  <img src="assets/mini-zero-success.svg" alt="Zero mascot" width="220" />
-</p>
+![banner](https://github.com/user-attachments/assets/eca832d2-c90b-4aed-867b-06d69cc19a7f)
 
-<p align="center">
-  <img src="assets/mini-zero-idle.svg" alt="Zero idle" width="42" />
-  <img src="assets/mini-zero-smiling.svg" alt="Zero smiling" width="42" />
-  <img src="assets/mini-zero-love.svg" alt="Zero love" width="42" />
-  <img src="assets/mini-zero-angry.svg" alt="Zero angry" width="42" />
-  <img src="assets/mini-zero-peek.svg" alt="Zero peek" width="42" />
-</p>
-<p align="center">
-  <img src="assets/mini-zero-sleeping.svg" alt="Zero sleeping" width="42" />
-  <img src="assets/mini-zero-success.svg" alt="Zero success" width="42" />
-  <img src="assets/mini-zero-error.svg" alt="Zero error" width="42" />
-  <img src="assets/mini-zero-typing.svg" alt="Zero typing" width="42" />
-  <img src="assets/mini-zero-idle.svg" alt="Zero idle" width="42" />
-</p>
+
 
 <p align="center">                                                                                                                                                                                                            <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white"/>
     <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                                 
