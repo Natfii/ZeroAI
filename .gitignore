@@ -42,6 +42,7 @@ desktop.ini
 *.pem
 credentials.json
 google-services.json
+auth-profiles.json
 
 # Compiled native libs (built by cargo-ndk, bundled in APK)
 app/src/main/jniLibs/

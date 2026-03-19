@@ -135,7 +135,7 @@ class SlotAwareAgentConfigTest {
                 ),
             )
             assertEquals(
-                true,
+                false,
                 SlotAwareAgentConfig.hasUsableProviderCredentials(
                     provider = "anthropic",
                     apiKey = null,

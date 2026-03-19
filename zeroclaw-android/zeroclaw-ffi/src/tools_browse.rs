@@ -173,7 +173,6 @@ const SESSION_TOOLS: &[&str] = &[
     "memory_forget",
     "cron_list",
     "cron_runs",
-    "read_messages",
 ];
 
 /// Tools that require a [`SecurityPolicy`] and can only execute via daemon

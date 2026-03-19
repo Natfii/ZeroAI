@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test
 
 class ProviderSlotRegistryTest {
     @Test
-    fun returnsAllSevenSlotsInStableOrder() {
+    fun returnsAllSixSlotsInStableOrder() {
         val slots = ProviderSlotRegistry.all()
-        assertEquals(7, slots.size)
+        assertEquals(6, slots.size)
         assertEquals("gemini-api", slots.first().slotId)
         assertEquals("ollama", slots.last().slotId)
     }
@@ -26,7 +26,7 @@ class ProviderSlotRegistryTest {
         assertEquals("openai-api", ProviderSlotRegistry.resolveSlotId("openai", false))
         assertEquals("chatgpt", ProviderSlotRegistry.resolveSlotId("openai", true))
         assertEquals("anthropic-api", ProviderSlotRegistry.resolveSlotId("anthropic", false))
-        assertEquals("claude-code", ProviderSlotRegistry.resolveSlotId("anthropic", true))
+        assertNull(ProviderSlotRegistry.resolveSlotId("anthropic", true))
         assertEquals("ollama", ProviderSlotRegistry.resolveSlotId("ollama", false))
     }
 

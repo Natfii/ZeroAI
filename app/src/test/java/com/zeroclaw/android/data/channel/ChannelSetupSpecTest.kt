@@ -16,14 +16,16 @@ import org.junit.jupiter.api.Test
 @DisplayName("ChannelSetupSpec")
 class ChannelSetupSpecTest {
     @Test
-    @DisplayName("every channel type has a setup spec")
-    fun `every channel type has a setup spec`() {
-        ChannelType.entries.forEach { type ->
-            assertNotNull(
-                ChannelSetupSpecs.forType(type),
-                "Missing setup spec for ${type.name}",
-            )
-        }
+    @DisplayName("every channel type except Discord has a setup spec")
+    fun `every channel type except Discord has a setup spec`() {
+        ChannelType.entries
+            .filter { it != ChannelType.DISCORD }
+            .forEach { type ->
+                assertNotNull(
+                    ChannelSetupSpecs.forType(type),
+                    "Missing setup spec for ${type.name}",
+                )
+            }
     }
 
     @Test
@@ -69,11 +71,10 @@ class ChannelSetupSpecTest {
     }
 
     @Test
-    @DisplayName("discord spec has 3 sub-steps")
-    fun `discord spec has 3 sub-steps`() {
+    @DisplayName("discord uses custom setup flow, no generic spec")
+    fun `discord uses custom setup flow, no generic spec`() {
         val spec = ChannelSetupSpecs.forType(ChannelType.DISCORD)
-        assertNotNull(spec)
-        assertEquals(3, spec!!.steps.size)
+        assertEquals(null, spec)
     }
 
     @Test
