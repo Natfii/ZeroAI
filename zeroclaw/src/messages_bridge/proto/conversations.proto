@@ -1,0 +1,443 @@
+// Copyright (c) 2026 @Natfii. All rights reserved.
+// Protobuf schemas ported from mautrix-gmessages (AGPL-3.0)
+// Original: https://github.com/mautrix/gmessages/tree/main/pkg/libgm/gmproto
+
+syntax = "proto3";
+package conversations;
+
+import "settings.proto";
+
+message Contact {
+    string participantID = 1;
+    string name = 2;
+    ContactNumber number = 3;
+    string avatarHexColor = 7;
+    bool unknownBool = 10;
+    string contactID = 11;
+}
+
+message ContactNumber {
+    int32 mysteriousInt = 1;
+    string number = 2;
+    string number2 = 3;
+    optional string formattedNumber = 4;
+}
+
+message SomeKindOfGroupID {
+    message NestedID {
+        string id = 1;
+    }
+    string conversationID = 1;
+    NestedID nestedID = 2;
+}
+
+message AnotherMessageID {
+    string messageID = 1;
+    string anotherID = 2;
+}
+
+message Message {
+    string messageID = 1;
+    MsgType msgType = 3;
+    MessageStatus messageStatus = 4;
+    int64 timestamp = 5;
+    string conversationID = 7;
+    string participantID = 9;
+    repeated MessageInfo messageInfo = 10;
+    int64 type = 11;
+    string tmpID = 12;
+    optional string subject = 14;
+    int64 someInt = 16;
+    repeated ReactionEntry reactions = 19;
+    ReplyMessage replyMessage = 21;
+    SomeKindOfGroupID someKindOfGroupID = 23;
+    AnotherMessageID anotherMessageID = 24;
+    Participant senderParticipant = 25;
+}
+
+message ReactionEntry {
+    ReactionData data = 1;
+    repeated string participantIDs = 2;
+}
+
+enum EmojiType {
+    REACTION_TYPE_UNSPECIFIED = 0;
+    LIKE = 1;
+    LOVE = 2;
+    LAUGH = 3;
+    SURPRISED = 4;
+    SAD = 5;
+    ANGRY = 6;
+    DISLIKE = 7;
+    CUSTOM = 8;
+    QUESTIONING = 9;
+    CRYING_FACE = 10;
+    POUTING_FACE = 11;
+    RED_HEART = 12;
+    EMOTIFY = 13;
+}
+
+message CustomEmojiData {
+    message Inner {
+        optional string unknownString = 100;
+        message ImageData {
+            string mimeType = 1;
+            string uri = 2;
+            optional int32 unknownInt3 = 3;
+            optional string unknownString5 = 5;
+        }
+        message WrappedImageData {
+            message ImageData {
+                int32 unknownInt1 = 1;
+                string mimeType = 2;
+                string uri = 3;
+                int32 width = 5;
+                int32 height = 6;
+                optional int32 unknownInt7 = 7;
+            }
+            ImageData data = 1;
+        }
+        ImageData first = 101;
+        WrappedImageData second = 102;
+    }
+
+    string uuid = 1;
+    optional int32 unknownInt4 = 4;
+    Inner innerData = 100;
+}
+
+message ReactionData {
+    string unicode = 1;
+    EmojiType type = 2;
+    CustomEmojiData customEmoji = 101;
+}
+
+message EmojiMeta {
+    repeated EmojiMetaData emojiMetaData = 1;
+}
+
+message EmojiMetaData {
+    string unicode = 1;
+    repeated string names = 2;
+}
+
+message ReplyMessage {
+    string messageID = 1;
+    string conversationID = 2;
+    ReplyMessageData replyMessageData = 3;
+}
+
+message ReplyMessageData {
+
+}
+
+message MessageInfo {
+    optional string actionMessageID = 1;
+    oneof data {
+        MessageContent messageContent = 2;
+        MediaContent mediaContent = 3;
+    }
+}
+
+message MediaContent {
+    MediaFormats format = 1;
+    string mediaID = 2;
+    string mediaName = 4;
+    int64 size = 5;
+    Dimensions dimensions = 6;
+    bytes mediaData = 7;
+    string thumbnailMediaID = 9;
+    bytes decryptionKey = 11;
+    bytes thumbnailDecryptionKey = 12;
+    string mimeType = 14;
+}
+
+message Dimensions {
+    int64 width = 1;
+    int64 height = 2;
+}
+
+message MessageContent {
+    string content = 1;
+}
+
+message MsgType {
+    int64 type = 1;
+}
+
+message MessageStatus {
+    MessageStatusType status = 2;
+    int64 subCode = 3;
+    string errMsg = 4;
+    string statusText = 5;
+    int64 thirdCode = 6;
+}
+
+message Conversation {
+    string conversationID = 1;
+    string name = 2;
+    LatestMessage latestMessage = 4;
+    int64 lastMessageTimestamp = 5;
+    bool unread = 6;
+
+    bool isGroupChat = 10;
+    string defaultOutgoingID = 11;
+
+    ConversationStatus status = 12;
+    bool readOnly = 13;
+    string avatarHexColor = 15;
+    string latestMessageID = 17;
+    ConversationSendMode sendMode = 18;
+    repeated Participant participants = 20;
+    repeated string otherParticipants = 21;
+    ConversationType type = 22;
+    bool subType = 24;
+    bool pinned = 26;
+    int64 unknownTimestamp = 28;
+    bool thirdType = 29;
+    SomeKindOfGroupID someKindOfGroupID = 31;
+    settings.SIMCard simCard = 32;
+    string groupAvatarURL = 34;
+    AnotherMessageID latestMessageAnoherID = 35;
+}
+
+message Participant {
+    SmallInfo ID = 1;
+    string firstName = 2;
+    string fullName = 3;
+    string avatarHexColor = 5;
+    bool isMe = 6;
+    settings.SIMPayload simPayload = 7;
+    bool isVisible = 8;
+    string contactID = 10;
+    int64 bs = 14;
+    string formattedNumber = 15;
+    int64 someInt1 = 19;
+    int64 someInt2 = 20;
+}
+
+enum IdentifierType {
+    UNKNOWN = 0;
+    PHONE = 1;
+    EMAIL = 2;
+}
+
+message SmallInfo {
+    IdentifierType type = 1;
+    string number = 2;
+    string participantID = 3;
+}
+
+message LatestMessage {
+    string displayContent = 1;
+    int64 fromMe = 2;
+
+    string displayName = 4;
+    LatestMessageStatus latestMessageStatus = 5;
+}
+
+message LatestMessageStatus {
+    int64 status2 = 1;
+    MessageStatusType status = 2;
+}
+
+message Muted {
+    int64 isMuted = 1;
+}
+
+enum ConversationSendMode {
+    SEND_MODE_AUTO = 0;
+    SEND_MODE_XMS = 1;
+    SEND_MODE_XMS_LATCH = 2;
+}
+
+enum ConversationType {
+    UNKNOWN_CONVERSATION_TYPE = 0;
+    SMS = 1;
+    RCS = 2;
+}
+
+enum MessageStatusType {
+    STATUS_UNKNOWN = 0;
+
+    OUTGOING_COMPLETE = 1;
+    OUTGOING_DELIVERED = 2;
+    OUTGOING_DISPLAYED = 11;
+    OUTGOING_DRAFT = 3;
+    OUTGOING_SEND_AFTER_PROCESSING = 10;
+    OUTGOING_YET_TO_SEND = 4;
+    OUTGOING_SENDING = 5;
+    OUTGOING_RESENDING = 6;
+    OUTGOING_AWAITING_RETRY = 7;
+    OUTGOING_FAILED_GENERIC = 8;
+    OUTGOING_FAILED_EMERGENCY_NUMBER = 9;
+    OUTGOING_CANCELED = 12;
+    OUTGOING_FAILED_TOO_LARGE = 13;
+    OUTGOING_NOT_DELIVERED_YET = 14;
+    OUTGOING_REVOCATION_PENDING = 15;
+    OUTGOING_SCHEDULED = 16;
+    OUTGOING_FAILED_RECIPIENT_LOST_RCS = 17;
+    OUTGOING_FAILED_NO_RETRY_NO_FALLBACK = 18;
+    OUTGOING_FAILED_RECIPIENT_DID_NOT_DECRYPT = 19;
+    OUTGOING_VALIDATING = 20;
+    OUTGOING_FAILED_RECIPIENT_LOST_ENCRYPTION = 21;
+    OUTGOING_FAILED_RECIPIENT_DID_NOT_DECRYPT_NO_MORE_RETRY = 22;
+
+    INCOMING_COMPLETE = 100;
+    INCOMING_YET_TO_MANUAL_DOWNLOAD = 101;
+    INCOMING_RETRYING_MANUAL_DOWNLOAD = 102;
+    INCOMING_MANUAL_DOWNLOADING = 103;
+    INCOMING_RETRYING_AUTO_DOWNLOAD = 104;
+    INCOMING_AUTO_DOWNLOADING = 105;
+    INCOMING_DOWNLOAD_FAILED = 106;
+    INCOMING_EXPIRED_OR_NOT_AVAILABLE = 107;
+    INCOMING_DELIVERED = 108;
+    INCOMING_DISPLAYED = 109;
+    INCOMING_DOWNLOAD_CANCELED = 110;
+    INCOMING_DOWNLOAD_FAILED_TOO_LARGE = 111;
+    INCOMING_DOWNLOAD_FAILED_SIM_HAS_NO_DATA = 112;
+    INCOMING_FAILED_TO_DECRYPT = 113;
+    INCOMING_DECRYPTION_ABORTED = 114;
+
+    TOMBSTONE_PARTICIPANT_JOINED = 200;
+    TOMBSTONE_PARTICIPANT_LEFT = 201;
+    TOMBSTONE_SELF_LEFT = 202;
+    TOMBSTONE_RCS_GROUP_CREATED = 203;
+    TOMBSTONE_MMS_GROUP_CREATED = 204;
+    TOMBSTONE_SMS_BROADCAST_CREATED = 205;
+    TOMBSTONE_ONE_ON_ONE_SMS_CREATED = 206;
+    TOMBSTONE_ONE_ON_ONE_RCS_CREATED = 207;
+    TOMBSTONE_SWITCH_TO_GROUP_MMS = 208;
+    TOMBSTONE_SWITCH_TO_BROADCAST_SMS = 209;
+    TOMBSTONE_SHOW_LINK_PREVIEWS = 210;
+    TOMBSTONE_GROUP_RENAMED_LOCAL = 211;
+    TOMBSTONE_VERIFIED_SMS_APPLICABLE = 212;
+    TOMBSTONE_ENCRYPTED_ONE_ON_ONE_RCS_CREATED = 213;
+    TOMBSTONE_PROTOCOL_SWITCH_TO_TEXT = 214;
+    TOMBSTONE_PROTOCOL_SWITCH_TO_RCS = 215;
+    TOMBSTONE_PROTOCOL_SWITCH_TO_ENCRYPTED_RCS = 216;
+    TOMBSTONE_GROUP_RENAMED_GLOBAL = 217;
+    TOMBSTONE_GROUP_NAME_CLEARED_GLOBAL = 218;
+    TOMBSTONE_PROTOCOL_SWITCH_TO_ENCRYPTED_RCS_INFO = 219;
+    TOMBSTONE_SELF_REMOVED_FROM_GROUP = 220;
+    MESSAGE_STATUS_TOMBSTONE_PARTICIPANT_REMOVED_FROM_GROUP = 221;
+    MESSAGE_STATUS_TOMBSTONE_SMS_NORM_PARTICIPANT_UPGRADED = 222;
+    MESSAGE_STATUS_TOMBSTONE_RCS_NORM_PARTICIPANT_UPGRADED = 223;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_RCS_NORM_PARTICIPANT_UPGRADED = 224;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_GROUP_PARTICIPANT_JOINED = 225;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_GROUP_PARTICIPANT_JOINED_INFO = 226;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_GROUP_PARTICIPANT_LEFT = 227;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_GROUP_SELF_LEFT = 228;
+    MESSAGE_STATUS_TOMBSTONE_ENCRYPTED_GROUP_CREATED = 229;
+    MESSAGE_STATUS_TOMBSTONE_SELF_REMOVED_FROM_ENCRYPTED_GROUP = 230;
+    MESSAGE_STATUS_TOMBSTONE_PARTICIPANT_REMOVED_FROM_ENCRYPTED_GROUP = 231;
+    MESSAGE_STATUS_TOMBSTONE_SUGGESTION_SHORTCUT_STAR_TOOLSTONE = 232;
+    MESSAGE_STATUS_TOMBSTONE_GROUP_PROTOCOL_SWITCH_RCS_TO_E2EE = 233;
+    MESSAGE_STATUS_TOMBSTONE_GROUP_PROTOCOL_SWITCH_E2EE_TO_RCS = 234;
+    MESSAGE_STATUS_TOMBSTONE_PROTOCOL_SWITCH_TEXT_TO_E2EE = 235;
+    MESSAGE_STATUS_TOMBSTONE_PROTOCOL_SWITCH_E2EE_TO_TEXT = 236;
+    MESSAGE_STATUS_TOMBSTONE_PROTOCOL_SWITCH_RCS_TO_E2EE = 237;
+    MESSAGE_STATUS_TOMBSTONE_PROTOCOL_SWITCH_E2EE_TO_RCS = 238;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_EDUCATION = 239;
+    MESSAGE_STATUS_TOMBSTONE_RBM_SIM_SWITCH = 240;
+    MESSAGE_STATUS_TOMBSTONE_RBM_PRIVACY_NOTICE = 241;
+    MESSAGE_STATUS_TOMBSTONE_PENPAL_CONVERSATION_NOTICE = 242;
+    MESSAGE_STATUS_TOMBSTONE_MEET_OTHER_PARTICIPANT_REACHABLE = 243;
+    MESSAGE_STATUS_TOMBSTONE_MISSED_VIDEO_CALL = 244;
+    MESSAGE_STATUS_TOMBSTONE_PARTICIPANT_THEME_CHANGE = 245;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_END_OF_EMERGENCY_SUCCESS_HELP_STILL_NEEDED = 246;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_END_OF_EMERGENCY_SUCCESS_HELP_NO_LONGER_NEEDED = 247;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_END_OF_EMERGENCY_FAILURE_HELP_STILL_NEEDED = 248;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_END_OF_EMERGENCY_FAILURE_HELP_NO_LONGER_NEEDED = 249;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_END_OF_EMERGENCY_UNEXPECTED_END = 250;
+    MESSAGE_STATUS_TOMBSTONE_SATELLITE_MESSAGING_TOOLSTONE = 251;
+    MESSAGE_STATUS_TOMBSTONE_GROUP_PROTOCOL_SWITCH_E2EE_TO_MMS = 252;
+    MESSAGE_STATUS_TOMBSTONE_PENPAL_PROACTIVE_MESSAGE_NOTICE = 253;
+    MESSAGE_STATUS_TOMBSTONE_SUGGESTION_POSSIBLE_SCAM_TOOLSTONE = 254;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_UNSUBSCRIBE_SENT = 255;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_SUBSCRIBE_SENT = 256;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_UNSUBSCRIBE_CONFIRMED = 257;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_SUBSCRIBE_CONFIRMED = 258;
+    MESSAGE_STATUS_TOMBSTONE_ACTIVE_SELF_IDENTITY_CHANGED = 259;
+    MESSAGE_STATUS_TOMBSTONE_GROUP_ICON_CHANGED_GLOBAL = 260;
+    MESSAGE_STATUS_TOMBSTONE_GROUP_ICON_CLEARED_GLOBAL = 261;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_UNSUBSCRIBE_ERROR = 262;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_SUBSCRIBE_ERROR = 263;
+    MESSAGE_STATUS_TOMBSTONE_EMERGENCY_CONVERSATION_CREATED = 264;
+    MESSAGE_STATUS_TOMBSTONE_SENSITIVE_CONTENT_WARNING_TOOLSTONE = 265;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_UNSUBSCRIBE_CONFIRMED_NO_LINK = 266;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_SUBSCRIBE_CONFIRMED_NO_LINK = 267;
+    MESSAGE_STATUS_TOMBSTONE_EMERGENCY_QUESTIONNAIRE = 268;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_UNSUBSCRIBE_SENT_NO_LINK = 269;
+    MESSAGE_STATUS_TOMBSTONE_CHATBOT_SUBSCRIBE_SENT_NO_LINK = 270;
+    MESSAGE_STATUS_TOMBSTONE_RCS_GROUP_JOINED_BY_LINK = 271;
+    MESSAGE_STATUS_TOMBSTONE_INVITE_LINK_ENABLED = 272;
+    MESSAGE_STATUS_TOMBSTONE_INVITE_LINK_DISABLED = 273;
+    MESSAGE_STATUS_TOMBSTONE_INVITE_LINK_RESET_MANUALLY = 274;
+    MESSAGE_STATUS_TOMBSTONE_INVITE_LINK_RESET_AUTOMATICALLY = 275;
+
+    MESSAGE_DELETED = 300;
+}
+
+enum ConversationStatus {
+    UNKNOWN_CONVERSATION_STATUS = 0;
+    ACTIVE = 1;
+    ARCHIVED = 2;
+    DELETED = 3;
+    KEEP_ARCHIVED = 4;
+    SPAM_FOLDER = 5;
+    BLOCKED_FOLDER = 6;
+    CROSS_COUNTRY_FOLDER = 7;
+}
+
+enum MediaFormats {
+    UNSPECIFIED_TYPE = 0;
+    IMAGE_JPEG = 1;
+    IMAGE_JPG = 2;
+    IMAGE_PNG = 3;
+    IMAGE_GIF = 4;
+    IMAGE_WBMP = 5;
+    IMAGE_X_MS_BMP = 6;
+    IMAGE_UNSPECIFIED = 7;
+
+    VIDEO_MP4 = 8;
+    VIDEO_3G2 = 9;
+    VIDEO_3GPP = 10;
+    VIDEO_WEBM = 11;
+    VIDEO_MKV = 12;
+    VIDEO_UNSPECIFIED = 13;
+
+    AUDIO_AAC = 14;
+    AUDIO_AMR = 15;
+    AUDIO_MP3 = 16;
+    AUDIO_MPEG = 17;
+    AUDIO_MPG = 18;
+    AUDIO_MP4 = 19;
+    AUDIO_MP4_LATM = 20;
+    AUDIO_3GPP = 21;
+    AUDIO_OGG = 22;
+    AUDIO_UNSPECIFIED = 23;
+
+    TEXT_VCARD = 24;
+
+    APP_PDF = 25;
+    APP_TXT = 26;
+    APP_HTML = 27;
+    APP_DOC = 28;
+    APP_DOCX = 29;
+    APP_PPTX = 30;
+    APP_PPT = 31;
+    APP_XLSX = 32;
+    APP_XLS = 33;
+    APP_APK = 34;
+    APP_ZIP = 35;
+    APP_JAR = 36;
+    APP_UNSPECIFIED = 37;
+
+    CAL_TEXT_VCALENDAR = 38;
+    CAL_TEXT_XVCALENDAR = 39;
+    CAL_TEXT_CALENDAR = 40;
+    CAL_APPLICATION_VCS = 41;
+    CAL_APPLICATION_ICS = 42;
+    CAL_APPLICATION_HBSVCS = 43;
+}

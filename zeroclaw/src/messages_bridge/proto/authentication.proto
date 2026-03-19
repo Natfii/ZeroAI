@@ -1,0 +1,305 @@
+// Copyright (c) 2026 @Natfii. All rights reserved.
+// Protobuf schemas ported from mautrix-gmessages (AGPL-3.0)
+// Original: https://github.com/mautrix/gmessages/tree/main/pkg/libgm/gmproto
+
+syntax = "proto3";
+package authentication;
+
+import "util.proto";
+
+enum BrowserType {
+    UNKNOWN_BROWSER_TYPE = 0;
+    OTHER = 1;
+    CHROME = 2;
+    FIREFOX = 3;
+    SAFARI = 4;
+    OPERA = 5;
+    IE = 6;
+    EDGE = 7;
+}
+
+enum DeviceType {
+    UNKNOWN_DEVICE_TYPE = 0;
+    WEB = 1;
+    TABLET = 2;
+    PWA = 3;
+}
+
+message BrowserDetails {
+    string userAgent = 1;
+    BrowserType browserType = 2;
+    string OS = 3;
+    DeviceType deviceType = 6;
+}
+
+message Device {
+    int64 userID = 1;
+    string sourceID = 2;
+    string network = 3;
+}
+
+message ConfigVersion {
+    int32 Year = 3;
+    int32 Month = 4;
+    int32 Day = 5;
+    int32 V1 = 7;
+    int32 V2 = 9;
+}
+
+message SignInGaiaRequest {
+    message Inner {
+        message DeviceID {
+            int32 unknownInt1 = 1;
+            string deviceID = 2;
+        }
+        message Data {
+            bytes someData = 3;
+        }
+        DeviceID deviceID = 1;
+        Data someData = 36;
+    }
+    AuthMessage authMessage = 1;
+    Inner inner = 2;
+    int32 unknownInt3 = 3;
+    string network = 4;
+}
+
+message SignInGaiaResponse {
+    message Header {
+        uint64 unknownInt2 = 2;
+        int64 unknownTimestamp = 4;
+    }
+    message DeviceData {
+        message DeviceWrapper {
+            Device device = 1;
+        }
+        DeviceWrapper deviceWrapper = 1;
+        repeated RPCGaiaData.UnknownContainer.Item2.Item1 unknownItems2 = 2;
+        repeated RPCGaiaData.UnknownContainer.Item4 unknownItems3 = 3;
+    }
+    Header header = 1;
+    string maybeBrowserUUID = 2;
+    DeviceData deviceData = 3;
+    TokenData tokenData = 4;
+}
+
+message GaiaPairingRequestContainer {
+    string pairingAttemptID = 1;
+    BrowserDetails browserDetails = 2;
+    int64 startTimestamp = 3;
+    bytes data = 4;
+    int32 proposedVerificationCodeVersion = 5;
+    int32 proposedKeyDerivationVersion = 6;
+}
+
+enum GaiaPairingErrorCode {
+    NONE = 0;
+    UKEY2_ALERT_ERROR = 1;
+    REQUEST_OUT_OF_DATE = 2;
+    REQUEST_NOT_RECEIVED_QUICKLY = 3;
+    INVALID_USER = 4;
+    WRONG_VERIFICATION_CODE_SELECTED = 5;
+    VERIFICATION_TIMED_OUT = 6;
+    USER_CANCELED_VERIFICATION = 7;
+    UKEY2_OTHER_ERROR = 8;
+    VERIFICATION_EMOJI_DOWNLOAD_FAILED = 9;
+    NOT_LATEST_ATTEMPT = 10;
+    VERIFICATION_DATA_SERVICE_NOT_PRESENT = 11;
+    VERIFICATION_INTENTS_NOT_PRESENT = 12;
+    WRONG_UKEY2_MESSAGE_TYPE = 13;
+    REQUEST_COMPLETE_WITH_UNKNOWN_RESULT = 14;
+    PHONE_NOT_AWAITING_CONFIRMATION = 15;
+    UKEY2_MESSAGE_MISSING = 16;
+    CLIENT_INIT_TIMEOUT = 17;
+    CLIENT_FINISHED_TIMEOUT = 18;
+    UNKNOWN = 19;
+    WEB_CANCEL_BUTTON_CLICKED = 20;
+    WEB_BACK_BUTTON_CLICKED = 21;
+    WEB_LEAVE_PAIR_PAGE = 22;
+    NEW_REQUEST_WHILE_WAITING_FOR_VERIFICATION = 23;
+    UKEY2_HANDSHAKE_ERROR = 24;
+    VERIFICATION_CODE_REVISION_MISMATCH = 25;
+    USER_CANCELED_VERIFICATION_ON_WEB = 26;
+    USER_DENIED_VERIFICATION_NOT_ME = 27;
+    KEY_DERIVATION_REVISION_MISMATCH = 28;
+    CMS_BACKUP_KEY_NOT_FOUND = 29;
+    UNABLE_TO_ENCRYPT_CMS_BACKUP_KEY = 30;
+    UNABLE_TO_DECRYPT_CMS_BACKUP_KEY = 31;
+}
+
+message GaiaPairingResponseContainer {
+    int32 finishErrorType = 1;
+    GaiaPairingErrorCode finishErrorCode = 2;
+    int32 unknownInt3 = 3;
+    string sessionUUID = 4;
+    bytes data = 5;
+    int32 confirmedVerificationCodeVersion = 6;
+    int32 confirmedKeyDerivationVersion = 7;
+}
+
+message RevokeGaiaPairingRequest {
+    string pairingAttemptID = 1;
+}
+
+message RPCGaiaData {
+    message UnknownContainer {
+        message Item2 {
+            message Item1 {
+                string destOrSourceUUID = 1;
+                int32 unknownInt4 = 4;
+                string languageCode = 5;
+                uint64 unknownBigInt7 = 7;
+            }
+            repeated Item1 item1 = 1;
+        }
+        message Item4 {
+            message Item8 {
+                int32 unknownInt1 = 1;
+                int32 unknownTimestamp = 2;
+                bytes unknownBytes = 3;
+            }
+            string destOrSourceUUID = 1;
+            int32 unknownInt3 = 3;
+            int32 unknownInt4 = 4;
+            int64 unknownTimestampMicroseconds = 7;
+            Item8 item8 = 8;
+        }
+        Item2 item2 = 2;
+        int64 unknownTimestampMicroseconds = 3;
+        repeated Item4 item4 = 4;
+    }
+
+    int32 command = 1;
+    UnknownContainer maybeServerData = 108;
+}
+
+message AuthenticationContainer {
+    AuthMessage authMessage = 1;
+    BrowserDetails browserDetails = 3;
+
+    oneof data {
+        KeyData keyData = 4;
+        CurrentDeviceData deviceData = 5;
+    }
+}
+
+message AuthMessage {
+    string requestID = 1;
+    string network = 3;
+    bytes tachyonAuthToken = 6;
+    ConfigVersion configVersion = 7;
+}
+
+message RevokeRelayPairingRequest {
+    AuthMessage authMessage = 1;
+    Device browser = 2;
+}
+
+message RevokeRelayPairingResponse {
+}
+
+message RegisterRefreshRequest {
+    message PushRegistration {
+        string type = 1;
+        string url = 2;
+        string p256dh = 3;
+        string auth = 4;
+    }
+
+    message MoreParameters {
+        int32 three = 1;
+        PushRegistration pushReg = 102;
+    }
+
+    message Parameters {
+        optional util.EmptyArr emptyArr = 9;
+        optional MoreParameters moreParameters = 23;
+    }
+
+    AuthMessage messageAuth = 1;
+    Device currBrowserDevice = 2;
+    int64 unixTimestamp = 3;
+    bytes signature = 4;
+    Parameters parameters = 13;
+    int32 messageType = 16;
+}
+
+message RegisterRefreshResponse {
+    TokenData tokenData = 2;
+}
+
+message RegisterPhoneRelayResponse {
+    CoordinateMessage coordinates = 1;
+    Device browser = 2;
+    bytes pairingKey = 3;
+    int64 validFor = 4;
+    TokenData authKeyData = 5;
+    string responseID = 6;
+}
+
+message CoordinateMessage {
+    int64 coord1 = 2;
+}
+
+message RefreshPhoneRelayResponse {
+    CoordinateMessage coordinates = 1;
+    bytes pairKey = 2;
+    int64 validFor = 3;
+}
+
+message WebEncryptionKeyResponse {
+    CoordinateMessage coordinates = 1;
+    bytes key = 2;
+}
+
+message ErrorResponse {
+    int64 type = 1;
+    string message = 2;
+    repeated ErrorClass class = 3;
+
+    message ErrorClass {
+        string class = 1;
+    }
+}
+
+message ECDSAKeys {
+    int64 field1 = 1;
+    bytes encryptedKeys = 2;
+}
+
+message CurrentDeviceData {
+    authentication.Device browser = 1;
+}
+
+message KeyData {
+    Device mobile = 1;
+    ECDSAKeys ecdsaKeys = 6;
+    WebAuthKey webAuthKeyData = 2;
+    Device browser = 3;
+}
+
+message WebAuthKey {
+    bytes webAuthKey = 1;
+    int64 validFor = 2;
+}
+
+message URLData {
+    bytes pairingKey = 1;
+    bytes AESKey = 2;
+    bytes HMACKey = 3;
+}
+
+message TokenData {
+    bytes tachyonAuthToken = 1;
+    int64 TTL = 2;
+}
+
+message PairedData {
+    Device mobile = 1;
+    TokenData tokenData = 2;
+    Device browser = 3;
+}
+
+message RevokePairData {
+    Device revokedDevice = 1;
+}

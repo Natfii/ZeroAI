@@ -1,0 +1,492 @@
+/*
+ * Copyright 2026 @Natfii
+ *
+ * Licensed under the MIT License. See LICENSE in the project root.
+ */
+
+package com.zeroclaw.android.ui.screen.settings.channels
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.data.channel.ChannelSetupSpec
+import com.zeroclaw.android.data.channel.ChannelSetupSpecs
+import com.zeroclaw.android.data.validation.ChannelValidator
+import com.zeroclaw.android.data.validation.ValidationResult
+import com.zeroclaw.android.model.ChannelFieldSpec
+import com.zeroclaw.android.model.ChannelType
+import com.zeroclaw.android.model.ConnectedChannel
+import com.zeroclaw.android.model.FieldInputType
+import com.zeroclaw.android.ui.component.CollapsibleSection
+import com.zeroclaw.android.ui.component.SecretTextField
+import com.zeroclaw.android.ui.component.setup.ChannelSetupFlow
+import com.zeroclaw.android.ui.screen.settings.apikeys.SaveState
+import java.util.UUID
+import kotlinx.coroutines.launch
+
+/** Spacing between form fields. */
+private const val FIELD_SPACING_DP = 12
+
+/** Heading spacing. */
+private const val HEADING_SPACING_DP = 16
+
+/** Bottom spacing. */
+private const val BOTTOM_SPACING_DP = 24
+
+/** Advanced section threshold: channels with more fields than this get a collapsible section. */
+private const val ADVANCED_THRESHOLD = 4
+
+/**
+ * Dynamic form screen for configuring a connected channel.
+ *
+ * Fields are rendered based on the [ChannelType.fields] specification.
+ * Secret fields use password visual transformation with a reveal toggle.
+ * Optional fields beyond the [ADVANCED_THRESHOLD] are grouped in a
+ * collapsible "Advanced" section.
+ *
+ * @param channelId Existing channel ID for editing, or null for new.
+ * @param channelTypeName Channel type name for new channel creation.
+ * @param onSaved Callback invoked after saving.
+ * @param onBack Callback invoked when the user navigates back from the setup flow.
+ * @param edgeMargin Horizontal padding based on window width size class.
+ * @param channelsViewModel The [ChannelsViewModel] for persistence.
+ * @param modifier Modifier applied to the root layout.
+ */
+@Composable
+fun ChannelDetailScreen(
+    channelId: String?,
+    channelTypeName: String?,
+    onSaved: () -> Unit,
+    onBack: () -> Unit = {},
+    edgeMargin: Dp,
+    channelsViewModel: ChannelsViewModel = viewModel(),
+    modifier: Modifier = Modifier,
+) {
+    val saveState by channelsViewModel.saveState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(saveState) {
+        if (saveState is SaveState.Error) {
+            snackbarHostState.showSnackbar((saveState as SaveState.Error).message)
+        }
+    }
+
+    val channelType =
+        remember(channelId, channelTypeName) {
+            if (channelTypeName != null) {
+                runCatching { ChannelType.valueOf(channelTypeName) }.getOrNull()
+            } else {
+                null
+            }
+        }
+
+    var loadedChannel by remember { mutableStateOf<ConnectedChannel?>(null) }
+    var resolvedType by remember { mutableStateOf(channelType) }
+    val fieldValues = remember { mutableStateMapOf<String, String>() }
+    var loaded by remember { mutableStateOf(channelId == null) }
+
+    LaunchedEffect(channelId) {
+        if (channelId != null) {
+            val result = channelsViewModel.loadChannelWithSecrets(channelId)
+            if (result != null) {
+                loadedChannel = result.first
+                resolvedType = result.first.type
+                fieldValues.putAll(result.second)
+            }
+            loaded = true
+        } else if (channelType != null) {
+            channelType.fields.forEach { spec ->
+                if (spec.defaultValue.isNotEmpty()) {
+                    fieldValues[spec.key] = spec.defaultValue
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(saveState) {
+        if (saveState is SaveState.Saved) {
+            channelsViewModel.resetSaveState()
+            onSaved()
+        }
+    }
+
+    val currentType = resolvedType ?: return
+    if (!loaded) return
+
+    val isNewChannel = channelId == null && channelType != null
+    val setupSpec = if (isNewChannel) ChannelSetupSpecs.forType(currentType) else null
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        modifier = modifier,
+    ) { innerPadding ->
+        if (isNewChannel && setupSpec != null) {
+            NewChannelSetupContent(
+                setupSpec = setupSpec,
+                currentType = currentType,
+                fieldValues = fieldValues,
+                onSave = { values ->
+                    val channel =
+                        ConnectedChannel(
+                            id = UUID.randomUUID().toString(),
+                            type = currentType,
+                        )
+                    channelsViewModel.saveChannel(channel, values)
+                },
+                onBack = onBack,
+                edgeMargin = edgeMargin,
+                modifier = Modifier.padding(innerPadding),
+            )
+        } else {
+            EditChannelFormContent(
+                channelId = channelId,
+                currentType = currentType,
+                loadedChannel = loadedChannel,
+                fieldValues = fieldValues,
+                saveState = saveState,
+                onSave = { channel, values ->
+                    channelsViewModel.saveChannel(channel, values)
+                },
+                edgeMargin = edgeMargin,
+                modifier = Modifier.padding(innerPadding),
+            )
+        }
+    }
+}
+
+/**
+ * Guided setup flow for creating a new channel.
+ *
+ * Renders the [ChannelSetupFlow] wizard using the channel's [ChannelSetupSpec],
+ * managing sub-step navigation, field values, and live validation internally.
+ * On the final sub-step the user taps "Done" to save the channel and navigate
+ * back.
+ *
+ * @param setupSpec The channel setup specification defining the sub-steps.
+ * @param currentType The channel type being configured.
+ * @param fieldValues Mutable map of field keys to current string values.
+ * @param onSave Callback to persist the channel with the collected field values.
+ * @param onBack Callback invoked when the user presses Back on the first sub-step.
+ * @param edgeMargin Horizontal padding based on window width size class.
+ * @param modifier Modifier applied to the root layout.
+ */
+@Suppress("LongParameterList")
+@Composable
+private fun NewChannelSetupContent(
+    setupSpec: ChannelSetupSpec,
+    currentType: ChannelType,
+    fieldValues: MutableMap<String, String>,
+    onSave: (Map<String, String>) -> Unit,
+    onBack: () -> Unit,
+    edgeMargin: Dp,
+    modifier: Modifier = Modifier,
+) {
+    var currentSubStep by remember { mutableIntStateOf(0) }
+    var validationResult by remember { mutableStateOf<ValidationResult>(ValidationResult.Idle) }
+    val scope = rememberCoroutineScope()
+
+    ChannelSetupFlow(
+        spec = setupSpec,
+        currentSubStep = currentSubStep,
+        fieldValues = fieldValues,
+        validationResult = validationResult,
+        onFieldChanged = { key, value -> fieldValues[key] = value },
+        onValidate = {
+            scope.launch {
+                validationResult = ValidationResult.Loading
+                validationResult =
+                    ChannelValidator.validate(currentType, fieldValues.toMap())
+            }
+        },
+        onNextSubStep = {
+            if (currentSubStep < setupSpec.steps.size - 1) {
+                currentSubStep++
+                validationResult = ValidationResult.Idle
+            } else {
+                onSave(fieldValues.toMap())
+            }
+        },
+        onPreviousSubStep = {
+            if (currentSubStep > 0) {
+                currentSubStep--
+                validationResult = ValidationResult.Idle
+            } else {
+                onBack()
+            }
+        },
+        modifier =
+            modifier
+                .fillMaxSize()
+                .padding(horizontal = edgeMargin),
+    )
+}
+
+/**
+ * Flat form for editing an existing channel's configuration.
+ *
+ * Preserves the original form layout with required fields at the top,
+ * optional fields below (in a collapsible "Advanced" section when there are
+ * more than [ADVANCED_THRESHOLD] optional fields), and a save button at the
+ * bottom.
+ *
+ * @param channelId The existing channel ID, or null for a new channel fallback.
+ * @param currentType The resolved channel type.
+ * @param loadedChannel The loaded channel entity, or null if creating new.
+ * @param fieldValues Mutable map of field keys to current string values.
+ * @param saveState Current save operation state from the view model.
+ * @param onSave Callback to persist the channel with the collected field values.
+ * @param edgeMargin Horizontal padding based on window width size class.
+ * @param modifier Modifier applied to the root layout.
+ */
+@Suppress("LongParameterList")
+@Composable
+private fun EditChannelFormContent(
+    channelId: String?,
+    currentType: ChannelType,
+    loadedChannel: ConnectedChannel?,
+    fieldValues: MutableMap<String, String>,
+    saveState: SaveState,
+    onSave: (ConnectedChannel, Map<String, String>) -> Unit,
+    edgeMargin: Dp,
+    modifier: Modifier = Modifier,
+) {
+    val requiredFields = currentType.fields.filter { it.isRequired }
+    val optionalFields = currentType.fields.filter { !it.isRequired }
+    val hasAdvanced = optionalFields.size > ADVANCED_THRESHOLD
+
+    val allRequiredFilled =
+        requiredFields.all { spec ->
+            fieldValues[spec.key]?.isNotBlank() == true
+        }
+
+    Column(
+        modifier =
+            modifier
+                .fillMaxSize()
+                .padding(horizontal = edgeMargin)
+                .verticalScroll(rememberScrollState()),
+    ) {
+        Spacer(modifier = Modifier.height(HEADING_SPACING_DP.dp))
+
+        Text(
+            text =
+                if (channelId != null) {
+                    "Edit ${currentType.displayName}"
+                } else {
+                    "Add ${currentType.displayName}"
+                },
+            style = MaterialTheme.typography.headlineSmall,
+        )
+        requiredFields.forEach { spec ->
+            ChannelField(
+                spec = spec,
+                value = fieldValues[spec.key].orEmpty(),
+                onValueChange = { fieldValues[spec.key] = it },
+            )
+            Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
+        }
+
+        if (hasAdvanced) {
+            CollapsibleSection(title = "Advanced") {
+                optionalFields.forEach { spec ->
+                    ChannelField(
+                        spec = spec,
+                        value = fieldValues[spec.key].orEmpty(),
+                        onValueChange = { fieldValues[spec.key] = it },
+                    )
+                    Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
+                }
+            }
+        } else {
+            optionalFields.forEach { spec ->
+                ChannelField(
+                    spec = spec,
+                    value = fieldValues[spec.key].orEmpty(),
+                    onValueChange = { fieldValues[spec.key] = it },
+                )
+                Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(BOTTOM_SPACING_DP.dp))
+
+        FilledTonalButton(
+            onClick = {
+                val channel =
+                    loadedChannel?.copy(
+                        configValues = emptyMap(),
+                    ) ?: ConnectedChannel(
+                        id = UUID.randomUUID().toString(),
+                        type = currentType,
+                    )
+                onSave(channel, fieldValues.toMap())
+            },
+            enabled = allRequiredFilled && saveState !is SaveState.Saving,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (channelId != null) "Save Changes" else "Add Channel")
+        }
+
+        if (saveState is SaveState.Error) {
+            Spacer(modifier = Modifier.height(FIELD_SPACING_DP.dp))
+            Text(
+                text = saveState.message,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(BOTTOM_SPACING_DP.dp))
+    }
+}
+
+/**
+ * Renders a single channel configuration field based on its [ChannelFieldSpec].
+ *
+ * @param spec The field specification.
+ * @param value Current field value.
+ * @param onValueChange Callback when the value changes.
+ */
+@Composable
+private fun ChannelField(
+    spec: ChannelFieldSpec,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    when (spec.inputType) {
+        FieldInputType.BOOLEAN -> {
+            BooleanField(
+                label = spec.label,
+                checked = value.lowercase() == "true",
+                onCheckedChange = { onValueChange(it.toString()) },
+            )
+        }
+        FieldInputType.SECRET -> {
+            SecretField(
+                label = spec.label,
+                value = value,
+                onValueChange = onValueChange,
+                isRequired = spec.isRequired,
+            )
+        }
+        else -> {
+            val keyboardType =
+                when (spec.inputType) {
+                    FieldInputType.NUMBER -> KeyboardType.Number
+                    FieldInputType.URL -> KeyboardType.Uri
+                    else -> KeyboardType.Text
+                }
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = {
+                    Text(
+                        if (spec.isRequired) "${spec.label} *" else spec.label,
+                    )
+                },
+                supportingText =
+                    if (spec.inputType == FieldInputType.LIST) {
+                        { Text("Comma-separated values") }
+                    } else {
+                        null
+                    },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+/**
+ * A boolean toggle field rendered as a labeled switch.
+ *
+ * @param label Human-readable label.
+ * @param checked Current toggle state.
+ * @param onCheckedChange Callback when toggled.
+ */
+@Composable
+private fun BooleanField(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier =
+                Modifier.semantics {
+                    contentDescription = "$label ${if (checked) "enabled" else "disabled"}"
+                },
+        )
+    }
+}
+
+/**
+ * A secret text field with password masking and a reveal toggle.
+ *
+ * Delegates to the shared [SecretTextField] component which uses
+ * [KeyboardType.Text] instead of [KeyboardType.Password] to allow
+ * clipboard paste on Android's secure keyboards.
+ *
+ * @param label Human-readable label.
+ * @param value Current field value.
+ * @param onValueChange Callback when text changes.
+ * @param isRequired Whether the field is required.
+ */
+@Composable
+private fun SecretField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    isRequired: Boolean,
+) {
+    SecretTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = if (isRequired) "$label *" else label,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}

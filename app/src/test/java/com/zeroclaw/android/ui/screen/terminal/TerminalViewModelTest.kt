@@ -1,0 +1,371 @@
+/*
+ * Copyright 2026 @Natfii
+ *
+ * Licensed under the MIT License. See LICENSE in the project root.
+ */
+
+package com.zeroclaw.android.ui.screen.terminal
+
+import com.zeroclaw.android.model.TerminalEntry
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.DisplayName
+import org.junit.jupiter.api.Nested
+import org.junit.jupiter.api.Test
+
+/**
+ * Unit tests for [TerminalViewModel] companion utilities and [TerminalState].
+ *
+ * The ViewModel itself requires an [android.app.Application] and native
+ * library loading, so these tests exercise the static helper functions
+ * and state mapping logic that can be tested without the Android framework.
+ */
+@DisplayName("TerminalViewModel")
+class TerminalViewModelTest {
+    @Nested
+    @DisplayName("shouldPersistAgentTurnFailure")
+    inner class ShouldPersistAgentTurnFailure {
+        @Test
+        @DisplayName("returns false when listener already emitted same error")
+        fun `returns false when listener already emitted same error`() {
+            assertEquals(
+                false,
+                TerminalViewModel.shouldPersistAgentTurnFailure(
+                    listenerError = "Cloud Code API disabled",
+                    caughtError = "Cloud Code API disabled",
+                ),
+            )
+        }
+
+        @Test
+        @DisplayName("returns true when listener did not emit an error")
+        fun `returns true when listener did not emit an error`() {
+            assertEquals(
+                true,
+                TerminalViewModel.shouldPersistAgentTurnFailure(
+                    listenerError = null,
+                    caughtError = "No active session",
+                ),
+            )
+        }
+
+        @Test
+        @DisplayName("returns true when listener emitted a different error")
+        fun `returns true when listener emitted a different error`() {
+            assertEquals(
+                true,
+                TerminalViewModel.shouldPersistAgentTurnFailure(
+                    listenerError = "Rate limited",
+                    caughtError = "No active session",
+                ),
+            )
+        }
+    }
+
+    @Nested
+    @DisplayName("decideDefaultChatRouting")
+    inner class DecideDefaultChatRouting {
+        @Test
+        @DisplayName("configured cloud provider bypasses Nano heuristic")
+        fun `configured cloud provider bypasses nano heuristic`() {
+            val result =
+                TerminalViewModel.decideDefaultChatRouting(
+                    hasConfiguredCloudProvider = true,
+                    query = "hello",
+                )
+
+            assertTrue(result is RoutingDecision.Cloud)
+            assertEquals(
+                "configured cloud provider available",
+                (result as RoutingDecision.Cloud).reason,
+            )
+        }
+
+        @Test
+        @DisplayName("without cloud provider falls back to Nano heuristic")
+        fun `without cloud provider falls back to nano heuristic`() {
+            val result =
+                TerminalViewModel.decideDefaultChatRouting(
+                    hasConfiguredCloudProvider = false,
+                    query = "hello",
+                )
+
+            assertTrue(result is RoutingDecision.Local)
+        }
+    }
+
+    @Nested
+    @DisplayName("toBlock")
+    inner class ToBlock {
+        @Test
+        @DisplayName("maps input entry to Input block")
+        fun `maps input entry to Input block`() {
+            val entry =
+                TerminalEntry(
+                    id = 1,
+                    content = "/status",
+                    entryType = "input",
+                    timestamp = 1000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Input)
+            assertEquals("/status", (block as TerminalBlock.Input).text)
+            assertEquals(1L, block.id)
+            assertEquals(1000L, block.timestamp)
+        }
+
+        @Test
+        @DisplayName("maps response entry to Response block")
+        fun `maps response entry to Response block`() {
+            val entry =
+                TerminalEntry(
+                    id = 2,
+                    content = "Daemon is running",
+                    entryType = "response",
+                    timestamp = 2000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Response)
+            assertEquals("Daemon is running", (block as TerminalBlock.Response).content)
+        }
+
+        @Test
+        @DisplayName("maps JSON response to Structured block")
+        fun `maps JSON response to Structured block`() {
+            val json = """{"daemon_running": true, "uptime": 3600}"""
+            val entry =
+                TerminalEntry(
+                    id = 3,
+                    content = json,
+                    entryType = "response",
+                    timestamp = 3000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Structured)
+            assertEquals(json, (block as TerminalBlock.Structured).json)
+        }
+
+        @Test
+        @DisplayName("maps array response to Structured block")
+        fun `maps array response to Structured block`() {
+            val json = """[{"name": "skill-1"}]"""
+            val entry =
+                TerminalEntry(
+                    id = 4,
+                    content = json,
+                    entryType = "response",
+                    timestamp = 4000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Structured)
+        }
+
+        @Test
+        @DisplayName("maps error entry to Error block")
+        fun `maps error entry to Error block`() {
+            val entry =
+                TerminalEntry(
+                    id = 5,
+                    content = "Connection refused",
+                    entryType = "error",
+                    timestamp = 5000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Error)
+            assertEquals("Connection refused", (block as TerminalBlock.Error).message)
+        }
+
+        @Test
+        @DisplayName("maps system entry to System block")
+        fun `maps system entry to System block`() {
+            val entry =
+                TerminalEntry(
+                    id = 6,
+                    content = "ZeroAI Terminal v0.0.37",
+                    entryType = "system",
+                    timestamp = 6000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.System)
+            assertEquals("ZeroAI Terminal v0.0.37", (block as TerminalBlock.System).text)
+        }
+
+        @Test
+        @DisplayName("maps unknown entry type to System block")
+        fun `maps unknown entry type to System block`() {
+            val entry =
+                TerminalEntry(
+                    id = 7,
+                    content = "Unknown type",
+                    entryType = "unknown",
+                    timestamp = 7000L,
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.System)
+        }
+
+        @Test
+        @DisplayName("maps input entry with image URIs to Input block with image names")
+        fun `maps input entry with image URIs to Input block with image names`() {
+            val entry =
+                TerminalEntry(
+                    id = 8,
+                    content = "describe this",
+                    entryType = "input",
+                    timestamp = 8000L,
+                    imageUris = listOf("content://media/external/images/photo.jpg"),
+                )
+            val block = TerminalViewModel.toBlock(entry)
+            assertTrue(block is TerminalBlock.Input)
+            val inputBlock = block as TerminalBlock.Input
+            assertEquals(1, inputBlock.imageNames.size)
+            assertEquals("photo.jpg", inputBlock.imageNames.first())
+        }
+    }
+
+    @Nested
+    @DisplayName("stripThinkingTags")
+    inner class StripThinkingTags {
+        @Test
+        @DisplayName("removes think tags from response")
+        fun `removes think tags from response`() {
+            val input = "<think>Let me reason about this.</think>The answer is 42."
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("The answer is 42.", result)
+        }
+
+        @Test
+        @DisplayName("removes thinking tags from response")
+        fun `removes thinking tags from response`() {
+            val input = "<thinking>Internal reasoning here.</thinking>Final answer."
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("Final answer.", result)
+        }
+
+        @Test
+        @DisplayName("removes commentary tags from response")
+        fun `removes commentary tags from response`() {
+            val input = "<commentary>Internal notes.</commentary>The answer."
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("The answer.", result)
+        }
+
+        @Test
+        @DisplayName("removes tool_output tags from response")
+        fun `removes tool_output tags from response`() {
+            val input = "<tool_output>curl result here</tool_output>Summary."
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("Summary.", result)
+        }
+
+        @Test
+        @DisplayName("removes analysis tags from response")
+        fun `removes analysis tags from response`() {
+            val input = "<analysis>We have curl and can reach...</analysis>Yes, I can."
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("Yes, I can.", result)
+        }
+
+        @Test
+        @DisplayName("passes through text without thinking tags")
+        fun `passes through text without thinking tags`() {
+            val input = "Plain response text"
+            val result = TerminalViewModel.stripThinkingTags(input)
+            assertEquals("Plain response text", result)
+        }
+    }
+
+    @Nested
+    @DisplayName("stripToolCallTags")
+    inner class StripToolCallTags {
+        @Test
+        @DisplayName("removes tool_call tags from response")
+        fun `removes tool_call tags from response`() {
+            val input = "Result: <tool_call>{\"name\":\"test\"}</tool_call>done"
+            val result = TerminalViewModel.stripToolCallTags(input)
+            assertEquals("Result: done", result)
+        }
+
+        @Test
+        @DisplayName("removes unclosed tool_call tags")
+        fun `removes unclosed tool_call tags`() {
+            val input = "Partial: <tool_call>{\"name\":\"test\"}"
+            val result = TerminalViewModel.stripToolCallTags(input)
+            assertEquals("Partial:", result)
+        }
+
+        @Test
+        @DisplayName("passes through text without tool call tags")
+        fun `passes through text without tool call tags`() {
+            val input = "Normal response"
+            val result = TerminalViewModel.stripToolCallTags(input)
+            assertEquals("Normal response", result)
+        }
+    }
+
+    @Nested
+    @DisplayName("bindResultPattern")
+    inner class BindResultPattern {
+        @Test
+        @DisplayName("matches valid bind result for telegram")
+        fun `matches valid bind result for telegram`() {
+            val input = "Bound alice to telegram (allowed_users). Restart daemon to apply."
+            val match = TerminalViewModel.BIND_RESULT_PATTERN.find(input)
+            assertNotNull(match)
+            assertEquals("alice", match!!.destructured.component1())
+            assertEquals("telegram", match.destructured.component2())
+            assertEquals("allowed_users", match.destructured.component3())
+        }
+
+        @Test
+        @DisplayName("matches bind result for discord with user ID")
+        fun `matches bind result for discord with user ID`() {
+            val input =
+                "Bound 123456789 to discord (allowed_users). Restart daemon to apply."
+            val match = TerminalViewModel.BIND_RESULT_PATTERN.find(input)
+            assertNotNull(match)
+            assertEquals("123456789", match!!.destructured.component1())
+            assertEquals("discord", match.destructured.component2())
+            assertEquals("allowed_users", match.destructured.component3())
+        }
+
+        @Test
+        @DisplayName("does not match already bound message")
+        fun `does not match already bound message`() {
+            val input = "alice is already bound to telegram"
+            assertNull(TerminalViewModel.BIND_RESULT_PATTERN.find(input))
+        }
+
+        @Test
+        @DisplayName("does not match unrelated text")
+        fun `does not match unrelated text`() {
+            val input = "Daemon is running"
+            assertNull(TerminalViewModel.BIND_RESULT_PATTERN.find(input))
+        }
+    }
+
+    @Nested
+    @DisplayName("TerminalState defaults")
+    inner class StateDefaults {
+        @Test
+        @DisplayName("default state has empty blocks and loading false")
+        fun `default state has empty blocks and loading false`() {
+            val state = TerminalState()
+            assertTrue(state.blocks.isEmpty())
+            assertEquals(false, state.isLoading)
+            assertTrue(state.pendingImages.isEmpty())
+            assertEquals(false, state.isProcessingImages)
+        }
+
+        @Test
+        @DisplayName("default setup progress has empty purged channels")
+        fun `default setup progress has empty purged channels`() {
+            val progress =
+                com.zeroclaw.android.ui.screen.setup
+                    .SetupProgress()
+            assertTrue(progress.purgedChannels.isEmpty())
+        }
+    }
+}

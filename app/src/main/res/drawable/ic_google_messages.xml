@@ -1,0 +1,27 @@
+<!--
+  ~ Copyright (c) 2026 @Natfii. All rights reserved.
+  -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="40dp"
+    android:height="40dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Blue background circle -->
+    <path
+        android:pathData="M48,48m-48,0a48,48 0,1 1,96 0a48,48 0,1 1,-96 0"
+        android:fillColor="#1A73E8" />
+    <!-- White chat bubble body -->
+    <path
+        android:pathData="M24,30C24,27.79 25.79,26 28,26L68,26C70.21,26 72,27.79 72,30L72,54C72,56.21 70.21,58 68,58L38,58L28,68L28,58C25.79,58 24,56.21 24,54Z"
+        android:fillColor="#FFFFFF" />
+    <!-- Three dots -->
+    <path
+        android:pathData="M38,42m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0"
+        android:fillColor="#1A73E8" />
+    <path
+        android:pathData="M48,42m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0"
+        android:fillColor="#1A73E8" />
+    <path
+        android:pathData="M58,42m-3,0a3,3 0,1 1,6 0a3,3 0,1 1,-6 0"
+        android:fillColor="#1A73E8" />
+</vector>

@@ -1,0 +1,53 @@
+[graph]
+targets = [
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
+
+[advisories]
+unmaintained = "workspace"
+yanked = "warn"
+ignore = [
+    # serde_yml unmaintained advisory — no drop-in replacement available yet.
+    # Tracked upstream: https://github.com/rustsec/advisory-db/issues/2395
+    "RUSTSEC-2025-0068",
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+    "0BSD",
+    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+]
+confidence-threshold = 0.8
+
+[[licenses.exceptions]]
+name = "ar_archive_writer"
+allow = ["Apache-2.0 WITH LLVM-exception"]
+
+[[licenses.exceptions]]
+name = "aws-lc-sys"
+allow = ["OpenSSL"]
+
+[[licenses.clarify]]
+name = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

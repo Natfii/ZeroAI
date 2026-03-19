@@ -1,0 +1,10 @@
+// Copyright (c) 2026 @Natfii. All rights reserved.
+// Protobuf schemas ported from mautrix-gmessages (AGPL-3.0)
+// Original: https://github.com/mautrix/gmessages/tree/main/pkg/libgm/gmproto
+
+syntax = "proto3";
+package util;
+
+message EmptyArr {
+
+}

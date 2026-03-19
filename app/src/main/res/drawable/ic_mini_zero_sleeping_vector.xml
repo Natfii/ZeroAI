@@ -1,0 +1,30 @@
+<!-- Copyright (c) 2026 @Natfii. All rights reserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="64dp"
+    android:height="64dp"
+    android:viewportWidth="16"
+    android:viewportHeight="16">
+    <group
+        android:name="mascotRoot"
+        android:pivotX="8"
+        android:pivotY="8">
+        <path
+            android:fillColor="#2A6FB6"
+            android:pathData="M5,2h6v1h2v2h1v6h-1v2h-2v1H5v-1H3v-2H2V5h1V3h2V2z" />
+        <path
+            android:fillColor="#59A6E8"
+            android:pathData="M6,4h4v1h1v1h1v4h-1v1h-1v1H6v-1H5v-1H4V6h1V5h1V4z" />
+        <path
+            android:fillColor="#09111B"
+            android:pathData="M5,8h2v1H5z" />
+        <path
+            android:fillColor="#09111B"
+            android:pathData="M9,8h2v1H9z" />
+        <path
+            android:fillColor="#2A6FB6"
+            android:pathData="M5,13h1v1H5z" />
+        <path
+            android:fillColor="#2A6FB6"
+            android:pathData="M10,13h1v1h-1z" />
+    </group>
+</vector>

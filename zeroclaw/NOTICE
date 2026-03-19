@@ -1,0 +1,24 @@
+ZeroClaw Rust Core
+Copyright 2025 ZeroClaw Labs
+Copyright 2026 Zeroclaw Labs
+
+This directory includes a stripped and modified version of the upstream ZeroClaw project:
+https://github.com/zeroclaw-labs/zeroclaw
+
+License
+=======
+
+The upstream project is offered under MIT OR Apache-2.0.
+For the `zeroclaw/` directory in this repository, the MIT license option is used.
+See LICENSE-MIT.
+
+Original upstream notices and attribution remain with their respective authors.
+Local modifications in this repository are attributed in the repository history.
+
+Third-Party Dependencies
+========================
+
+This project uses third-party libraries and components,
+each licensed under their respective terms.
+
+See Cargo.lock for a complete dependency list.

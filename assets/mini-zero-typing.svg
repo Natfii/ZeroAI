@@ -1,0 +1,18 @@
+<!-- Copyright (c) 2026 @Natfii. All rights reserved. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges" role="img" aria-labelledby="title">
+  <title id="title">Zero Blob Mascot — Typing</title>
+  <style>
+    @keyframes pixel-recall { 0%, 20%, 100% { transform: translate(0, 0); } 40%, 80% { transform: translate(1px, -1px); } }
+    .eyes { animation: pixel-recall 2s steps(2) infinite; }
+  </style>
+  <g>
+    <path fill="#2A6FB6" d="M5 2h6v1h2v2h1v6h-1v2h-2v1H5v-1H3v-2H2V5h1V3h2V2z"/>
+    <path fill="#59A6E8" d="M6 4h4v1h1v1h1v4h-1v1h-1v1H6v-1H5v-1H4V6h1V5h1V4z"/>
+    <g class="eyes">
+      <rect x="5" y="6" width="2" height="2" fill="#09111B"/>
+      <rect x="9" y="6" width="2" height="2" fill="#09111B"/>
+    </g>
+    <rect x="5" y="13" width="1" height="1" fill="#2A6FB6"/>
+    <rect x="10" y="13" width="1" height="1" fill="#2A6FB6"/>
+  </g>
+</svg>

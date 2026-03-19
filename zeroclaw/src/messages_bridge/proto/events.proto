@@ -1,0 +1,109 @@
+// Copyright (c) 2026 @Natfii. All rights reserved.
+// Protobuf schemas ported from mautrix-gmessages (AGPL-3.0)
+// Original: https://github.com/mautrix/gmessages/tree/main/pkg/libgm/gmproto
+
+syntax = "proto3";
+package events;
+
+import "conversations.proto";
+import "authentication.proto";
+import "settings.proto";
+
+message UpdateEvents {
+    oneof event {
+        ConversationEvent conversationEvent = 2;
+        MessageEvent messageEvent = 3;
+        TypingEvent typingEvent = 4;
+        settings.Settings settingsEvent = 5;
+        UserAlertEvent userAlertEvent = 6;
+        BrowserPresenceCheckEvent browserPresenceCheckEvent = 7;
+        AccountChangeOrSomethingEvent accountChange = 15;
+    }
+}
+
+message EncryptedData2Container {
+    AccountChangeOrSomethingEvent accountChange = 2;
+}
+
+message AccountChangeOrSomethingEvent {
+    string account = 1;
+    bool enabled = 2;
+}
+
+message ConversationEvent {
+    repeated conversations.Conversation data = 2;
+}
+
+message TypingEvent {
+    TypingData data = 2;
+}
+
+message MessageEvent {
+    repeated conversations.Message data = 2;
+}
+
+message UserAlertEvent {
+    AlertType alertType = 2;
+}
+
+message BrowserPresenceCheckEvent {}
+
+message TypingData {
+    string conversationID = 1;
+    User user = 2;
+    TypingTypes type = 3;
+    conversations.SomeKindOfGroupID someKindOfGroupID = 4;
+}
+
+message MoreTypingData {
+    string conversationID = 1;
+    repeated string number = 3;
+}
+
+message User {
+    int64 field1 = 1;
+    string number = 2;
+}
+
+message RPCPairData {
+    oneof event {
+        authentication.PairedData paired = 4;
+        authentication.RevokePairData revoked = 5;
+    }
+}
+
+enum AlertType {
+    ALERT_TYPE_UNKNOWN = 0;
+    BROWSER_INACTIVE = 1;
+    BROWSER_ACTIVE = 2;
+    MOBILE_DATA_CONNECTION = 3;
+    MOBILE_WIFI_CONNECTION = 4;
+    MOBILE_BATTERY_LOW = 5;
+    MOBILE_BATTERY_RESTORED = 6;
+    BROWSER_INACTIVE_FROM_TIMEOUT = 7;
+    BROWSER_INACTIVE_FROM_INACTIVITY = 8;
+    RCS_CONNECTION = 9;
+    OBSERVER_REGISTERED = 10;
+    MOBILE_DATABASE_SYNCING = 11;
+    MOBILE_DATABASE_SYNC_COMPLETE = 12;
+    MOBILE_DATABASE_SYNC_STARTED = 13;
+    MOBILE_DATABASE_PARTIAL_SYNC_COMPLETED = 14;
+    MOBILE_DATABASE_PARTIAL_SYNC_STARTED = 15;
+    CONTACTS_REFRESH_STARTED = 16;
+    CONTACTS_REFRESH_COMPLETED = 17;
+    DISCONNECTED_FROM_SATELLITE = 18;
+    BR_MESSAGE_RESTORING = 19;
+    BR_MESSAGE_RESTORE_COMPLETED = 20;
+    BR_MESSAGE_RESTORE_STARTED = 21;
+    PUSH_THROTTLING = 22;
+    PUSH_THROTTLE_STARTED = 23;
+    PUSH_THROTTLE_ENDED = 24;
+    PUSH_THROTTLE_STARTED_IN_DARK_LAUNCH = 25;
+    PUSH_THROTTLE_ENDED_IN_DARK_LAUNCH = 26;
+    PUSH_THROTTLING_IN_DARK_LAUNCH = 27;
+}
+
+enum TypingTypes {
+    STOPPED_TYPING = 0;
+    STARTED_TYPING = 1;
+}

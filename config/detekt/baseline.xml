@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>CognitiveComplexMethod:AppsCatalogViewModel.kt$AppsCatalogViewModel$@Suppress("TooGenericExceptionCaught") private fun tailscaleItem(settings: AppSettings): AppCatalogItem</ID>
+    <ID>CognitiveComplexMethod:ConfigTomlBuilder.kt$ConfigTomlBuilder$fun buildChannelsToml( channelsWithSecrets: List&lt;Pair&lt;ConnectedChannel, Map&lt;String, String>>>, discordGuildId: String? = null, ): String</ID>
+    <ID>CognitiveComplexMethod:TailscaleConfigViewModel.kt$TailscaleConfigViewModel$@Suppress("TooGenericExceptionCaught") fun scanServices()</ID>
+    <ID>CognitiveComplexMethod:TailscaleConfigViewModel.kt$TailscaleConfigViewModel$fun addManualPeer(peerAddress: String)</ID>
+    <ID>CyclomaticComplexMethod:SharedFolderSafHelper.kt$SharedFolderSafHelper$fun write( rootUri: Uri, path: String, content: String?, isBase64: Boolean, mkdir: Boolean, ): String</ID>
+    <ID>FunctionOnlyReturningConstant:ZeroAIDaemonService.kt$ZeroAIDaemonService$private fun clawBoyAwarenessFragment(): String</ID>
+    <ID>LongMethod:AppsCatalogViewModel.kt$AppsCatalogViewModel$@Suppress("TooGenericExceptionCaught") private fun tailscaleItem(settings: AppSettings): AppCatalogItem</ID>
+    <ID>LongMethod:TailscaleConfigViewModel.kt$TailscaleConfigViewModel$@Suppress("TooGenericExceptionCaught") fun scanServices()</ID>
+    <ID>LongMethod:TailscaleConfigViewModel.kt$TailscaleConfigViewModel$fun addManualPeer(peerAddress: String)</ID>
+    <ID>LongMethod:ZeroAIDaemonService.kt$ZeroAIDaemonService$@Suppress("CognitiveComplexMethod", "TooGenericExceptionCaught") private fun attemptStart( configToml: String, host: String, port: UShort, memoryBackend: String = "none", )</ID>
+    <ID>MagicNumber:SharedFolderSafHelper.kt$SharedFolderSafHelper$1024</ID>
+    <ID>MagicNumber:SharedFolderSafHelper.kt$SharedFolderSafHelper$3</ID>
+    <ID>MagicNumber:ZeroAIDaemonService.kt$ZeroAIDaemonService$3</ID>
+    <ID>NestedBlockDepth:SharedFolderSafHelper.kt$SharedFolderSafHelper$private fun findChild( treeUri: Uri, parentUri: Uri, childName: String, ): Uri?</ID>
+    <ID>OutdatedDocumentation:ConfigTomlBuilder.kt$GlobalTomlConfig</ID>
+    <ID>OutdatedDocumentation:GoogleMessagesScreen.kt$@Composable private fun PairingContent( qrPageUrl: String, onCancel: () -> Unit, )</ID>
+    <ID>ReturnCount:SharedFolderSafHelper.kt$SharedFolderSafHelper$fun write( rootUri: Uri, path: String, content: String?, isBase64: Boolean, mkdir: Boolean, ): String</ID>
+    <ID>SwallowedException:DiscordChannelsViewModel.kt$DiscordChannelsViewModel$e: com.zeroclaw.ffi.FfiException.StateException</ID>
+    <ID>SwallowedException:GoogleMessagesViewModel.kt$GoogleMessagesViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:GoogleMessagesViewModel.kt$GoogleMessagesViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:SharedFolderSafHelper.kt$SharedFolderSafHelper$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:TailscaleConfigViewModel.kt$TailscaleConfigViewModel$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:ZeroAIDaemonService.kt$ZeroAIDaemonService$e: Exception</ID>
+    <ID>UndocumentedPublicClass:MessageClassifier.kt$MessageClassifier$Companion</ID>
+    <ID>UndocumentedPublicClass:SharedFolderSafHelper.kt$SharedFolderSafHelper$Companion</ID>
+  </CurrentIssues>
+</SmellBaseline>

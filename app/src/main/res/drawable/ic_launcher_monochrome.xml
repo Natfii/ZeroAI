@@ -1,0 +1,22 @@
+<!-- Copyright (c) 2026 @Natfii. All rights reserved. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="6"
+        android:scaleY="6"
+        android:translateX="6"
+        android:translateY="6">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M5,2h6v1h2v2h1v6h-1v2h-2v1H5v-1H3v-2H2V5h1V3h2V2z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M5,13h1v1H5z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M10,13h1v1h-1z" />
+    </group>
+</vector>

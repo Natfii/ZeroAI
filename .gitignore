@@ -1,0 +1,73 @@
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+.cargo/config.toml
+
+# Android / Gradle
+*.iml
+.gradle/
+build/
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+captures/
+.externalNativeBuild/
+.cxx/
+*.jks
+*.keystore
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Environment files (may contain secrets)
+.env
+.env.local
+.env.*.local
+
+# Secret keys and credentials
+.secret_key
+*.key
+*.pem
+credentials.json
+google-services.json
+
+# Compiled native libs (built by cargo-ndk, bundled in APK)
+app/src/main/jniLibs/
+
+# Node modules
+node_modules/
+
+# MCP config (local)
+.mcp.json
+
+# Design documents (local only)
+docs/
+
+# Hook scripts (local machine paths)
+scripts/hooks/
+
+# AI agent instructions (local only — agents.md.default is the tracked template)
+.claude/
+CLAUDE.md
+agents.md
+
+# Agent task output files
+*.output
+codex-x86_64-pc-windows-msvc.exe
+
+# Git worktrees
+.worktrees/
+.tmp/
+.kotlin/

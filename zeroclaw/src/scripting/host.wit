@@ -1,0 +1,45 @@
+// Copyright (c) 2026 Zeroclaw Labs. All rights reserved.
+
+package zero:scripting@0.1.0;
+
+interface host {
+    record tool-call {
+        name: string,
+        args-json: string,
+    }
+
+    record memory-query {
+        query: string,
+        limit: u32,
+    }
+
+    record memory-write {
+        key: string,
+        value: string,
+    }
+
+    record storage-read {
+        path: string,
+    }
+
+    record storage-write {
+        path: string,
+        value: string,
+    }
+
+    record model-request {
+        prompt: string,
+    }
+
+    invoke-tool: func(call: tool-call) -> result<string, string>;
+    read-memory: func(query: memory-query) -> result<string, string>;
+    write-memory: func(write: memory-write) -> result<bool, string>;
+    subscribe-events: func(filter: option<string>) -> result<string, string>;
+    read-storage: func(request: storage-read) -> result<string, string>;
+    write-storage: func(request: storage-write) -> result<bool, string>;
+    model-chat: func(request: model-request) -> result<string, string>;
+}
+
+world zero-scripting-plugin {
+    import host;
+}

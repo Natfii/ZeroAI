@@ -1,0 +1,15 @@
+<!-- Copyright (c) 2026 @Natfii. All rights reserved. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges" role="img" aria-labelledby="title">
+  <title id="title">Zero Blob Mascot — Success</title>
+  <style>
+    @keyframes success-hop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+    g { animation: success-hop 0.6s steps(2) infinite; }
+  </style>
+  <g>
+    <path fill="#2A6FB6" d="M5 2h6v1h2v2h1v6h-1v2h-2v1H5v-1H3v-2H2V5h1V3h2V2z"/>
+    <path fill="#59A6E8" d="M6 4h4v1h1v1h1v4h-1v1h-1v1H6v-1H5v-1H4V6h1V5h1V4z"/>
+    <path fill="#09111B" d="M5 8V7h1V6h1V7h1V8H5zM9 8V7h1V6h1V7h1V8H9z"/>
+    <rect x="5" y="13" width="1" height="1" fill="#2A6FB6"/>
+    <rect x="10" y="13" width="1" height="1" fill="#2A6FB6"/>
+  </g>
+</svg>

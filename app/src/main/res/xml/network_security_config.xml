@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext allowed for local/self-hosted AI servers (Ollama, LM Studio,
+  vLLM, etc.) reachable on the LAN or loopback. Android domain-config
+  does not support CIDR notation for IP ranges, so the base-config permits
+  cleartext globally. Cloud API traffic relies on TLS at the transport
+  layer (Rust reqwest enforces HTTPS for all known provider endpoints).
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

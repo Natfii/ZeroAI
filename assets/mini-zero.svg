@@ -1,0 +1,103 @@
+<!-- Copyright (c) 2026 @Natfii. All rights reserved. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges" role="img" aria-labelledby="title desc">
+  <title id="title">Zero Blob Mascot</title>
+  <style>
+    svg { overflow: visible; }
+    /* Centered origins for the 16x16 grid */
+    .root { transform-origin: 8px 8px; }
+    .eyes-container, .eyes-default, .eyes-smiling, .eyes-heart, .eyes-angry, .eyes-sleeping { 
+      transform-origin: 8px 7px; 
+    }
+    
+    /* Default visibility */
+    .eyes-angry, .eyes-sleeping, .eyes-heart, .eyes-smiling { display: none; }
+    .eyes-default { display: block; }
+
+    /* --- Animations --- */
+    @keyframes pixel-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+    @keyframes pixel-blink { 0%, 94%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0); } }
+    @keyframes pixel-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+    @keyframes pixel-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 75% { transform: translateX(1px); } }
+    @keyframes pixel-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(0.97) translateY(0.5px); } }
+    @keyframes pixel-peek { 0% { transform: translateX(16px); } 100% { transform: translateX(0); } }
+    @keyframes pixel-recall { 0%, 20%, 100% { transform: translate(0, 0); } 40%, 80% { transform: translate(1px, -1px); } }
+
+    /* --- Base State (Idle) --- */
+    .root { animation: pixel-float 1.2s steps(2) infinite; }
+    .eyes-default { animation: pixel-blink 4s infinite; }
+
+    /* --- State Overrides --- */
+    
+    /* SMILING & SUCCESS */
+    .smiling .eyes-smiling, .success .eyes-smiling { display: block; }
+    .smiling .eyes-default, .success .eyes-default { display: none; }
+    .success .root { animation: pixel-bounce 0.6s steps(2) infinite; }
+
+    /* LOVE */
+    .love .eyes-heart { display: block; }
+    .love .eyes-default { display: none; }
+    .love .root { animation: pixel-bounce 0.8s steps(2) infinite; }
+
+    /* ANGRY & ERROR */
+    .angry .eyes-angry, .error .eyes-angry { display: block; }
+    .angry .eyes-default, .error .eyes-default { display: none; }
+    .angry .root { animation: pixel-shake 0.3s steps(2) infinite; }
+    .error .root { animation: pixel-shake 0.15s steps(2) infinite; }
+
+    /* SLEEPING */
+    .sleeping .eyes-sleeping { display: block; }
+    .sleeping .eyes-default { display: none; }
+    .sleeping .root { animation: pixel-breathe 3s ease-in-out infinite; }
+
+    /* PEEK */
+    .peek .root { animation: pixel-peek 2s ease-out infinite; }
+
+    /* TYPING */
+    .typing .root { animation: pixel-pulse 0.8s ease-in-out infinite; }
+    .typing .eyes-default { animation: pixel-recall 2s steps(2) infinite; }
+
+  </style>
+  
+  <g class="root">
+    <!-- Main Round Body (Blue 0) -->
+    <path fill="#2A6FB6" d="M5 2h6v1h2v2h1v6h-1v2h-2v1H5v-1H3v-2H2V5h1V3h2V2z"/>
+    
+    <!-- Body Shine/Core (Light Blue) -->
+    <path fill="#59A6E8" d="M6 4h4v1h1v1h1v4h-1v1h-1v1H6v-1H5v-1H4V6h1V5h1V4z"/>
+
+    <g class="eyes-container">
+      <!-- Default Eyes -->
+      <g class="eyes-default">
+        <rect x="5" y="6" width="2" height="2" fill="#09111B"/>
+        <rect x="9" y="6" width="2" height="2" fill="#09111B"/>
+      </g>
+      
+      <!-- Smiling Eyes [^ ^] -->
+      <g class="eyes-smiling">
+        <path fill="#09111B" d="M5 8V7h1V6h1V7h1V8H5zM9 8V7h1V6h1V7h1V8H9z"/>
+      </g>
+
+      <!-- Heart Eyes [❤️❤️] -->
+      <g class="eyes-heart">
+        <path fill="#FF4B4B" d="M4 6h1v1h1V6h1v2h-1v1h-1V8H4zm4 0h1v1h1V6h1v2h-1v1h-1V8H8z"/>
+      </g>
+      
+      <!-- Angry Eyes [\ /] -->
+      <g class="eyes-angry">
+        <path fill="#09111B" d="M5 5v1h1v1h1v1H5zm6 0v1h-1v1h-1v1h2z"/>
+        <rect x="5" y="7" width="2" height="1" fill="#09111B"/>
+        <rect x="9" y="7" width="2" height="1" fill="#09111B"/>
+      </g>
+
+      <!-- Sleeping Eyes [- -] -->
+      <g class="eyes-sleeping">
+        <rect x="5" y="8" width="2" height="1" fill="#09111B"/>
+        <rect x="9" y="8" width="2" height="1" fill="#09111B"/>
+      </g>
+    </g>
+
+    <!-- Tiny Feet -->
+    <rect x="5" y="13" width="1" height="1" fill="#2A6FB6"/>
+    <rect x="10" y="13" width="1" height="1" fill="#2A6FB6"/>
+  </g>
+</svg>
