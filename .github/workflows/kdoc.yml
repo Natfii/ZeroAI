@@ -1,0 +1,62 @@
+# Copyright (c) 2026 @Natfii. All rights reserved.
+
+name: Generate KDocs
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: kdoc-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  kdoc:
+    name: Generate KDocs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, x86_64-linux-android
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Cache Gradle & Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.cargo/registry
+            ~/.cargo/git
+            zeroclaw-android/target
+          key: ${{ runner.os }}-kdoc-${{ hashFiles('zeroclaw-android/Cargo.lock', '**/*.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-kdoc-
+
+      - name: Generate KDocs
+        run: ./gradlew :app:dokkaGeneratePublicationHtml
+
+      - name: Upload KDocs
+        uses: actions/upload-artifact@v4
+        with:
+          name: kdoc-${{ github.sha }}
+          path: app/build/dokka/html/
+          retention-days: 30
+          if-no-files-found: error
