@@ -14,7 +14,7 @@ If you are evaluating the project locally:
 
 - keep signing files, local properties, and other machine-specific secrets outside the repo
 - read [README.md](README.md) for build prerequisites and repository layout
-- follow the Kotlin and Rust conventions documented in [CLAUDE.md](CLAUDE.md)
+- follow the Kotlin and Rust conventions documented in [agents.md.default](agents.md.default)
 
 ## Future contribution expectations
 
