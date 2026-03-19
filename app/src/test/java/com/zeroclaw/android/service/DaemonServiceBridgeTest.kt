@@ -174,6 +174,24 @@ class DaemonServiceBridgeTest {
         }
 
     @Test
+    @DisplayName("stop transitions to STOPPED when coroutine is cancelled")
+    fun `stop transitions to STOPPED when coroutine is cancelled`() =
+        runTest {
+            every { com.zeroclaw.ffi.startDaemon(any(), any(), any(), any()) } returns Unit
+            every {
+                com.zeroclaw.ffi.stopDaemon()
+            } throws kotlin.coroutines.cancellation.CancellationException("scope cancelled")
+
+            bridge.start(configToml = "", host = "127.0.0.1", port = 8080u)
+
+            assertThrows<kotlin.coroutines.cancellation.CancellationException> {
+                bridge.stop()
+            }
+
+            assertEquals(ServiceState.STOPPED, bridge.serviceState.value)
+        }
+
+    @Test
     @DisplayName("stop clears lastError on success")
     fun `stop clears lastError on success`() =
         runTest {

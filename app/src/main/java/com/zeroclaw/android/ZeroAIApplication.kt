@@ -9,6 +9,8 @@ package com.zeroclaw.android
 import android.app.Application
 import android.content.Context
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -272,6 +274,7 @@ class ZeroAIApplication :
         ProcessLifecycleOwner.get().lifecycle.addObserver(sessionLockManager)
 
         syncDaemonState(ioScope)
+        observeForegroundSync(ioScope)
         bindEstopPolling(ioScope)
         reconcileOAuthState(ioScope)
         schedulePluginSyncIfEnabled(ioScope)
@@ -315,6 +318,28 @@ class ZeroAIApplication :
         scope.launch {
             daemonBridge.syncState()
         }
+    }
+
+    /**
+     * Re-syncs the bridge with the actual Rust daemon state every time the
+     * app returns to the foreground.
+     *
+     * After process death the foreground service may have restarted the
+     * daemon via [START_STICKY] while the [DaemonServiceBridge] still holds
+     * a stale [ServiceState]. Probing the FFI on each foreground transition
+     * corrects the discrepancy so the UI never shows a stale "Shutting
+     * down" or "Stopped" badge.
+     *
+     * @param scope Background scope for the non-blocking probe.
+     */
+    private fun observeForegroundSync(scope: CoroutineScope) {
+        ProcessLifecycleOwner.get().lifecycle.addObserver(
+            object : DefaultLifecycleObserver {
+                override fun onStart(owner: LifecycleOwner) {
+                    scope.launch { daemonBridge.syncState() }
+                }
+            },
+        )
     }
 
     /**

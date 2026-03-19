@@ -408,6 +408,9 @@ class DaemonServiceBridge(
             _lastError.value = null
             _serviceState.value = ServiceState.STOPPED
             _lastStatus.value = null
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            _serviceState.value = ServiceState.STOPPED
+            throw e
         } catch (e: FfiException) {
             _lastError.value = e.errorDetail()
             _serviceState.value = ServiceState.ERROR
