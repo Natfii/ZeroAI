@@ -483,9 +483,7 @@ pub fn get_anthropic_access_token_standalone(data_dir: String) -> Result<Option<
 /// [`FfiError::SpawnError`] on I/O or token-refresh failure, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
-pub fn get_openai_access_token_standalone(
-    data_dir: String,
-) -> Result<Option<String>, FfiError> {
+pub fn get_openai_access_token_standalone(data_dir: String) -> Result<Option<String>, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         auth_profiles::get_valid_openai_access_token_standalone_inner(data_dir)
     }))

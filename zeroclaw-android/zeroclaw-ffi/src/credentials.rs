@@ -168,7 +168,9 @@ mod tests {
 
     #[test]
     fn test_callback_resolves_known_provider() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_state();
         let count = Arc::new(AtomicUsize::new(0));
         let resolver: Arc<dyn FfiCredentialResolver> = Arc::new(TestResolver {
@@ -185,7 +187,9 @@ mod tests {
 
     #[test]
     fn test_returns_none_for_empty_string() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_state();
         let count = Arc::new(AtomicUsize::new(0));
         let resolver: Arc<dyn FfiCredentialResolver> = Arc::new(TestResolver {
@@ -201,7 +205,9 @@ mod tests {
 
     #[test]
     fn test_returns_none_with_no_callback() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_state();
         let result = resolve_credential_via_callback("openai");
         assert_eq!(result, None);
@@ -209,7 +215,9 @@ mod tests {
 
     #[test]
     fn test_cache_prevents_second_callback_call() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_state();
         let count = Arc::new(AtomicUsize::new(0));
         let resolver: Arc<dyn FfiCredentialResolver> = Arc::new(TestResolver {
@@ -232,7 +240,9 @@ mod tests {
 
     #[test]
     fn test_clear_cache_forces_re_resolve() {
-        let _g = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _g = TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         reset_state();
         let count = Arc::new(AtomicUsize::new(0));
         let resolver: Arc<dyn FfiCredentialResolver> = Arc::new(TestResolver {
