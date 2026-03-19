@@ -202,11 +202,22 @@ class ZeroAIDaemonService : Service() {
             )
         val alarmManager =
             getSystemService(ALARM_SERVICE) as AlarmManager
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + RESTART_DELAY_MS,
-            pendingIntent,
-        )
+        val triggerAt = SystemClock.elapsedRealtime() + RESTART_DELAY_MS
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ||
+            alarmManager.canScheduleExactAlarms()
+        ) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                triggerAt,
+                pendingIntent,
+            )
+        } else {
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                triggerAt,
+                pendingIntent,
+            )
+        }
         if (BuildConfig.DEBUG) {
             Log.i(TAG, "Scheduled AlarmManager restart fallback in ${RESTART_DELAY_MS}ms")
         }
