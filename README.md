@@ -40,7 +40,7 @@ long-lived on-device service, exposes tools through a native [Zeroclaw] Rust cor
 Compose UI for configuring and operating the agent.
 ![1-ezgif com-optimize]()
 
-<p align="Center"><img src="https://github.com/user-attachments/assets/429db2eb-602b-4696-a414-46dc8dd744e0" alt="Zero screenshots" width="33%" /> <img src="https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80" alt="Zero screenshots" width="33%" /> <img src="https://github.com/user-attachments/assets/85b797be-0b92-45ff-9394-0ada640fa7b7" alt="Zero screenshots" width="33%" /> </p>
+<p align="Center"><img src="https://github.com/user-attachments/assets/429db2eb-602b-4696-a414-46dc8dd744e0" alt="Zero screenshots" width="30%" /> <img src="https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80" alt="Zero screenshots" width="30%" /> <img src="https://github.com/user-attachments/assets/85b797be-0b92-45ff-9394-0ada640fa7b7" alt="Zero screenshots" width="30%" /> </p>
 
 ## Project status
 
