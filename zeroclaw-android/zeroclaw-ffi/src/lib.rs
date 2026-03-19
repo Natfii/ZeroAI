@@ -2365,10 +2365,7 @@ pub fn discord_trigger_backfill(channel_id: String) -> Result<(), FfiError> {
 /// Returns [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn messages_bridge_get_status() -> Result<messages_bridge::FfiBridgeStatus, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        Ok(messages_bridge::get_status_inner())
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(|| Ok(messages_bridge::get_status_inner()))).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -2386,8 +2383,8 @@ pub fn messages_bridge_get_status() -> Result<messages_bridge::FfiBridgeStatus, 
 /// [`FfiError::SpawnError`] on store query failure, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
-pub fn messages_bridge_list_conversations(
-) -> Result<Vec<messages_bridge::FfiBridgedConversation>, FfiError> {
+pub fn messages_bridge_list_conversations()
+-> Result<Vec<messages_bridge::FfiBridgedConversation>, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         messages_bridge::list_conversations_inner()
     }))
@@ -2435,10 +2432,7 @@ pub fn messages_bridge_set_allowed(
 /// Returns [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn messages_bridge_disconnect() -> Result<(), FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        messages_bridge::disconnect_inner()
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(messages_bridge::disconnect_inner)).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -3018,10 +3012,7 @@ pub fn test_email_connection(config_json: String) -> Result<String, FfiError> {
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tailnet_auto_discover() -> Result<tailnet::TailnetAutoDiscoverResult, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tailnet::tailnet_auto_discover_inner()
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(tailnet::tailnet_auto_discover_inner)).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })

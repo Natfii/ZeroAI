@@ -32,20 +32,26 @@ static HANDLER: Mutex<Option<Box<dyn SharedFolderHandler>>> = Mutex::new(None);
 /// Registers the Kotlin-side shared folder handler.
 #[uniffi::export]
 pub fn register_shared_folder_handler(handler: Box<dyn SharedFolderHandler>) {
-    let mut guard = HANDLER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = HANDLER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = Some(handler);
 }
 
 /// Unregisters the shared folder handler.
 #[uniffi::export]
 pub fn unregister_shared_folder_handler() {
-    let mut guard = HANDLER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = HANDLER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     *guard = None;
 }
 
 /// Dispatches a shared folder tool call to the registered handler.
 fn dispatch(tool_name: &str, params_json: &str) -> Result<String, String> {
-    let guard = HANDLER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let guard = HANDLER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     match guard.as_ref() {
         Some(handler) => handler
             .execute_shared_folder_tool(tool_name.to_string(), params_json.to_string())

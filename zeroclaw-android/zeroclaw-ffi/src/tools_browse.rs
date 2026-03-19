@@ -156,12 +156,10 @@ const SHARED_FOLDER_TOOLS: &[BuiltInTool] = &[
 ];
 
 /// Google Messages bridge tool (available when paired).
-const MESSAGES_BRIDGE_TOOLS: &[BuiltInTool] = &[
-    BuiltInTool {
-        name: "read_messages",
-        description: "Read text messages from allowlisted Google Messages conversations",
-    },
-];
+const MESSAGES_BRIDGE_TOOLS: &[BuiltInTool] = &[BuiltInTool {
+    name: "read_messages",
+    description: "Read text messages from allowlisted Google Messages conversations",
+}];
 
 /// Tools available in the Android session without a [`SecurityPolicy`].
 ///

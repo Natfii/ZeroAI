@@ -119,13 +119,14 @@ pub(crate) fn tailnet_auto_discover_inner() -> Result<TailnetAutoDiscoverResult,
                 detail: format!("failed to build HTTP client: {e}"),
             })?;
 
-        let response = client
-            .get(TAILSCALE_LOCAL_API)
-            .send()
-            .await
-            .map_err(|e| FfiError::NetworkError {
-                detail: format!("failed to reach Tailscale local API: {e}"),
-            })?;
+        let response =
+            client
+                .get(TAILSCALE_LOCAL_API)
+                .send()
+                .await
+                .map_err(|e| FfiError::NetworkError {
+                    detail: format!("failed to reach Tailscale local API: {e}"),
+                })?;
 
         let status = response.status();
         if !status.is_success() {
@@ -240,9 +241,9 @@ pub(crate) fn tailnet_probe_services_inner(
                 for &(port, _hint) in AI_PORTS {
                     let c = client.clone();
                     let h = host.to_string();
-                    handles.push(tokio::spawn(async move {
-                        probe_ai_server(&c, &h, port).await
-                    }));
+                    handles.push(tokio::spawn(
+                        async move { probe_ai_server(&c, &h, port).await },
+                    ));
                 }
                 let zc = client.clone();
                 let zh = host.to_string();
@@ -298,9 +299,7 @@ async fn probe_ai_server(
         && let Ok(json) = resp.json::<serde_json::Value>().await
         && json.get("models").and_then(|v| v.as_array()).is_some()
     {
-        let model_count = json["models"]
-            .as_array()
-            .map_or(0, Vec::len);
+        let model_count = json["models"].as_array().map_or(0, Vec::len);
         let kind = port_to_kind(port);
         return Some(TailnetService {
             kind,
@@ -331,11 +330,7 @@ async fn probe_ai_server(
 /// Probes a zeroclaw gateway's `/health` endpoint.
 ///
 /// Returns `None` if the probe fails for any reason.
-async fn probe_zeroclaw(
-    client: &reqwest::Client,
-    host: &str,
-    port: u16,
-) -> Option<TailnetService> {
+async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Option<TailnetService> {
     let url = format!("http://{host}:{port}/health");
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {

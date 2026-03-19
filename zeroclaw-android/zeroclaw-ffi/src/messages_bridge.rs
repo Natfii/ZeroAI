@@ -47,7 +47,9 @@ static PAIRING_SERVER: Mutex<Option<ActivePairingServer>> = Mutex::new(None);
 /// Dropping the [`PairingPageServer`] sends the shutdown signal to the
 /// accept loop, which causes the spawned task to exit.
 fn shutdown_pairing_server() {
-    let mut guard = PAIRING_SERVER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut guard = PAIRING_SERVER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(state) = guard.take() {
         tracing::info!(
             target: "messages_bridge::http",
@@ -114,17 +116,21 @@ fn status_to_ffi(status: &zeroclaw::messages_bridge::types::BridgeStatus) -> Ffi
     match status {
         BridgeStatus::Unpaired => FfiBridgeStatus::Unpaired,
         BridgeStatus::AwaitingPairing { .. } => {
-            let guard = PAIRING_SERVER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let guard = PAIRING_SERVER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             let page_url = guard
                 .as_ref()
                 .map(|s| s.page_url.clone())
                 .unwrap_or_default();
-            FfiBridgeStatus::AwaitingPairing { qr_page_url: page_url }
+            FfiBridgeStatus::AwaitingPairing {
+                qr_page_url: page_url,
+            }
         }
         BridgeStatus::Connected => FfiBridgeStatus::Connected,
-        BridgeStatus::Reconnecting { attempt } => FfiBridgeStatus::Reconnecting {
-            attempt: *attempt,
-        },
+        BridgeStatus::Reconnecting { attempt } => {
+            FfiBridgeStatus::Reconnecting { attempt: *attempt }
+        }
         BridgeStatus::PhoneNotResponding => FfiBridgeStatus::PhoneNotResponding,
     }
 }
@@ -156,8 +162,13 @@ fn conv_to_ffi(
 pub(crate) fn get_status_inner() -> FfiBridgeStatus {
     let status = zeroclaw::messages_bridge::session::get_status();
 
-    if matches!(status, zeroclaw::messages_bridge::types::BridgeStatus::Connected) {
-        let guard = PAIRING_SERVER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if matches!(
+        status,
+        zeroclaw::messages_bridge::types::BridgeStatus::Connected
+    ) {
+        let guard = PAIRING_SERVER
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(state) = guard.as_ref() {
             state.paired_flag.store(true, Ordering::Release);
         }
@@ -175,14 +186,15 @@ pub(crate) fn get_status_inner() -> FfiBridgeStatus {
 /// Returns [`FfiError::StateError`] if the bridge session is not active,
 /// or [`FfiError::SpawnError`] if the store query fails.
 pub(crate) fn list_conversations_inner() -> Result<Vec<FfiBridgedConversation>, FfiError> {
-    let store = zeroclaw::messages_bridge::session::get_store().ok_or_else(|| {
-        FfiError::StateError {
+    let store =
+        zeroclaw::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
             detail: "Messages bridge not active".into(),
-        }
-    })?;
-    let convs = store.list_conversations().map_err(|e| FfiError::SpawnError {
-        detail: e.to_string(),
-    })?;
+        })?;
+    let convs = store
+        .list_conversations()
+        .map_err(|e| FfiError::SpawnError {
+            detail: e.to_string(),
+        })?;
     Ok(convs.iter().map(conv_to_ffi).collect())
 }
 
@@ -200,11 +212,10 @@ pub(crate) fn set_allowed_inner(
     allowed: bool,
     window_start_ms: Option<i64>,
 ) -> Result<(), FfiError> {
-    let store = zeroclaw::messages_bridge::session::get_store().ok_or_else(|| {
-        FfiError::StateError {
+    let store =
+        zeroclaw::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
             detail: "Messages bridge not active".into(),
-        }
-    })?;
+        })?;
     store
         .set_allowed(&conversation_id, allowed, window_start_ms)
         .map_err(|e| FfiError::SpawnError {
@@ -278,7 +289,9 @@ pub(crate) fn start_pairing_inner(data_dir: String) -> Result<String, FfiError> 
 
         // 4. Store the server so it stays alive and can be cleaned up later.
         {
-            let mut guard = PAIRING_SERVER.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let mut guard = PAIRING_SERVER
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             *guard = Some(ActivePairingServer {
                 page_url: page_url.clone(),
                 paired_flag,
@@ -335,10 +348,7 @@ impl PairingPageServer {
     ///
     /// Returns an error string if the TCP listener cannot be bound or the
     /// local address cannot be retrieved.
-    async fn start(
-        pairing_url: String,
-        paired_flag: Arc<AtomicBool>,
-    ) -> Result<Self, String> {
+    async fn start(pairing_url: String, paired_flag: Arc<AtomicBool>) -> Result<Self, String> {
         let qr_svg = generate_qr_svg(&pairing_url);
 
         let listener = TcpListener::bind("0.0.0.0:0")
@@ -554,14 +564,12 @@ async fn serve_status(stream: &mut TcpStream, paired_flag: &AtomicBool) {
 /// Panics if the QR code library fails to encode the URL, which should
 /// not happen for well-formed ASCII URLs.
 fn generate_qr_svg(url: &str) -> String {
-    use qrcode::render::svg;
     use qrcode::QrCode;
+    use qrcode::render::svg;
 
     #[allow(clippy::unwrap_used)]
     let code = QrCode::new(url.as_bytes()).unwrap();
-    code.render::<svg::Color>()
-        .min_dimensions(200, 200)
-        .build()
+    code.render::<svg::Color>().min_dimensions(200, 200).build()
 }
 
 /// Returns the device's outbound LAN IP address as a string.
@@ -604,7 +612,10 @@ mod tests {
     fn pairing_html_placeholder_replaced() {
         let html = PAIRING_HTML.replace("QR_SVG_PLACEHOLDER", "<svg/>");
         assert!(html.contains("<svg/>"), "placeholder should be replaced");
-        assert!(!html.contains("QR_SVG_PLACEHOLDER"), "placeholder should be gone");
+        assert!(
+            !html.contains("QR_SVG_PLACEHOLDER"),
+            "placeholder should be gone"
+        );
     }
 
     #[tokio::test]

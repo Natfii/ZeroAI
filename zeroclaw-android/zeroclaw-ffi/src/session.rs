@@ -1092,15 +1092,30 @@ fn build_tools_registry(config: &zeroclaw::Config, memory: Arc<dyn Memory>) -> V
     }
 
     if let Some(email_config) = config.email.as_ref().filter(|c| c.enabled) {
-        let email_client =
-            Arc::new(zeroclaw::tools::email::client::EmailClient::from_config(email_config));
-        tools.push(Box::new(zeroclaw::tools::email::check::EmailCheckTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::read::EmailReadTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::reply::EmailReplyTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::compose::EmailComposeTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::search::EmailSearchTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::delete::EmailDeleteTool::new(email_client.clone())));
-        tools.push(Box::new(zeroclaw::tools::email::empty_trash::EmailEmptyTrashTool::new(email_client)));
+        let email_client = Arc::new(zeroclaw::tools::email::client::EmailClient::from_config(
+            email_config,
+        ));
+        tools.push(Box::new(
+            zeroclaw::tools::email::check::EmailCheckTool::new(email_client.clone()),
+        ));
+        tools.push(Box::new(zeroclaw::tools::email::read::EmailReadTool::new(
+            email_client.clone(),
+        )));
+        tools.push(Box::new(
+            zeroclaw::tools::email::reply::EmailReplyTool::new(email_client.clone()),
+        ));
+        tools.push(Box::new(
+            zeroclaw::tools::email::compose::EmailComposeTool::new(email_client.clone()),
+        ));
+        tools.push(Box::new(
+            zeroclaw::tools::email::search::EmailSearchTool::new(email_client.clone()),
+        ));
+        tools.push(Box::new(
+            zeroclaw::tools::email::delete::EmailDeleteTool::new(email_client.clone()),
+        ));
+        tools.push(Box::new(
+            zeroclaw::tools::email::empty_trash::EmailEmptyTrashTool::new(email_client),
+        ));
     }
 
     if tools.len() > MAX_SESSION_TOOLS {
@@ -1465,8 +1480,7 @@ pub(crate) fn session_start_inner() -> Result<(), FfiError> {
         provider.supports_native_tools()
     };
 
-    let skills =
-        zeroclaw::skills::load_skills_with_config(&config.workspace_dir, &config);
+    let skills = zeroclaw::skills::load_skills_with_config(&config.workspace_dir, &config);
     let mut system_prompt = zeroclaw::channels::build_system_prompt_with_mode(
         &config.workspace_dir,
         &model,
@@ -4110,12 +4124,14 @@ mod tests {
         .unwrap();
 
         let config = zeroclaw::Config::default();
-        let skills =
-            zeroclaw::skills::load_skills_with_config(&workspace, &config);
+        let skills = zeroclaw::skills::load_skills_with_config(&workspace, &config);
 
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "my-skill");
-        assert!(!skills[0].prompts.is_empty(), "community skill should have prompts from body");
+        assert!(
+            !skills[0].prompts.is_empty(),
+            "community skill should have prompts from body"
+        );
         assert!(
             skills[0].prompts[0].contains("Do the thing"),
             "prompt content should contain SKILL.md body"

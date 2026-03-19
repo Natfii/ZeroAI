@@ -129,8 +129,7 @@ pub(crate) fn forget_memory_inner(key: String) -> Result<bool, FfiError> {
     })?;
 
     if deleted
-        && let Ok(workspace) =
-            crate::runtime::with_daemon_config(|c| c.workspace_dir.clone())
+        && let Ok(workspace) = crate::runtime::with_daemon_config(|c| c.workspace_dir.clone())
         && let Err(e) = zeroclaw::memory::snapshot::export_snapshot(&workspace)
     {
         tracing::warn!("snapshot re-export after forget failed: {e}");

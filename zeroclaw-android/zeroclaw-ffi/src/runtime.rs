@@ -373,9 +373,7 @@ pub(crate) fn start_daemon_inner(
     );
     if config.shared_folder.enabled {
         tracing::info!("Registering shared folder tool factory");
-        zeroclaw::tools::set_global_extra_tools(
-            crate::shared_folder::create_shared_folder_tools,
-        );
+        zeroclaw::tools::set_global_extra_tools(crate::shared_folder::create_shared_folder_tools);
     }
 
     std::fs::create_dir_all(&config.workspace_dir).map_err(|e| FfiError::ConfigError {
