@@ -145,7 +145,7 @@ class SlotAwareAgentConfigTest {
         }
 
     @Test
-    fun `daemon routing ignores managed chat logins without direct api keys`() =
+    fun `daemon routing accepts openai and anthropic managed auth profiles`() =
         runTest {
             val authProfiles =
                 listOf(
@@ -154,7 +154,7 @@ class SlotAwareAgentConfigTest {
                 )
 
             assertEquals(
-                false,
+                true,
                 SlotAwareAgentConfig.hasUsableDaemonProviderCredentials(
                     provider = "openai",
                     apiKey = null,
@@ -169,17 +169,21 @@ class SlotAwareAgentConfigTest {
                     authProfiles = authProfiles,
                 ),
             )
+        }
+
+    @Test
+    fun `daemon routing rejects gemini managed auth without direct api key`() =
+        runTest {
+            val authProfiles =
+                listOf(
+                    fakeAuthProfile("gemini", "user@example.com"),
+                )
+
             assertEquals(
-                "ChatGPT",
-                SlotAwareAgentConfig.connectedManagedAuthDisplayLabel(
-                    provider = "openai",
-                    authProfiles = authProfiles,
-                ),
-            )
-            assertEquals(
-                "Claude Code",
-                SlotAwareAgentConfig.connectedManagedAuthDisplayLabel(
-                    provider = "anthropic",
+                false,
+                SlotAwareAgentConfig.hasUsableDaemonProviderCredentials(
+                    provider = "google-gemini",
+                    apiKey = null,
                     authProfiles = authProfiles,
                 ),
             )

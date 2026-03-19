@@ -343,6 +343,7 @@ class TerminalViewModel(
     init {
         repository.clear()
         initAgentSession()
+        observeDaemonRestarts()
     }
 
     /**
@@ -365,6 +366,47 @@ class TerminalViewModel(
                     TAG,
                     "Agent session init failed: ${e.message}",
                 )
+            }
+        }
+    }
+
+    /**
+     * Observes daemon service state and re-creates the session on restart.
+     *
+     * When the daemon transitions back to [ServiceState.RUNNING] after being
+     * in a non-running state, the old session is destroyed and a fresh one
+     * is started so it picks up the latest provider/model config.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun observeDaemonRestarts() {
+        viewModelScope.launch {
+            var wasRunning = app.daemonBridge.serviceState.value == ServiceState.RUNNING
+            app.daemonBridge.serviceState.collect { state ->
+                val isRunning = state == ServiceState.RUNNING
+                if (isRunning && !wasRunning && sessionReady) {
+                    logRepository.append(
+                        LogSeverity.DEBUG,
+                        TAG,
+                        "Daemon restarted — re-creating agent session",
+                    )
+                    try {
+                        withContext(Dispatchers.IO) { sessionDestroy() }
+                    } catch (_: Exception) {
+                        // session may not exist
+                    }
+                    sessionReady = false
+                    try {
+                        withContext(Dispatchers.IO) { sessionStart() }
+                        sessionReady = true
+                    } catch (e: Exception) {
+                        logRepository.append(
+                            LogSeverity.WARN,
+                            TAG,
+                            "Session re-init after restart failed: ${e.message}",
+                        )
+                    }
+                }
+                wasRunning = isRunning
             }
         }
     }

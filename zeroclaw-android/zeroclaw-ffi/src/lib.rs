@@ -470,6 +470,32 @@ pub fn get_anthropic_access_token_standalone(data_dir: String) -> Result<Option<
     })
 }
 
+/// Returns a valid OpenAI access token from the standalone auth-profile store.
+///
+/// OpenAI OAuth tokens are short-lived JWTs. This function transparently
+/// refreshes expired tokens using the stored refresh token before returning.
+/// The Android daemon service uses this to inject a fresh bearer token into
+/// the TOML `api_key` field at startup.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] when `data_dir` is invalid,
+/// [`FfiError::SpawnError`] on I/O or token-refresh failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn get_openai_access_token_standalone(
+    data_dir: String,
+) -> Result<Option<String>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        auth_profiles::get_valid_openai_access_token_standalone_inner(data_dir)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Returns a valid Gemini access token from the standalone auth-profile store.
 ///
 /// This is intended for Android UI flows that need to call Google Workspace APIs

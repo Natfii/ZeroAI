@@ -211,8 +211,12 @@ object SlotAwareAgentConfig {
      * detects the `sk-ant-oat01-` prefix and switches to Bearer auth with
      * the `anthropic-beta: oauth-2025-04-20` header automatically.
      *
-     * Google account OAuth is scoped to Workspace apps and ChatGPT needs
-     * a dedicated daemon transport that has not landed yet.
+     * OpenAI OAuth tokens are short-lived JWTs refreshed transparently by
+     * the Rust auth service. The upstream OpenAI provider uses the same
+     * `Authorization: Bearer` header for both API keys and OAuth tokens.
+     *
+     * Google account OAuth is scoped to Workspace apps and is not yet
+     * supported for daemon routing.
      */
-    private fun providerSupportsDaemonManagedAuth(provider: String): Boolean = provider == "anthropic"
+    private fun providerSupportsDaemonManagedAuth(provider: String): Boolean = provider == "anthropic" || provider == "openai"
 }

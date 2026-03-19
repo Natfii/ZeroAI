@@ -365,6 +365,27 @@ pub(crate) fn get_anthropic_access_token_standalone_inner(
         })
 }
 
+/// Returns a valid OpenAI access token from the standalone encrypted auth-profile store.
+///
+/// OpenAI OAuth tokens are short-lived JWTs that expire quickly. This calls
+/// [`AuthService::get_valid_openai_access_token`] which automatically refreshes
+/// the token (with backoff and retry) when it is expiring within 90 seconds.
+/// The refreshed token is persisted back to the encrypted store.
+pub(crate) fn get_valid_openai_access_token_standalone_inner(
+    data_dir: String,
+) -> Result<Option<String>, FfiError> {
+    let state_dir = validate_standalone_state_dir(data_dir)?;
+    let runtime = shared_runtime()?;
+    runtime
+        .block_on(async move {
+            let auth_service = AuthService::new(&state_dir, true);
+            auth_service.get_valid_openai_access_token(None).await
+        })
+        .map_err(|e| FfiError::SpawnError {
+            detail: format!("failed to read OpenAI access token: {e}"),
+        })
+}
+
 /// Returns a valid Gemini access token from the standalone encrypted auth-profile store.
 ///
 /// This mirrors the daemon-side managed Gemini token lookup so Android UI flows

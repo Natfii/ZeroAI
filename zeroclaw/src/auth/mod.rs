@@ -163,7 +163,11 @@ impl AuthService {
         profile_override: Option<&str>,
     ) -> Result<Option<String>> {
         let data = self.store.load().await?;
-        let Some(profile_id) = select_profile_id(&data, "openai", profile_override) else {
+        // Upstream CLI stores profiles under "openai"; the Android OAuth flow
+        // stores them under "openai-codex". Try both.
+        let Some(profile_id) = select_profile_id(&data, "openai", profile_override)
+            .or_else(|| select_profile_id(&data, "openai-codex", profile_override))
+        else {
             return Ok(None);
         };
 

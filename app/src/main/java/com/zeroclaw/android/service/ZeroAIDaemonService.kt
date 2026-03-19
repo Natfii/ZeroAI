@@ -613,30 +613,48 @@ class ZeroAIDaemonService : Service() {
     /**
      * Resolves an OAuth access token for [provider] from the Rust auth-profile store.
      *
-     * Used as a fallback when no direct API key is stored. The Anthropic
-     * provider recognises `sk-ant-oat01-...` tokens and switches to
-     * Bearer auth automatically. Token material never leaves the encrypted
-     * Rust store except transiently for the TOML config string.
+     * Used as a fallback when no direct API key is stored. Anthropic tokens
+     * (`sk-ant-oat01-...`) are long-lived; OpenAI tokens are short-lived JWTs
+     * that are transparently refreshed by the Rust auth service before being
+     * returned. Both are injected into the TOML `api_key` field and sent as
+     * `Authorization: Bearer` by the upstream provider.
+     *
+     * Token material never leaves the encrypted Rust store except transiently
+     * for the TOML config string.
      *
      * @return The access token string, or empty if no matching profile.
      */
     private fun resolveOAuthAccessToken(
         provider: String,
         @Suppress("UNUSED_PARAMETER") authProfiles: List<FfiAuthProfile>,
-    ): String {
-        if (provider != "anthropic") return ""
-        return try {
-            com.zeroclaw.ffi
-                .getAnthropicAccessTokenStandalone(
-                    dataDir = filesDir.absolutePath,
-                ).orEmpty()
-        } catch (
-            @Suppress("TooGenericExceptionCaught") e: Exception,
-        ) {
-            Log.w(TAG, "Failed to resolve Anthropic OAuth token: ${e.message}")
-            ""
+    ): String =
+        when (provider) {
+            "anthropic" ->
+                try {
+                    com.zeroclaw.ffi
+                        .getAnthropicAccessTokenStandalone(
+                            dataDir = filesDir.absolutePath,
+                        ).orEmpty()
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    Log.w(TAG, "Failed to resolve Anthropic OAuth token: ${e.message}")
+                    ""
+                }
+            "openai" ->
+                try {
+                    com.zeroclaw.ffi
+                        .getOpenaiAccessTokenStandalone(
+                            dataDir = filesDir.absolutePath,
+                        ).orEmpty()
+                } catch (
+                    @Suppress("TooGenericExceptionCaught") e: Exception,
+                ) {
+                    Log.w(TAG, "Failed to resolve OpenAI OAuth token: ${e.message}")
+                    ""
+                }
+            else -> ""
         }
-    }
 
     /**
      * Resolves all enabled agents into [AgentTomlEntry] instances and builds
