@@ -38,6 +38,8 @@
 long-lived on-device service, exposes tools through a native [Zeroclaw] Rust core, and provides a
 Compose UI for configuring and operating the agent.
 
+![Adobe Express - screen-20260318-085433-1773838455341](https://github.com/user-attachments/assets/9b839513-0e19-409c-a34d-4a0856cacdd3)
+
 ## Project status
 
 - Experimental and actively evolving.
@@ -111,6 +113,8 @@ That means your in-app Zero can live inside the app, speak through connected cha
 - vision / multimodal support
 - smart message routing + provider cascade
 - Twitter/X browsing via authenticated cookies
+
+![Adobe Express - screen-20260318-085433-1773838455341](https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80)
 
 ### Core systems
 
