@@ -1091,6 +1091,12 @@ fn build_tools_registry(config: &zeroclaw::Config, memory: Arc<dyn Memory>) -> V
         tools.extend(crate::shared_folder::create_shared_folder_tools());
     }
 
+    if zeroclaw::messages_bridge::session::get_store().is_some() {
+        tools.push(Box::new(
+            zeroclaw::messages_bridge::tool::ReadMessagesTool::new_lazy(),
+        ));
+    }
+
     if let Some(email_config) = config.email.as_ref().filter(|c| c.enabled) {
         let email_client = Arc::new(zeroclaw::tools::email::client::EmailClient::from_config(
             email_config,
