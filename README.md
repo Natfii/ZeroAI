@@ -203,6 +203,13 @@ Zero is not just "an Android chat app." It is an attempt to build a full agent p
 - Issues and pull requests are temporarily closed  (try making a fork you and your zero can grow together!)
 - Please do not use upstream ZeroClaw Labs issue trackers for this downstream fork.
 
+## Research
+
+Some of the reverse engineering and protocol work done for this project is documented
+publicly in case it helps others building similar integrations:
+
+- [**Google Messages Bugle Protocol**](docs/research/google-messages-bugle-protocol.md) — reverse engineering notes on Google's proprietary Messages-for-Web RPC protocol (pairing, encryption, contacts/message sync, media upload)
+
 ## License
 
 - Top-level app, docs, and assets are covered by the root [`LICENSE`](LICENSE).
