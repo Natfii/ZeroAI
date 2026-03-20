@@ -374,12 +374,8 @@ async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Opti
         return None;
     }
     let json: serde_json::Value = resp.json().await.ok()?;
-    let version = json["version"]
-        .as_str()
-        .map(cap_version_string);
-    let auth_required = json["require_pairing"]
-        .as_bool()
-        .unwrap_or(true);
+    let version = json["version"].as_str().map(cap_version_string);
+    let auth_required = json["require_pairing"].as_bool().unwrap_or(true);
     Some(TailnetService {
         kind: TailnetServiceKind::Zeroclaw,
         port,
@@ -404,11 +400,7 @@ fn cap_version_string(s: &str) -> String {
 /// 2. Parse response as JSON and check `name`/`title` fields (fallback)
 ///
 /// Returns `None` if neither signal is present.
-async fn probe_openclaw(
-    client: &reqwest::Client,
-    host: &str,
-    port: u16,
-) -> Option<TailnetService> {
+async fn probe_openclaw(client: &reqwest::Client, host: &str, port: u16) -> Option<TailnetService> {
     let url = format!("http://{host}:{port}/");
     let resp = client.get(&url).send().await.ok()?;
     if !resp.status().is_success() {
@@ -535,12 +527,10 @@ pub(crate) fn peer_send_message_inner(
 
         match kind {
             TailnetServiceKind::Zeroclaw => {
-                send_to_zeroclaw(&client, &addr, port, auth_header.as_deref(), &message)
-                    .await
+                send_to_zeroclaw(&client, &addr, port, auth_header.as_deref(), &message).await
             }
             TailnetServiceKind::OpenClaw => {
-                send_to_openclaw(&client, &addr, port, auth_header.as_deref(), &message)
-                    .await
+                send_to_openclaw(&client, &addr, port, auth_header.as_deref(), &message).await
             }
             _ => Err(FfiError::InvalidArgument {
                 detail: format!("Unsupported peer kind for messaging: {kind:?}"),
