@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test
 
 class ProviderSlotRegistryTest {
     @Test
-    fun returnsAllSixSlotsInStableOrder() {
+    fun returnsAllSevenSlotsInStableOrder() {
         val slots = ProviderSlotRegistry.all()
         assertEquals(7, slots.size)
         assertEquals("gemini-api", slots.first().slotId)
