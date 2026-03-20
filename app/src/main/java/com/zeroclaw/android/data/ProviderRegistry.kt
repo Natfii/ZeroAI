@@ -165,6 +165,26 @@ object ProviderRegistry {
                         "Google, Meta, and more through a single API key.",
             ),
             ProviderInfo(
+                id = "xai",
+                displayName = "xAI (Grok)",
+                authType = ProviderAuthType.API_KEY_ONLY,
+                suggestedModels =
+                    listOf(
+                        "grok-4",
+                        "grok-4-1-fast-reasoning",
+                        "grok-4-1-fast-non-reasoning",
+                    ),
+                aliases = listOf("grok"),
+                category = ProviderCategory.PRIMARY,
+                iconUrl = faviconUrl("x.ai"),
+                modelListUrl = "https://api.x.ai/v1/models",
+                modelListFormat = ModelListFormat.OPENAI_COMPATIBLE,
+                keyCreationUrl = "https://console.x.ai",
+                keyPrefix = "xai-",
+                keyPrefixHint = "xAI keys typically start with xai-",
+                helpText = "Get your API key from the xAI Console",
+            ),
+            ProviderInfo(
                 id = "ollama",
                 displayName = "Ollama",
                 authType = ProviderAuthType.URL_ONLY,

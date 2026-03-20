@@ -14,7 +14,7 @@ class ProviderSlotRegistryTest {
     @Test
     fun returnsAllSixSlotsInStableOrder() {
         val slots = ProviderSlotRegistry.all()
-        assertEquals(6, slots.size)
+        assertEquals(7, slots.size)
         assertEquals("gemini-api", slots.first().slotId)
         assertEquals("ollama", slots.last().slotId)
     }
@@ -43,6 +43,12 @@ class ProviderSlotRegistryTest {
         assertEquals("Gemini API", slot?.displayName)
         assertNull(ProviderSlotRegistry.findById("gemini-oauth"))
         assertNull(ProviderSlotRegistry.findById("missing-slot"))
+    }
+
+    @Test
+    fun resolvesXaiSlot() {
+        assertEquals("xai-api", ProviderSlotRegistry.resolveSlotId("xai", false))
+        assertNull(ProviderSlotRegistry.resolveSlotId("xai", true))
     }
 
     @Test

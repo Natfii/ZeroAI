@@ -110,6 +110,20 @@ pub fn all_integrations() -> Vec<IntegrationEntry> {
             },
         },
         IntegrationEntry {
+            name: "xAI",
+            description: "Grok 4 models",
+            category: IntegrationCategory::AiModel,
+            status_fn: |c| {
+                if c.default_provider.as_deref() == Some("xai")
+                    || c.default_provider.as_deref() == Some("grok")
+                {
+                    IntegrationStatus::Active
+                } else {
+                    IntegrationStatus::Available
+                }
+            },
+        },
+        IntegrationEntry {
             name: "GitHub",
             description: "Code, issues, PRs",
             category: IntegrationCategory::Productivity,

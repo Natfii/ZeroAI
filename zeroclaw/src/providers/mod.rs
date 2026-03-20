@@ -14,6 +14,7 @@ pub mod cascade;
 pub mod gemini;
 pub mod ollama;
 pub mod openai;
+pub mod xai;
 pub mod traits;
 
 #[allow(unused_imports)]
@@ -92,7 +93,7 @@ fn token_end(input: &str, from: usize) -> usize {
 
 /// Scrub known secret-like token prefixes from provider error strings.
 pub fn scrub_secret_patterns(input: &str) -> String {
-    const PREFIXES: [&str; 7] = [
+    const PREFIXES: [&str; 8] = [
         "sk-",
         "xoxb-",
         "xoxp-",
@@ -100,6 +101,7 @@ pub fn scrub_secret_patterns(input: &str) -> String {
         "gho_",
         "ghu_",
         "github_pat_",
+        "xai-",
     ];
 
     let mut scrubbed = input.to_string();
@@ -185,6 +187,7 @@ fn resolve_provider_credential(name: &str, credential_override: Option<&str>) ->
         "ollama" => vec!["OLLAMA_API_KEY"],
         "gemini" | "google" | "google-gemini" => vec!["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         "openrouter" => vec!["OPENROUTER_API_KEY"],
+        "xai" | "grok" => vec!["XAI_API_KEY"],
         _ => vec![],
     };
 
@@ -320,6 +323,10 @@ pub(crate) fn create_provider_with_url_and_options(
             ))
         }
 
+        "xai" | "grok" => Ok(Box::new(
+            xai::XaiProvider::new(key).with_custom_headers(headers),
+        )),
+
         name if name.starts_with("custom:") => {
             let base_url = parse_custom_provider_url(
                 name.strip_prefix("custom:").unwrap_or(""),
@@ -345,7 +352,7 @@ pub(crate) fn create_provider_with_url_and_options(
         }
 
         _ => anyhow::bail!(
-            "Unknown provider: {name}. Supported: openai, anthropic, gemini, ollama, openrouter.\n\
+            "Unknown provider: {name}. Supported: openai, anthropic, gemini, ollama, openrouter, xai.\n\
              Tip: Use \"custom:https://your-api.com\" for OpenAI-compatible endpoints.\n\
              Tip: Use \"anthropic-custom:https://your-api.com\" for Anthropic-compatible endpoints."
         ),
@@ -448,6 +455,12 @@ pub fn list_providers() -> Vec<ProviderInfo> {
             local: false,
         },
         ProviderInfo {
+            name: "xai",
+            display_name: "xAI (Grok)",
+            aliases: &["grok"],
+            local: false,
+        },
+        ProviderInfo {
             name: "ollama",
             display_name: "Ollama",
             aliases: &[],
@@ -473,14 +486,15 @@ mod tests {
     }
 
     #[test]
-    fn list_providers_returns_five_entries() {
+    fn list_providers_returns_six_entries() {
         let providers = list_providers();
-        assert_eq!(providers.len(), 5);
+        assert_eq!(providers.len(), 6);
         assert!(providers.iter().any(|p| p.name == "anthropic"));
         assert!(providers.iter().any(|p| p.name == "openai"));
         assert!(providers.iter().any(|p| p.name == "gemini"));
         assert!(providers.iter().any(|p| p.name == "openrouter"));
         assert!(providers.iter().any(|p| p.name == "ollama"));
+        assert!(providers.iter().any(|p| p.name == "xai"));
     }
 
     #[test]
@@ -488,6 +502,14 @@ mod tests {
         let input = "Error: invalid key sk-abc123xyz";
         let result = scrub_secret_patterns(input);
         assert!(!result.contains("sk-abc123xyz"));
+        assert!(result.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_secret_patterns_redacts_xai_prefix() {
+        let input = "Error: invalid key xai-abc123xyz456";
+        let result = scrub_secret_patterns(input);
+        assert!(!result.contains("xai-abc123xyz456"));
         assert!(result.contains("[REDACTED]"));
     }
 

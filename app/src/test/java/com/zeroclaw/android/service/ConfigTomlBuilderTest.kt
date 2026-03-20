@@ -906,6 +906,7 @@ class ConfigTomlBuilderTest {
             assertEquals("openai", ConfigTomlBuilder.resolveProvider("openai", ""))
             assertEquals("anthropic", ConfigTomlBuilder.resolveProvider("anthropic", ""))
             assertEquals("openrouter", ConfigTomlBuilder.resolveProvider("openrouter", ""))
+            assertEquals("xai", ConfigTomlBuilder.resolveProvider("xai", ""))
         }
 
         @Test

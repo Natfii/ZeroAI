@@ -58,6 +58,16 @@ fn factory_google_gemini_alias_resolves_to_gemini() {
     assert_provider_ok("google-gemini", Some("test-key"), None);
 }
 
+#[test]
+fn factory_resolves_xai_provider() {
+    assert_provider_ok("xai", Some("test-key"), None);
+}
+
+#[test]
+fn factory_grok_alias_resolves_to_xai() {
+    assert_provider_ok("grok", Some("test-key"), None);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom URL provider creation
 // ─────────────────────────────────────────────────────────────────────────────

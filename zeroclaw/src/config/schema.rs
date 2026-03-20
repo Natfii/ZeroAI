@@ -17,6 +17,7 @@ const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "provider.gemini",
     "provider.ollama",
     "provider.openai",
+    "provider.xai",
     "channel.discord",
     "channel.telegram",
     "tool.browser",
@@ -3489,6 +3490,7 @@ impl Config {
             "ollama" => "ollama/llama3",
             "openai" => "openai/gpt-4.1",
             "gemini" => "gemini/gemini-2.5-flash",
+            "xai" | "grok" => "xai/grok-4",
             _ => "anthropic/claude-sonnet-4-20250514",
         }
     }

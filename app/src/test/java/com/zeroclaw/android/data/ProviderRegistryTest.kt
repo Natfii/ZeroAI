@@ -116,6 +116,7 @@ class ProviderRegistryTest {
                 "google-gemini",
                 "ollama",
                 "openrouter",
+                "xai",
             )
         expectedWithIcons.forEach { id ->
             val provider = ProviderRegistry.findById(id)
@@ -134,6 +135,7 @@ class ProviderRegistryTest {
                 "google-gemini" to ModelListFormat.GOOGLE_GEMINI,
                 "ollama" to ModelListFormat.OLLAMA,
                 "openrouter" to ModelListFormat.OPENROUTER,
+                "xai" to ModelListFormat.OPENAI_COMPATIBLE,
             )
         expectedWithModelList.forEach { (id, expectedFormat) ->
             val provider = ProviderRegistry.findById(id)
@@ -156,6 +158,7 @@ class ProviderRegistryTest {
                 "anthropic",
                 "google-gemini",
                 "openrouter",
+                "xai",
             )
         expectedWithUrl.forEach { id ->
             val provider = ProviderRegistry.findById(id)
@@ -194,6 +197,7 @@ class ProviderRegistryTest {
                 "google-gemini",
                 "ollama",
                 "openrouter",
+                "xai",
             )
         priorityIds.forEach { id ->
             val provider = ProviderRegistry.findById(id)
@@ -234,5 +238,24 @@ class ProviderRegistryTest {
         assertEquals("sk-or-v1-", provider.keyPrefix)
         assertEquals(ModelListFormat.OPENROUTER, provider.modelListFormat)
         assertTrue(provider.oauthClientId.isEmpty())
+    }
+
+    @Test
+    @DisplayName("xai has API_KEY_ONLY auth type and correct prefix")
+    fun `xai has API_KEY_ONLY auth type and correct prefix`() {
+        val provider = ProviderRegistry.findById("xai")
+        assertNotNull(provider)
+        assertEquals(ProviderAuthType.API_KEY_ONLY, provider!!.authType)
+        assertEquals("xai-", provider.keyPrefix)
+        assertEquals(ModelListFormat.OPENAI_COMPATIBLE, provider.modelListFormat)
+        assertTrue(provider.oauthClientId.isEmpty())
+    }
+
+    @Test
+    @DisplayName("grok alias resolves to xai")
+    fun `grok alias resolves to xai`() {
+        val grok = ProviderRegistry.findById("grok")
+        assertNotNull(grok)
+        assertEquals("xai", grok!!.id)
     }
 }
