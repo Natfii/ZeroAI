@@ -450,6 +450,27 @@ data class GlobalTomlConfig(
 }
 
 /**
+ * Peer agent entry ready for TOML serialization.
+ *
+ * @property ip Tailscale IP address.
+ * @property hostname Peer hostname.
+ * @property kind Agent type: `"zeroclaw"` or `"openclaw"`.
+ * @property port Agent gateway TCP port.
+ * @property alias User-configurable @mention alias.
+ * @property authRequired Whether the peer requires a bearer token.
+ * @property enabled Whether this peer is enabled for routing.
+ */
+data class PeerTomlEntry(
+    val ip: String,
+    val hostname: String,
+    val kind: String,
+    val port: Int,
+    val alias: String,
+    val authRequired: Boolean,
+    val enabled: Boolean,
+)
+
+/**
  * Builds a valid TOML configuration string for the ZeroAI daemon.
  *
  * The upstream [Config][zeroclaw::config::Config] struct requires at minimum
@@ -1494,4 +1515,34 @@ object ConfigTomlBuilder {
 
     /** ASCII DEL character code. */
     private const val DELETE_CHAR = 0x7F
+
+    /** Maximum TCP port number. */
+    private const val MAX_TCP_PORT = 65535
+
+    /**
+     * Builds the TOML representation of tailscale peer agent entries.
+     *
+     * Emits only `[[tailscale_peers.entries]]` blocks without a bare
+     * `[tailscale_peers]` header. Returns empty string when list is empty.
+     *
+     * @param peers List of peer configurations to serialize.
+     * @return TOML string fragment, or empty string if no peers.
+     */
+    fun buildTailscalePeersToml(peers: List<PeerTomlEntry>): String {
+        if (peers.isEmpty()) return ""
+
+        return buildString {
+            for (peer in peers) {
+                appendLine("[[tailscale_peers.entries]]")
+                appendLine("ip = \"${peer.ip}\"")
+                appendLine("hostname = \"${peer.hostname}\"")
+                appendLine("kind = \"${peer.kind}\"")
+                appendLine("port = ${peer.port.coerceIn(0, MAX_TCP_PORT)}")
+                appendLine("alias = \"${peer.alias}\"")
+                appendLine("auth_required = ${peer.authRequired}")
+                appendLine("enabled = ${peer.enabled}")
+                appendLine()
+            }
+        }
+    }
 }

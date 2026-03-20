@@ -317,7 +317,8 @@ class ZeroAIDaemonService : Service() {
             val channelsToml =
                 ConfigTomlBuilder.buildChannelsToml(enabledChannels, discordGuildId)
             val agentsToml = buildAgentsToml()
-            val configToml = baseToml + channelsToml + agentsToml
+            val peersToml = buildPeersToml()
+            val configToml = baseToml + channelsToml + agentsToml + peersToml
 
             if (!validateConfigOrStop(configToml)) return@launch
 
@@ -698,6 +699,108 @@ class ZeroAIDaemonService : Service() {
                     )
                 }.filterNotNull()
         return ConfigTomlBuilder.buildAgentsToml(entries)
+    }
+
+    /**
+     * Builds the Tailscale peer agents TOML section from cached discovery state.
+     *
+     * Reads the peer list from cached settings and converts enabled
+     * agent peers (zeroclaw/openclaw kinds) into [PeerTomlEntry] instances.
+     *
+     * @return TOML string fragment for `[[tailscale_peers.entries]]`, or empty.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun buildPeersToml(): String {
+        val settings = settingsRepository.settings.first()
+        val cachedJson = settings.tailscaleCachedDiscovery
+        if (cachedJson.isBlank()) return ""
+
+        val peers =
+            try {
+                kotlinx.serialization.json.Json.decodeFromString<
+                    List<com.zeroclaw.android.model.CachedTailscalePeer>,
+                >(cachedJson)
+            } catch (_: Exception) {
+                return ""
+            }
+
+        val rawEntries =
+            peers.flatMap { peer ->
+                peer.services
+                    .filter { svc ->
+                        com.zeroclaw.android.tailscale
+                            .isAgentKind(svc.kind)
+                    }.map { svc ->
+                        Triple(
+                            peer,
+                            svc,
+                            com.zeroclaw.android.tailscale
+                                .normalizeKind(svc.kind),
+                        )
+                    }
+            }
+        val defaults =
+            com.zeroclaw.android.tailscale.PeerMessageRouter.resolveAliasConflicts(
+                rawEntries.map { it.third },
+            )
+        val aliasPrefs = peerAliasPrefs()
+        val entries =
+            rawEntries.mapIndexed { i, (peer, svc, _) ->
+                val savedAlias =
+                    aliasPrefs.getString(
+                        peerAliasKey(peer.ip, svc.port),
+                        null,
+                    )
+                PeerTomlEntry(
+                    ip = peer.ip,
+                    hostname = peer.hostname,
+                    kind = svc.kind,
+                    port = svc.port,
+                    alias = savedAlias ?: defaults[i],
+                    authRequired = svc.authRequired,
+                    enabled = true,
+                )
+            }
+
+        return ConfigTomlBuilder.buildTailscalePeersToml(entries)
+    }
+
+    /**
+     * Opens the encrypted preferences file for peer alias storage.
+     *
+     * @return [android.content.SharedPreferences] instance.
+     */
+    private fun peerAliasPrefs(): android.content.SharedPreferences {
+        val masterKey =
+            androidx.security.crypto.MasterKey
+                .Builder(this)
+                .setKeyScheme(
+                    androidx.security.crypto.MasterKey.KeyScheme.AES256_GCM,
+                ).build()
+        return androidx.security.crypto.EncryptedSharedPreferences.create(
+            this,
+            "tailscale_peer_tokens",
+            masterKey,
+            androidx.security.crypto.EncryptedSharedPreferences
+                .PrefKeyEncryptionScheme.AES256_SIV,
+            androidx.security.crypto.EncryptedSharedPreferences
+                .PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    /**
+     * Generates the encrypted preferences key for a peer alias.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @return Formatted key string.
+     */
+    private fun peerAliasKey(
+        ip: String,
+        port: Int,
+    ): String {
+        val sanitizedIp = ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+        return "tailscale_alias_${sanitizedIp}_$port"
     }
 
     private fun hasUsableDaemonProviderCredentials(

@@ -12,6 +12,8 @@ import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
@@ -51,6 +53,7 @@ import com.zeroclaw.android.data.repository.RoomPluginRepository
 import com.zeroclaw.android.data.repository.RoomTerminalEntryRepository
 import com.zeroclaw.android.data.repository.SettingsRepository
 import com.zeroclaw.android.data.repository.TerminalEntryRepository
+import com.zeroclaw.android.model.CachedTailscalePeer
 import com.zeroclaw.android.model.RefreshCommand
 import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.service.CostBridge
@@ -64,6 +67,10 @@ import com.zeroclaw.android.service.PluginSyncWorker
 import com.zeroclaw.android.service.SkillsBridge
 import com.zeroclaw.android.service.ToolsBridge
 import com.zeroclaw.android.service.VisionBridge
+import com.zeroclaw.android.tailscale.PeerMessageRouter
+import com.zeroclaw.android.tailscale.PeerRouteEntry
+import com.zeroclaw.android.tailscale.isAgentKind
+import com.zeroclaw.android.tailscale.normalizeKind
 import com.zeroclaw.android.util.SessionLockManager
 import com.zeroclaw.ffi.getVersion
 import java.io.File
@@ -79,6 +86,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
 import okhttp3.ConnectionPool
 import okhttp3.OkHttpClient
 
@@ -264,7 +273,13 @@ class ZeroAIApplication :
         skillsBridge = SkillsBridge()
         toolsBridge = ToolsBridge()
         memoryBridge = MemoryBridge()
-        eventBridge = EventBridge(activityRepository, ioScope)
+        eventBridge =
+            EventBridge(
+                activityRepository = activityRepository,
+                scope = ioScope,
+                getPeers = { buildPeerRoutes() },
+                getPeerToken = { ip, port -> readPeerToken(ip, port) },
+            )
         daemonBridge.eventBridge = eventBridge
         daemonBridge.credentialBridge = CredentialBridge(apiKeyRepository)
 
@@ -653,11 +668,117 @@ class ZeroAIApplication :
             null
         }
 
+    /**
+     * Returns enabled peer route entries derived from cached tailscale discovery data.
+     *
+     * Reads the JSON-serialized peer cache from [AppSettings.tailscaleCachedDiscovery]
+     * and maps each agent service (zeroclaw or openclaw) to a [PeerRouteEntry].
+     * Returns an empty list when no peers are cached or the setting is blank.
+     *
+     * Safe to call from a background thread. Uses [runBlocking] to read the
+     * settings [kotlinx.coroutines.flow.Flow] synchronously.
+     *
+     * @return List of peer routes available for @alias routing.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun buildPeerRoutes(): List<PeerRouteEntry> {
+        val cached =
+            try {
+                runBlocking { settingsRepository.settings.first() }.tailscaleCachedDiscovery
+            } catch (_: Exception) {
+                return emptyList()
+            }
+        if (cached.isBlank()) return emptyList()
+        return try {
+            val peers = Json.decodeFromString<List<CachedTailscalePeer>>(cached)
+            val raw =
+                peers.flatMap { peer ->
+                    peer.services
+                        .filter { svc -> isAgentKind(svc.kind) }
+                        .map { svc ->
+                            PeerRouteEntry(
+                                alias = normalizeKind(svc.kind),
+                                ip = peer.ip,
+                                port = svc.port,
+                                kind = normalizeKind(svc.kind),
+                            )
+                        }
+                }
+            val defaults =
+                PeerMessageRouter.resolveAliasConflicts(raw.map { it.alias })
+            val masterKey =
+                MasterKey
+                    .Builder(this)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+            val prefs =
+                EncryptedSharedPreferences.create(
+                    this,
+                    PEER_TOKEN_PREFS,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            raw.mapIndexed { i, entry ->
+                val sanitizedIp =
+                    entry.ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+                val savedAlias =
+                    prefs.getString(
+                        "tailscale_alias_${sanitizedIp}_${entry.port}",
+                        null,
+                    )
+                entry.copy(alias = savedAlias ?: defaults[i])
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Retrieves a stored bearer token for the given peer from encrypted preferences.
+     *
+     * Uses the same storage key convention as
+     * [com.zeroclaw.android.ui.screen.tailscale.TailscaleConfigViewModel].
+     * Returns `null` when no token has been saved for this peer or if
+     * the keystore is unavailable.
+     *
+     * Safe to call from a background thread.
+     *
+     * @param ip Tailscale IP of the peer.
+     * @param port Gateway port of the peer service.
+     * @return Stored bearer token, or `null` if absent.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun readPeerToken(
+        ip: String,
+        port: Int,
+    ): String? =
+        try {
+            val masterKey =
+                MasterKey
+                    .Builder(this)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+            val prefs =
+                EncryptedSharedPreferences.create(
+                    this,
+                    PEER_TOKEN_PREFS,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            val sanitizedIp = ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+            prefs.getString("tailscale_peer_${sanitizedIp}_$port", null)
+        } catch (_: Exception) {
+            null
+        }
+
     /** Constants for [ZeroAIApplication]. */
     companion object {
         private const val TAG = "ZeroAIApp"
         private const val CHANNEL_SECRETS_PREFS = "zeroclaw_channel_secrets"
         private const val EMAIL_SECRETS_PREFS = "zeroclaw_email_secrets"
+        private const val PEER_TOKEN_PREFS = "tailscale_peer_tokens"
         private const val STALE_OAUTH_PROVIDER = "openai"
         private const val CODEX_PROVIDER = "openai-codex"
         private const val MEMORY_CACHE_PERCENT = 0.15

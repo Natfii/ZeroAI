@@ -32,6 +32,7 @@ data class CachedTailscalePeer(
  * @property port TCP port the service was found on.
  * @property version Version or info string, if available.
  * @property healthy Whether the service responded successfully.
+ * @property authRequired Whether the service requires a bearer token for API access.
  */
 @Serializable
 data class CachedTailscaleService(
@@ -39,4 +40,5 @@ data class CachedTailscaleService(
     val port: Int,
     val version: String? = null,
     val healthy: Boolean = false,
+    val authRequired: Boolean = true,
 )

@@ -12,10 +12,13 @@ import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.ProviderRegistry
 import com.zeroclaw.android.data.oauth.AuthProfileStore
 import com.zeroclaw.android.model.AppSettings
+import com.zeroclaw.android.model.CachedTailscalePeer
 import com.zeroclaw.android.model.LogSeverity
 import com.zeroclaw.android.model.ProcessedImage
 import com.zeroclaw.android.model.ProviderAuthType
@@ -34,6 +37,11 @@ import com.zeroclaw.android.service.ScreenCaptureBridge
 import com.zeroclaw.android.service.SlotAwareAgentConfig
 import com.zeroclaw.android.service.VoiceBridge
 import com.zeroclaw.android.service.ZeroAIDaemonService
+import com.zeroclaw.android.tailscale.PeerMatchResult
+import com.zeroclaw.android.tailscale.PeerMessageRouter
+import com.zeroclaw.android.tailscale.PeerRouteEntry
+import com.zeroclaw.android.tailscale.isAgentKind
+import com.zeroclaw.android.tailscale.normalizeKind
 import com.zeroclaw.android.util.ErrorSanitizer
 import com.zeroclaw.android.util.ImageProcessor
 import com.zeroclaw.ffi.FfiException
@@ -41,9 +49,11 @@ import com.zeroclaw.ffi.FfiProgressPhase
 import com.zeroclaw.ffi.FfiScriptValidation
 import com.zeroclaw.ffi.FfiSessionListener
 import com.zeroclaw.ffi.FfiWorkspaceScript
+import com.zeroclaw.ffi.TailnetServiceKind
 import com.zeroclaw.ffi.evalScriptWithCapabilities
 import com.zeroclaw.ffi.getProviderSupportsVision
 import com.zeroclaw.ffi.listWorkspaceScripts
+import com.zeroclaw.ffi.peerSendMessage
 import com.zeroclaw.ffi.runWorkspaceScript
 import com.zeroclaw.ffi.sessionCancel
 import com.zeroclaw.ffi.sessionDestroy
@@ -60,10 +70,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 
 /**
  * ViewModel for the terminal REPL screen.
@@ -224,6 +236,13 @@ class TerminalViewModel(
     private val cachedSettings: StateFlow<AppSettings> =
         settingsRepository.settings
             .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
+    /** Peer agent aliases for `@` autocomplete in the terminal input. */
+    val peerAliases: StateFlow<List<String>> =
+        cachedSettings
+            .map { settings ->
+                getPeerRoutes().map { "@${it.alias}" }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(PEER_ALIAS_TIMEOUT), emptyList())
 
     private val loadingState = MutableStateFlow(false)
     private val pendingImagesState = MutableStateFlow<List<ProcessedImage>>(emptyList())
@@ -462,7 +481,10 @@ class TerminalViewModel(
     /**
      * Submits user input for processing.
      *
-     * Parses the input through [CommandRegistry.parseAndTranslate] and
+     * Before command parsing, checks for an `@alias` prefix matching a known
+     * tailnet peer. If matched, routes to [dispatchPeerMessage] and returns early.
+     *
+     * Otherwise, parses the input through [CommandRegistry.parseAndTranslate] and
      * dispatches based on the result type:
      * - [CommandResult.RhaiExpression]: persists the input, evaluates
      *   via FFI, and persists the response or error.
@@ -480,6 +502,12 @@ class TerminalViewModel(
 
         appendToHistory(trimmed)
         _historyIndex.value = NO_HISTORY_SELECTION
+
+        val peerMatch = PeerMessageRouter.matchAlias(trimmed, getPeerRoutes())
+        if (peerMatch != null) {
+            dispatchPeerMessage(trimmed, peerMatch)
+            return
+        }
 
         val result = CommandRegistry.parseAndTranslate(trimmed)
         when (result) {
@@ -915,6 +943,170 @@ class TerminalViewModel(
                 val sanitized = ErrorSanitizer.sanitizeForUi(e)
                 logRepository.append(LogSeverity.ERROR, TAG, "Packaged script run failed: $sanitized")
                 repository.append(content = sanitized, entryType = ENTRY_TYPE_ERROR)
+            } finally {
+                loadingState.value = false
+            }
+        }
+    }
+
+    /**
+     * Returns enabled peer route entries derived from cached tailscale discovery data.
+     *
+     * Reads the JSON-serialized peer cache from [AppSettings.tailscaleCachedDiscovery]
+     * and maps each agent service (zeroclaw or openclaw) to a [PeerRouteEntry].
+     * Returns an empty list when no peers are cached or the setting is blank.
+     *
+     * @return List of peer routes available for @alias routing.
+     */
+    private fun getPeerRoutes(): List<PeerRouteEntry> {
+        val cached = cachedSettings.value.tailscaleCachedDiscovery
+        if (cached.isBlank()) return emptyList()
+        return try {
+            val peers = Json.decodeFromString<List<CachedTailscalePeer>>(cached)
+            val raw =
+                peers.flatMap { peer ->
+                    peer.services
+                        .filter { svc -> isAgentKind(svc.kind) }
+                        .map { svc ->
+                            PeerRouteEntry(
+                                alias = normalizeKind(svc.kind),
+                                ip = peer.ip,
+                                port = svc.port,
+                                kind = normalizeKind(svc.kind),
+                            )
+                        }
+                }
+            val defaults =
+                PeerMessageRouter.resolveAliasConflicts(raw.map { it.alias })
+            val masterKey =
+                MasterKey
+                    .Builder(app)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+            val prefs =
+                EncryptedSharedPreferences.create(
+                    app,
+                    "tailscale_peer_tokens",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            raw.mapIndexed { i, entry ->
+                val sanitizedIp =
+                    entry.ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+                val savedAlias =
+                    prefs.getString(
+                        "tailscale_alias_${sanitizedIp}_${entry.port}",
+                        null,
+                    )
+                entry.copy(alias = savedAlias ?: defaults[i])
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * Retrieves a stored bearer token for the given peer from encrypted preferences.
+     *
+     * Uses the same storage key convention as [TailscaleConfigViewModel].
+     * Returns `null` when no token has been saved for this peer.
+     *
+     * @param ip Tailscale IP of the peer.
+     * @param port Gateway port of the peer service.
+     * @return Stored bearer token, or `null` if absent.
+     */
+    private fun getPeerToken(
+        ip: String,
+        port: Int,
+    ): String? =
+        try {
+            val masterKey =
+                MasterKey
+                    .Builder(app)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+            val prefs =
+                EncryptedSharedPreferences.create(
+                    app,
+                    "tailscale_peer_tokens",
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                )
+            val sanitizedIp = ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+            prefs.getString("tailscale_peer_${sanitizedIp}_$port", null)
+        } catch (_: Exception) {
+            null
+        }
+
+    /**
+     * Converts a service kind string to its [TailnetServiceKind] enum value.
+     *
+     * @param kind Service kind identifier, either `"zeroclaw"` or `"openclaw"`.
+     * @return Corresponding [TailnetServiceKind], defaulting to [TailnetServiceKind.Zeroclaw].
+     */
+    private fun serviceKindFromString(kind: String): TailnetServiceKind =
+        when (kind.lowercase()) {
+            "openclaw" -> TailnetServiceKind.OPEN_CLAW
+            else -> TailnetServiceKind.ZEROCLAW
+        }
+
+    /**
+     * Dispatches a matched @alias message to the target peer agent via FFI.
+     *
+     * Persists the user input, sends the stripped message to the peer on
+     * [Dispatchers.IO], and appends the peer response or a reachability error
+     * to the terminal. Returns early without invoking normal agent processing.
+     *
+     * @param displayText The original raw input shown in the scrollback.
+     * @param match The alias match result containing peer info and stripped message.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun dispatchPeerMessage(
+        displayText: String,
+        match: PeerMatchResult,
+    ) {
+        loadingState.value = true
+        viewModelScope.launch {
+            repository.append(content = displayText, entryType = ENTRY_TYPE_INPUT)
+            try {
+                val token =
+                    withContext(Dispatchers.IO) {
+                        getPeerToken(match.peer.ip, match.peer.port)
+                    }
+                val kind = serviceKindFromString(match.peer.kind)
+                val response =
+                    withContext(Dispatchers.IO) {
+                        peerSendMessage(
+                            ip = match.peer.ip,
+                            port = match.peer.port.toUShort(),
+                            kind = kind,
+                            token = token,
+                            message = match.strippedMessage,
+                        )
+                    }
+                repository.append(
+                    content = "{@${match.alias}} $response",
+                    entryType = ENTRY_TYPE_RESPONSE,
+                )
+                if (_speakRepliesEnabled.value && response.isNotBlank()) {
+                    _lastAgentResponse.value = response
+                }
+            } catch (e: FfiException) {
+                val sanitized = ErrorSanitizer.sanitizeForUi(e)
+                logRepository.append(LogSeverity.ERROR, TAG, "Peer send failed: $sanitized")
+                repository.append(
+                    content = "{@${match.alias}} Unreachable: $sanitized",
+                    entryType = ENTRY_TYPE_ERROR,
+                )
+            } catch (e: Exception) {
+                val sanitized = ErrorSanitizer.sanitizeForUi(e)
+                logRepository.append(LogSeverity.ERROR, TAG, "Peer send failed: $sanitized")
+                repository.append(
+                    content = "{@${match.alias}} Unreachable: $sanitized",
+                    entryType = ENTRY_TYPE_ERROR,
+                )
             } finally {
                 loadingState.value = false
             }
@@ -2443,6 +2635,9 @@ class TerminalViewModel(
 
         /** Entry type constant for system message entries. */
         private const val ENTRY_TYPE_SYSTEM = "system"
+
+        /** Subscription timeout for [peerAliases] flow collection. */
+        private const val PEER_ALIAS_TIMEOUT = 5_000L
 
         /** Runtime identifier for the currently executable embedded script engine. */
         private const val SCRIPT_RUNTIME_RHAI = "rhai"

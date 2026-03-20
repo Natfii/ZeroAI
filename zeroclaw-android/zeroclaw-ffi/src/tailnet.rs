@@ -13,6 +13,8 @@
 
 use crate::error::FfiError;
 use crate::runtime::get_or_create_runtime;
+use secrecy::{ExposeSecret, SecretString};
+use std::net::IpAddr;
 use std::time::Duration;
 
 /// TCP connect timeout for service probes.
@@ -34,6 +36,9 @@ const AI_PORTS: &[(u16, &str)] = &[
 
 /// Default zeroclaw gateway HTTP port (matches ZeroAI's `AppSettings.DEFAULT_PORT`).
 const ZEROCLAW_PORT: u16 = 42617;
+
+/// Default OpenClaw gateway HTTP port.
+const OPENCLAW_PORT: u16 = 18789;
 
 // ── FFI record types ─────────────────────────────────────────────────
 
@@ -84,6 +89,24 @@ pub struct TailnetService {
     pub version: Option<String>,
     /// Whether the service responded with a healthy status.
     pub healthy: bool,
+    /// Whether the peer requires a bearer token for API access.
+    ///
+    /// Defaults to `true` (safe assumption — require auth unless proven otherwise).
+    pub auth_required: bool,
+}
+
+/// Channel kinds that support peer message relay.
+///
+/// Used by [`peer_send_channel_response_inner`] to validate and route
+/// responses back through the originating channel.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum PeerChannelKind {
+    /// Telegram bot channel.
+    Telegram,
+    /// Discord bot channel.
+    Discord,
+    /// In-app CLI/Terminal.
+    Cli,
 }
 
 /// Known service types that can be discovered on tailnet peers.
@@ -99,6 +122,8 @@ pub enum TailnetServiceKind {
     LocalAi,
     /// ZeroClaw gateway HTTP server (port 42617).
     Zeroclaw,
+    /// OpenClaw gateway (port 18789).
+    OpenClaw,
 }
 
 // ── Inner implementations ────────────────────────────────────────────
@@ -235,6 +260,9 @@ pub(crate) fn tailnet_probe_services_inner(
                 if let Some(svc) = probe_zeroclaw(&client, host, port).await {
                     services.push(svc);
                 }
+                if let Some(svc) = probe_openclaw(&client, host, port).await {
+                    services.push(svc);
+                }
             } else {
                 // No explicit port: probe all standard ports concurrently.
                 let mut handles = Vec::new();
@@ -249,6 +277,11 @@ pub(crate) fn tailnet_probe_services_inner(
                 let zh = host.to_string();
                 handles.push(tokio::spawn(async move {
                     probe_zeroclaw(&zc, &zh, ZEROCLAW_PORT).await
+                }));
+                let oc = client.clone();
+                let oh = host.to_string();
+                handles.push(tokio::spawn(async move {
+                    probe_openclaw(&oc, &oh, OPENCLAW_PORT).await
                 }));
 
                 for handle in handles {
@@ -300,12 +333,13 @@ async fn probe_ai_server(
         && json.get("models").and_then(|v| v.as_array()).is_some()
     {
         let model_count = json["models"].as_array().map_or(0, Vec::len);
-        let kind = port_to_kind(port);
+        let kind = port_to_kind(port)?;
         return Some(TailnetService {
             kind,
             port,
             version: Some(format!("{model_count} model(s)")),
             healthy: true,
+            auth_required: false,
         });
     }
 
@@ -315,12 +349,13 @@ async fn probe_ai_server(
         && let Ok(json) = resp.json::<serde_json::Value>().await
         && let Some(data) = json.get("data").and_then(|v| v.as_array())
     {
-        let kind = port_to_kind(port);
+        let kind = port_to_kind(port)?;
         return Some(TailnetService {
             kind,
             port,
             version: Some(format!("{} model(s)", data.len())),
             healthy: true,
+            auth_required: false,
         });
     }
 
@@ -329,7 +364,9 @@ async fn probe_ai_server(
 
 /// Probes a zeroclaw gateway's `/health` endpoint.
 ///
-/// Returns `None` if the probe fails for any reason.
+/// Returns `None` if the probe fails for any reason. Extracts
+/// `require_pairing` to determine `auth_required` (defaults to
+/// `true` when the field is absent — safe assumption).
 async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Option<TailnetService> {
     let url = format!("http://{host}:{port}/health");
     let resp = client.get(&url).send().await.ok()?;
@@ -337,21 +374,320 @@ async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Opti
         return None;
     }
     let json: serde_json::Value = resp.json().await.ok()?;
-    let version = json["version"].as_str().map(String::from);
+    let version = json["version"]
+        .as_str()
+        .map(cap_version_string);
+    let auth_required = json["require_pairing"]
+        .as_bool()
+        .unwrap_or(true);
     Some(TailnetService {
         kind: TailnetServiceKind::Zeroclaw,
         port,
         version,
         healthy: true,
+        auth_required,
     })
 }
 
-/// Maps a port number to the expected [`TailnetServiceKind`].
-fn port_to_kind(port: u16) -> TailnetServiceKind {
-    match port {
-        1234 => TailnetServiceKind::LmStudio,
-        8000 => TailnetServiceKind::Vllm,
-        8080 => TailnetServiceKind::LocalAi,
-        _ => TailnetServiceKind::Ollama,
+/// Caps a string at 64 characters for safe storage/display.
+fn cap_version_string(s: &str) -> String {
+    match s.char_indices().nth(64) {
+        Some((idx, _)) => s[..idx].to_string(),
+        None => s.to_string(),
     }
+}
+
+/// Probes for an OpenClaw gateway on the given host and port.
+///
+/// Detection uses a tiered approach:
+/// 1. Check for `x-openclaw-version` response header (definitive)
+/// 2. Parse response as JSON and check `name`/`title` fields (fallback)
+///
+/// Returns `None` if neither signal is present.
+async fn probe_openclaw(
+    client: &reqwest::Client,
+    host: &str,
+    port: u16,
+) -> Option<TailnetService> {
+    let url = format!("http://{host}:{port}/");
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    // Tier 1: definitive header
+    let header_version = resp
+        .headers()
+        .get("x-openclaw-version")
+        .and_then(|v| v.to_str().ok())
+        .map(cap_version_string);
+
+    if let Some(ref ver) = header_version {
+        return Some(TailnetService {
+            kind: TailnetServiceKind::OpenClaw,
+            port,
+            version: Some(ver.clone()),
+            healthy: true,
+            auth_required: true,
+        });
+    }
+
+    // Tier 2: structured JSON body (cap at 4KB)
+    let body = resp.text().await.ok()?;
+    let truncated = &body[..body.len().min(4096)];
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(truncated) {
+        let name_match = json
+            .get("name")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.to_lowercase().contains("openclaw"));
+        let title_match = json
+            .get("title")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.to_lowercase().contains("openclaw"));
+
+        if name_match || title_match {
+            let version = json
+                .get("version")
+                .and_then(|v| v.as_str())
+                .map(cap_version_string);
+            return Some(TailnetService {
+                kind: TailnetServiceKind::OpenClaw,
+                port,
+                version,
+                healthy: true,
+                auth_required: true,
+            });
+        }
+    }
+
+    None
+}
+
+/// Maps a port number to the expected [`TailnetServiceKind`].
+///
+/// Returns `None` for unrecognized ports. Never guesses — unknown
+/// ports must be classified by their probe response, not their number.
+fn port_to_kind(port: u16) -> Option<TailnetServiceKind> {
+    match port {
+        11434 => Some(TailnetServiceKind::Ollama),
+        1234 => Some(TailnetServiceKind::LmStudio),
+        8000 => Some(TailnetServiceKind::Vllm),
+        8080 => Some(TailnetServiceKind::LocalAi),
+        42617 => Some(TailnetServiceKind::Zeroclaw),
+        18789 => Some(TailnetServiceKind::OpenClaw),
+        _ => None,
+    }
+}
+
+// ── Peer messaging ───────────────────────────────────────────────────
+
+/// Maximum response body size (1 MB) to prevent OOM from a malicious peer.
+const MAX_RESPONSE_BYTES: u64 = 1_048_576;
+
+/// Response timeout for peer messages (60s — waiting for LLM generation).
+const PEER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Validates that an IP string is a valid IP address.
+fn validate_peer_ip(ip: &str) -> Result<IpAddr, FfiError> {
+    ip.parse::<IpAddr>().map_err(|_| FfiError::InvalidArgument {
+        detail: format!("Invalid IP address: {ip}"),
+    })
+}
+
+/// Sends a message to a peer agent and returns the response text.
+///
+/// # Blocking
+///
+/// This function performs a synchronous HTTP request and may block for
+/// up to 63 seconds (3s connect + 60s response timeout). Callers
+/// **must** invoke from a background dispatcher (`Dispatchers.IO`).
+/// Never call from the main thread.
+///
+/// # Errors
+///
+/// - [`FfiError::InvalidArgument`] — malformed IP address or unsupported peer kind
+/// - [`FfiError::NetworkError`] — connection failure, timeout, or malformed response
+/// - [`FfiError::InternalPanic`] — unexpected internal panic (caught)
+pub(crate) fn peer_send_message_inner(
+    ip: String,
+    port: u16,
+    kind: TailnetServiceKind,
+    token: Option<String>,
+    message: String,
+) -> Result<String, FfiError> {
+    let addr = validate_peer_ip(&ip)?;
+
+    let secret_token: Option<SecretString> = token.map(SecretString::from);
+
+    let handle = get_or_create_runtime()?;
+    handle.block_on(async {
+        let client = reqwest::Client::builder()
+            .connect_timeout(PROBE_CONNECT_TIMEOUT)
+            .timeout(PEER_RESPONSE_TIMEOUT)
+            .build()
+            .map_err(|e| FfiError::NetworkError {
+                detail: format!("failed to build HTTP client: {e}"),
+            })?;
+
+        let auth_header = secret_token
+            .as_ref()
+            .map(|t: &SecretString| format!("Bearer {}", t.expose_secret()));
+
+        match kind {
+            TailnetServiceKind::Zeroclaw => {
+                send_to_zeroclaw(&client, &addr, port, auth_header.as_deref(), &message)
+                    .await
+            }
+            TailnetServiceKind::OpenClaw => {
+                send_to_openclaw(&client, &addr, port, auth_header.as_deref(), &message)
+                    .await
+            }
+            _ => Err(FfiError::InvalidArgument {
+                detail: format!("Unsupported peer kind for messaging: {kind:?}"),
+            }),
+        }
+    })
+}
+
+/// Sends a message to a ZeroClaw peer via POST /webhook.
+async fn send_to_zeroclaw(
+    client: &reqwest::Client,
+    addr: &IpAddr,
+    port: u16,
+    auth: Option<&str>,
+    message: &str,
+) -> Result<String, FfiError> {
+    let url = format!("http://{addr}:{port}/webhook");
+    let body = serde_json::json!({"message": message});
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(token) = auth {
+        req = req.header("Authorization", token);
+    }
+
+    let resp = req.send().await.map_err(|e| FfiError::NetworkError {
+        detail: format!("Failed to reach ZeroClaw peer at {addr}:{port}: {e}"),
+    })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(FfiError::NetworkError {
+            detail: format!("ZeroClaw peer returned HTTP {status}"),
+        });
+    }
+
+    let body = read_capped_body(resp).await?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| FfiError::NetworkError {
+            detail: format!("Invalid JSON from ZeroClaw peer: {e}"),
+        })?;
+
+    json.get("response")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .ok_or_else(|| FfiError::NetworkError {
+            detail: "ZeroClaw response missing 'response' field".into(),
+        })
+}
+
+/// Sends a message to an OpenClaw peer via POST /v1/chat/completions.
+async fn send_to_openclaw(
+    client: &reqwest::Client,
+    addr: &IpAddr,
+    port: u16,
+    auth: Option<&str>,
+    message: &str,
+) -> Result<String, FfiError> {
+    let url = format!("http://{addr}:{port}/v1/chat/completions");
+    let body = serde_json::json!({
+        "model": "openclaw",
+        "messages": [{"role": "user", "content": message}]
+    });
+
+    let mut req = client.post(&url).json(&body);
+    if let Some(token) = auth {
+        req = req.header("Authorization", token);
+    }
+
+    let resp = req.send().await.map_err(|e| FfiError::NetworkError {
+        detail: format!("Failed to reach OpenClaw peer at {addr}:{port}: {e}"),
+    })?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        return Err(FfiError::NetworkError {
+            detail: format!("OpenClaw peer returned HTTP {status}"),
+        });
+    }
+
+    let body = read_capped_body(resp).await?;
+    let json: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| FfiError::NetworkError {
+            detail: format!("Invalid JSON from OpenClaw peer: {e}"),
+        })?;
+
+    json.get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|msg| msg.get("content"))
+        .and_then(|c| c.as_str())
+        .map(String::from)
+        .ok_or_else(|| FfiError::NetworkError {
+            detail: "OpenClaw response missing choices[0].message.content".into(),
+        })
+}
+
+/// Reads a response body with a 1 MB cap to prevent OOM.
+async fn read_capped_body(resp: reqwest::Response) -> Result<String, FfiError> {
+    use futures_util::StreamExt;
+
+    let mut stream = resp.bytes_stream();
+    let mut total: u64 = 0;
+    let mut body = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| FfiError::NetworkError {
+            detail: format!("Error reading response body: {e}"),
+        })?;
+        total += chunk.len() as u64;
+        if total > MAX_RESPONSE_BYTES {
+            return Err(FfiError::NetworkError {
+                detail: format!("Response exceeded {MAX_RESPONSE_BYTES} byte limit"),
+            });
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    String::from_utf8(body).map_err(|e| FfiError::NetworkError {
+        detail: format!("Response body is not valid UTF-8: {e}"),
+    })
+}
+
+/// Sends a formatted response back through the daemon's gateway.
+///
+/// Relays the message through the gateway webhook endpoint, which
+/// dispatches to all active channels. The `channel` and `recipient`
+/// parameters are encoded in the message for routing context.
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running.
+pub(crate) fn peer_send_channel_response_inner(
+    channel: PeerChannelKind,
+    recipient: String,
+    message: String,
+) -> Result<(), FfiError> {
+    let channel_name = match channel {
+        PeerChannelKind::Telegram => "telegram",
+        PeerChannelKind::Discord => "discord",
+        PeerChannelKind::Cli => "cli",
+    };
+
+    let body = serde_json::json!({
+        "message": message,
+        "channel": channel_name,
+        "recipient": recipient,
+    });
+
+    crate::gateway_client::gateway_post("/webhook", &body)?;
+    Ok(())
 }

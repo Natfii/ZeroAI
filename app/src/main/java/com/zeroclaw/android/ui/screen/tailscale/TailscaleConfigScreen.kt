@@ -14,16 +14,22 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.VpnLock
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,6 +41,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -72,7 +79,9 @@ fun TailscaleConfigScreen(
 ) {
     val configState by viewModel.configState.collectAsStateWithLifecycle()
     val scanState by viewModel.scanState.collectAsStateWithLifecycle()
+    val peersState by viewModel.peersState.collectAsStateWithLifecycle()
     var peerInput by remember { mutableStateOf("") }
+    var tokenDialogPeerKey by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         topBar = {
@@ -160,6 +169,71 @@ fun TailscaleConfigScreen(
                 }
             }
 
+            item("peer-agents-header") {
+                Text(
+                    "Peer Agents",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            }
+
+            when (val peers = peersState) {
+                is TailscalePeersUiState.Loading -> {
+                    item("peer-agents-loading") {
+                        CircularProgressIndicator(
+                            modifier = Modifier.padding(16.dp),
+                        )
+                    }
+                }
+                is TailscalePeersUiState.Empty -> {
+                    item("peer-agents-empty") {
+                        Text(
+                            "No ZeroClaw or OpenClaw agents found on your peers.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                is TailscalePeersUiState.Error -> {
+                    item("peer-agents-error") {
+                        Text(
+                            peers.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+                is TailscalePeersUiState.Content -> {
+                    items(
+                        items = peers.peers,
+                        key = { "${it.ip}:${it.port}" },
+                        contentType = { "peer_agent" },
+                    ) { peer ->
+                        PeerRow(
+                            peer = peer,
+                            hasToken =
+                                viewModel.getPeerToken(
+                                    peer.ip,
+                                    peer.port,
+                                ) != null,
+                            onAliasChange = {
+                                viewModel.updatePeerAlias(
+                                    peer.ip,
+                                    peer.port,
+                                    it,
+                                )
+                            },
+                            onToggle = {
+                                viewModel.togglePeer(peer.ip, peer.port, it)
+                            },
+                            onTokenTap = {
+                                tokenDialogPeerKey = "${peer.ip}:${peer.port}"
+                            },
+                        )
+                    }
+                }
+            }
+
             if (configState.lastScanTimestamp > 0L) {
                 item("last-scan") {
                     val formatted =
@@ -184,6 +258,17 @@ fun TailscaleConfigScreen(
             item("bottom-spacer") {
                 Spacer(modifier = Modifier.height(16.dp))
             }
+        }
+
+        if (tokenDialogPeerKey != null) {
+            TokenEntryDialog(
+                onSave = { token ->
+                    val (ip, port) = tokenDialogPeerKey!!.split(":")
+                    viewModel.savePeerToken(ip, port.toInt(), token)
+                    tokenDialogPeerKey = null
+                },
+                onDismiss = { tokenDialogPeerKey = null },
+            )
         }
     }
 }
@@ -528,3 +613,174 @@ private fun ServiceRow(
         )
     }
 }
+
+/**
+ * Triple-encoded status indicator for a peer agent.
+ *
+ * Encodes status through color, icon shape, and text label so that
+ * color is never the sole differentiator (WCAG 2.2 AA compliance).
+ *
+ * @param authRequired Whether the peer requires a bearer token.
+ * @param hasToken Whether a token is stored for this peer.
+ * @param modifier Optional modifier.
+ */
+@Composable
+private fun PeerStatusIndicator(
+    authRequired: Boolean,
+    hasToken: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val (icon, tint, label) =
+        when {
+            !authRequired || hasToken ->
+                Triple(
+                    Icons.Default.CheckCircle,
+                    MaterialTheme.colorScheme.primary,
+                    "Connected",
+                )
+            else ->
+                Triple(
+                    Icons.Default.Lock,
+                    MaterialTheme.colorScheme.tertiary,
+                    "Token required",
+                )
+        }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier =
+            modifier.semantics(mergeDescendants = true) {
+                contentDescription = label
+            },
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/**
+ * Row displaying a peer agent with alias field, status, token button, and toggle.
+ *
+ * @param peer Peer agent configuration.
+ * @param hasToken Whether a token is stored for this peer.
+ * @param onAliasChange Called when the alias text field changes.
+ * @param onToggle Called when the enable/disable switch is toggled.
+ * @param onTokenTap Called when the "Add token" chip is tapped.
+ * @param modifier Optional modifier.
+ */
+@Composable
+private fun PeerRow(
+    peer: TailscalePeerConfig,
+    hasToken: Boolean,
+    onAliasChange: (String) -> Unit,
+    onToggle: (Boolean) -> Unit,
+    onTokenTap: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector =
+                if (peer.kind == "zeroclaw") {
+                    Icons.Default.Memory
+                } else {
+                    Icons.Default.Cloud
+                },
+            contentDescription = "${peer.kind} agent",
+            modifier = Modifier.size(24.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(peer.hostname, style = MaterialTheme.typography.bodyMedium)
+            PeerStatusIndicator(peer.authRequired, hasToken)
+            OutlinedTextField(
+                value = peer.alias,
+                onValueChange = { newValue ->
+                    val filtered =
+                        newValue
+                            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+                            .take(MAX_ALIAS_LENGTH)
+                    onAliasChange(filtered)
+                },
+                label = { Text("Alias") },
+                supportingText = {
+                    Text(
+                        "Chat prefix \u2014 type @${peer.alias} to reach this agent",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        if (peer.authRequired && !hasToken) {
+            AssistChip(
+                onClick = onTokenTap,
+                label = { Text("Add token") },
+                modifier =
+                    Modifier.semantics {
+                        contentDescription = "Add token for ${peer.alias}"
+                    },
+            )
+        }
+        Switch(
+            checked = peer.enabled,
+            onCheckedChange = onToggle,
+        )
+    }
+}
+
+/**
+ * Dialog for entering a peer agent bearer token.
+ *
+ * @param onSave Called with the entered token when Save is tapped.
+ * @param onDismiss Called when the dialog is dismissed.
+ */
+@Composable
+private fun TokenEntryDialog(
+    onSave: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var tokenText by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Enter Bearer Token") },
+        text = {
+            OutlinedTextField(
+                value = tokenText,
+                onValueChange = { tokenText = it },
+                label = { Text("Token") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(tokenText) },
+                enabled = tokenText.isNotBlank(),
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+/** Maximum alias length in characters, matching [PeerMessageRouter] validation. */
+private const val MAX_ALIAS_LENGTH = 32

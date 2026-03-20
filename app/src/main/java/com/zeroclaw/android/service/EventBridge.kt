@@ -10,14 +10,23 @@ import android.util.Log
 import com.zeroclaw.android.data.repository.ActivityRepository
 import com.zeroclaw.android.model.ActivityType
 import com.zeroclaw.android.model.DaemonEvent
+import com.zeroclaw.android.tailscale.PeerMatchResult
+import com.zeroclaw.android.tailscale.PeerMessageRouter
+import com.zeroclaw.android.tailscale.PeerRouteEntry
 import com.zeroclaw.ffi.FfiEventListener
 import com.zeroclaw.ffi.FfiException
+import com.zeroclaw.ffi.PeerChannelKind
+import com.zeroclaw.ffi.TailnetServiceKind
+import com.zeroclaw.ffi.peerSendChannelResponse
+import com.zeroclaw.ffi.peerSendMessage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
@@ -28,15 +37,24 @@ import org.json.JSONObject
  * into [DaemonEvent] instances and emitted on a [SharedFlow] for ViewModel consumption.
  * Each event is also persisted to the [ActivityRepository] for the dashboard feed.
  *
+ * Incoming `channel_message` events with an `@alias` prefix are intercepted before
+ * normal flow emission and routed to the matching tailnet peer via [peerSendMessage].
+ * The peer response is relayed back through [peerSendChannelResponse] to the originating
+ * channel. If the peer is unreachable an error reply is sent instead.
+ *
  * The internal [MutableSharedFlow] uses [BufferOverflow.DROP_OLDEST] with a capacity of
  * 64 events to avoid back-pressure blocking the native callback thread.
  *
  * @param activityRepository Repository for persisting events to the activity feed.
  * @param scope Coroutine scope for asynchronous emission and persistence.
+ * @param getPeers Supplier for the current list of enabled peer route entries.
+ * @param getPeerToken Retrieves a stored bearer token for a peer by IP and port.
  */
 class EventBridge(
     private val activityRepository: ActivityRepository,
     private val scope: CoroutineScope,
+    private val getPeers: () -> List<PeerRouteEntry> = { emptyList() },
+    private val getPeerToken: (String, Int) -> String? = { _, _ -> null },
 ) : FfiEventListener {
     private val _events =
         MutableSharedFlow<DaemonEvent>(
@@ -50,18 +68,98 @@ class EventBridge(
     /**
      * Called by the native layer when a new event is produced.
      *
-     * Parses the JSON string into a [DaemonEvent], emits it on [events],
-     * and records it in the [ActivityRepository]. Malformed JSON is logged at
-     * warning level and dropped to avoid crashing the native callback thread.
+     * Parses the JSON string into a [DaemonEvent]. Incoming `channel_message` events
+     * whose content starts with an `@alias` prefix are intercepted for peer routing via
+     * [handlePeerRoute]; all other events are emitted on [events] and recorded in the
+     * [ActivityRepository]. Malformed JSON is logged at warning level and dropped.
      *
      * @param eventJson Raw JSON event string from the Rust daemon.
      */
     override fun onEvent(eventJson: String) {
         val event = parseEvent(eventJson) ?: return
+
+        if (event.kind == "channel_message" && event.data["direction"] == "in") {
+            val content = event.data["content"]
+            val channel = event.data["channel"]
+            val sender = event.data["sender"]
+            if (content != null && channel != null && sender != null) {
+                val match = PeerMessageRouter.matchAlias(content, getPeers())
+                if (match != null) {
+                    scope.launch(Dispatchers.IO) {
+                        handlePeerRoute(match, channel, sender)
+                    }
+                    return
+                }
+            }
+        }
+
         scope.launch {
             _events.emit(event)
             val (type, message) = event.toActivityRecord()
             activityRepository.record(type, message)
+        }
+    }
+
+    /**
+     * Routes a matched peer message and relays the response through the originating channel.
+     *
+     * @param match The alias match result containing peer info and stripped message.
+     * @param channel The originating channel name (e.g. "telegram", "discord").
+     * @param sender The message sender identifier for reply routing.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun handlePeerRoute(
+        match: PeerMatchResult,
+        channel: String,
+        sender: String,
+    ) {
+        try {
+            val token = getPeerToken(match.peer.ip, match.peer.port)
+            val kind =
+                when (match.peer.kind.lowercase()) {
+                    "openclaw" -> TailnetServiceKind.OPEN_CLAW
+                    else -> TailnetServiceKind.ZEROCLAW
+                }
+            val response =
+                withContext(Dispatchers.IO) {
+                    peerSendMessage(
+                        match.peer.ip,
+                        match.peer.port.toUShort(),
+                        kind,
+                        token,
+                        match.strippedMessage,
+                    )
+                }
+            val channelKind =
+                when (channel) {
+                    "telegram" -> PeerChannelKind.TELEGRAM
+                    "discord" -> PeerChannelKind.DISCORD
+                    else -> return
+                }
+            peerSendChannelResponse(
+                channelKind,
+                sender,
+                "{@${match.alias}} $response",
+            )
+        } catch (e: Exception) {
+            Log.w(EVENT_BRIDGE_TAG, "Peer route to ${match.alias} failed", e)
+            val channelKind =
+                when (channel) {
+                    "telegram" -> PeerChannelKind.TELEGRAM
+                    "discord" -> PeerChannelKind.DISCORD
+                    else -> return
+                }
+            try {
+                peerSendChannelResponse(
+                    channelKind,
+                    sender,
+                    "{@${match.alias}} not reachable right now.",
+                )
+            } catch (
+                @Suppress("SwallowedException") relayErr: Exception,
+            ) {
+                Log.w(EVENT_BRIDGE_TAG, "Failed to relay peer error to $channel")
+            }
         }
     }
 

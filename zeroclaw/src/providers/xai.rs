@@ -491,6 +491,58 @@ impl Provider for XaiProvider {
             .ok_or_else(|| anyhow::anyhow!("No response from xAI"))
     }
 
+    async fn chat(
+        &self,
+        request: crate::providers::traits::ChatRequest<'_>,
+        model: &str,
+        temperature: f64,
+    ) -> anyhow::Result<ProviderChatResponse> {
+        let credential = self.require_credential()?;
+        let model = Self::normalized_model_name(model);
+        let tools_payload = Self::convert_and_clean_tools(request.tools);
+        let tool_choice = tools_payload.as_ref().map(|_| "auto".to_string());
+
+        let request = ChatRequest {
+            model: model.to_string(),
+            messages: Self::convert_messages(request.messages),
+            temperature,
+            tools: tools_payload,
+            tool_choice,
+            stream: None,
+        };
+
+        let req = self
+            .http_client()
+            .post(format!("{XAI_BASE_URL}/chat/completions"))
+            .header("Authorization", format!("Bearer {credential}"))
+            .json(&request);
+        let response = super::apply_custom_headers(req, &self.custom_headers)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(super::api_error("xAI", response).await);
+        }
+
+        let chat_response: ChatResponse = response.json().await?;
+        let usage = chat_response
+            .usage
+            .map(|u| crate::providers::traits::TokenUsage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+            });
+        let message = chat_response
+            .choices
+            .into_iter()
+            .next()
+            .map(|c| c.message)
+            .ok_or_else(|| anyhow::anyhow!("No response from xAI"))?;
+
+        let mut result = Self::parse_response(message)?;
+        result.usage = usage;
+        Ok(result)
+    }
+
     async fn chat_with_history(
         &self,
         messages: &[ChatMessage],

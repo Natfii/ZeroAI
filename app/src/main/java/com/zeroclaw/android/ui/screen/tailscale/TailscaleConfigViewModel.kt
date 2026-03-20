@@ -9,9 +9,14 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.model.CachedTailscalePeer
 import com.zeroclaw.android.model.CachedTailscaleService
+import com.zeroclaw.android.tailscale.PeerMessageRouter
+import com.zeroclaw.android.tailscale.isAgentKind
+import com.zeroclaw.android.tailscale.normalizeKind
 import com.zeroclaw.android.viewmodel.DaemonUiState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +29,58 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+/**
+ * Configuration for a single tailscale peer agent, used by the UI layer.
+ *
+ * @property ip Tailscale IP address.
+ * @property hostname Peer hostname.
+ * @property kind Agent type: `"zeroclaw"` or `"openclaw"`.
+ * @property port Agent gateway TCP port.
+ * @property alias User-configurable @mention alias.
+ * @property authRequired Whether the peer requires a bearer token.
+ * @property enabled Whether this peer is enabled for routing.
+ */
+data class TailscalePeerConfig(
+    val ip: String,
+    val hostname: String,
+    val kind: String,
+    val port: Int,
+    val alias: String,
+    val authRequired: Boolean = true,
+    val enabled: Boolean = true,
+)
+
+/**
+ * UI state for the tailscale peer agents section.
+ */
+sealed interface TailscalePeersUiState {
+    /** Loading peer configuration. */
+    data object Loading : TailscalePeersUiState
+
+    /**
+     * Error loading peers.
+     *
+     * @property message Human-readable error description.
+     * @property onRetry Callback to retry the failed operation.
+     */
+    data class Error(
+        val message: String,
+        val onRetry: () -> Unit,
+    ) : TailscalePeersUiState
+
+    /** No agent peers discovered. */
+    data object Empty : TailscalePeersUiState
+
+    /**
+     * Peers loaded successfully.
+     *
+     * @property peers List of discovered peer agent configurations.
+     */
+    data class Content(
+        val peers: List<TailscalePeerConfig>,
+    ) : TailscalePeersUiState
+}
 
 /**
  * State for the Tailscale configuration screen content.
@@ -95,6 +152,226 @@ class TailscaleConfigViewModel(
                 TailscaleConfigState(),
             )
 
+    private val _peersState =
+        MutableStateFlow<TailscalePeersUiState>(TailscalePeersUiState.Loading)
+
+    /** Peer agents UI state. */
+    val peersState: StateFlow<TailscalePeersUiState> = _peersState.asStateFlow()
+
+    private val encryptedPrefs by lazy {
+        val masterKey =
+            MasterKey
+                .Builder(getApplication<ZeroAIApplication>())
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+        EncryptedSharedPreferences.create(
+            getApplication(),
+            "tailscale_peer_tokens",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+    }
+
+    init {
+        loadPeerConfig()
+    }
+
+    private fun loadPeerConfig() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val settings = settingsRepository.settings.first()
+                val peers =
+                    if (settings.tailscaleCachedDiscovery.isNotBlank()) {
+                        try {
+                            Json.decodeFromString<List<CachedTailscalePeer>>(
+                                settings.tailscaleCachedDiscovery,
+                            )
+                        } catch (_: Exception) {
+                            emptyList()
+                        }
+                    } else {
+                        emptyList()
+                    }
+
+                val rawPeers =
+                    peers.flatMap { peer ->
+                        peer.services
+                            .filter { isAgentKind(it.kind) }
+                            .map { svc ->
+                                TailscalePeerConfig(
+                                    ip = peer.ip,
+                                    hostname = peer.hostname,
+                                    kind = normalizeKind(svc.kind),
+                                    port = svc.port,
+                                    alias = normalizeKind(svc.kind),
+                                    authRequired = svc.authRequired,
+                                )
+                            }
+                    }
+                val defaults =
+                    PeerMessageRouter.resolveAliasConflicts(
+                        rawPeers.map { it.alias },
+                    )
+                val agentPeers =
+                    rawPeers.mapIndexed { i, peer ->
+                        val saved = getSavedAlias(peer.ip, peer.port)
+                        peer.copy(alias = saved ?: defaults[i])
+                    }
+
+                _peersState.value =
+                    if (agentPeers.isEmpty()) {
+                        TailscalePeersUiState.Empty
+                    } else {
+                        TailscalePeersUiState.Content(agentPeers)
+                    }
+            } catch (e: Exception) {
+                _peersState.value =
+                    TailscalePeersUiState.Error(
+                        message = "Failed to load peer config: ${e.message}",
+                        onRetry = { loadPeerConfig() },
+                    )
+            }
+        }
+    }
+
+    /**
+     * Saves a peer agent token to encrypted storage.
+     *
+     * @param ip Peer Tailscale IP.
+     * @param port Peer gateway port.
+     * @param token The bearer token to store.
+     */
+    fun savePeerToken(
+        ip: String,
+        port: Int,
+        token: String,
+    ) {
+        val key = peerTokenKey(ip, port)
+        encryptedPrefs.edit().putString(key, token).apply()
+    }
+
+    /**
+     * Retrieves a peer agent token from encrypted storage.
+     *
+     * @param ip Peer Tailscale IP.
+     * @param port Peer gateway port.
+     * @return The token, or `null` if not stored.
+     */
+    fun getPeerToken(
+        ip: String,
+        port: Int,
+    ): String? {
+        val key = peerTokenKey(ip, port)
+        return encryptedPrefs.getString(key, null)
+    }
+
+    /**
+     * Generates the encrypted preferences key for a peer token.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @return Formatted key string.
+     */
+    private fun peerTokenKey(
+        ip: String,
+        port: Int,
+    ): String {
+        val sanitizedIp = ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+        return "tailscale_peer_${sanitizedIp}_$port"
+    }
+
+    /**
+     * Retrieves a persisted alias from encrypted storage.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @return The saved alias, or `null` if none set.
+     */
+    private fun getSavedAlias(
+        ip: String,
+        port: Int,
+    ): String? {
+        val key = peerAliasKey(ip, port)
+        return encryptedPrefs.getString(key, null)
+    }
+
+    /**
+     * Persists an alias to encrypted storage.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @param alias Alias to store.
+     */
+    private fun saveAlias(
+        ip: String,
+        port: Int,
+        alias: String,
+    ) {
+        val key = peerAliasKey(ip, port)
+        encryptedPrefs.edit().putString(key, alias).apply()
+    }
+
+    /**
+     * Generates the encrypted preferences key for a peer alias.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @return Formatted key string.
+     */
+    private fun peerAliasKey(
+        ip: String,
+        port: Int,
+    ): String {
+        val sanitizedIp = ip.replace(Regex("[^a-fA-F0-9.:]"), "")
+        return "tailscale_alias_${sanitizedIp}_$port"
+    }
+
+    /**
+     * Updates the alias for a peer agent.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @param alias New alias value.
+     */
+    fun updatePeerAlias(
+        ip: String,
+        port: Int,
+        alias: String,
+    ) {
+        val current = _peersState.value
+        if (current !is TailscalePeersUiState.Content) return
+        _peersState.value =
+            TailscalePeersUiState.Content(
+                current.peers.map { peer ->
+                    if (peer.ip == ip && peer.port == port) peer.copy(alias = alias) else peer
+                },
+            )
+        saveAlias(ip, port, alias)
+    }
+
+    /**
+     * Toggles a peer agent's enabled state.
+     *
+     * @param ip Peer IP address.
+     * @param port Peer gateway port.
+     * @param enabled New enabled state.
+     */
+    fun togglePeer(
+        ip: String,
+        port: Int,
+        enabled: Boolean,
+    ) {
+        val current = _peersState.value
+        if (current !is TailscalePeersUiState.Content) return
+        _peersState.value =
+            TailscalePeersUiState.Content(
+                current.peers.map { peer ->
+                    if (peer.ip == ip && peer.port == port) peer.copy(enabled = enabled) else peer
+                },
+            )
+    }
+
     /**
      * Toggles the agent awareness setting.
      *
@@ -164,6 +441,7 @@ class TailscaleConfigViewModel(
                                         port = svc.port.toInt(),
                                         version = svc.version,
                                         healthy = svc.healthy,
+                                        authRequired = svc.authRequired,
                                     )
                                 },
                         )
@@ -183,6 +461,7 @@ class TailscaleConfigViewModel(
                     DaemonUiState.Content(
                         "Found $svcCount service(s) on $peerAddress",
                     )
+                loadPeerConfig()
             } catch (e: Exception) {
                 _scanState.value =
                     DaemonUiState.Error(
@@ -287,6 +566,7 @@ class TailscaleConfigViewModel(
                         "Found ${result.peers.size} peer(s)" +
                             " on ${result.tailnetName}",
                     )
+                loadPeerConfig()
             } catch (_: Exception) {
                 _scanState.value =
                     DaemonUiState.Content(
@@ -361,6 +641,7 @@ class TailscaleConfigViewModel(
                                         port = svc.port.toInt(),
                                         version = svc.version,
                                         healthy = svc.healthy,
+                                        authRequired = svc.authRequired,
                                     )
                                 },
                         )
@@ -380,6 +661,7 @@ class TailscaleConfigViewModel(
                         "Found $totalServices service(s)" +
                             " across ${updatedPeers.size} peer(s)",
                     )
+                loadPeerConfig()
             } catch (e: Exception) {
                 _scanState.value =
                     DaemonUiState.Error(

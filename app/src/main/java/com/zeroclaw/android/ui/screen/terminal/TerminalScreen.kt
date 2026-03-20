@@ -224,6 +224,7 @@ fun TerminalScreen(
     }
 
     val isDaemonRunning by terminalViewModel.isDaemonRunning.collectAsStateWithLifecycle()
+    val peerAliases by terminalViewModel.peerAliases.collectAsStateWithLifecycle()
 
     TerminalContent(
         state = state,
@@ -239,6 +240,7 @@ fun TerminalScreen(
         onVoiceLongPress = terminalViewModel::stopVoice,
         onSpeakRepliesChanged = terminalViewModel::setSpeakRepliesEnabled,
         onCanvasAction = terminalViewModel::handleCanvasAction,
+        peerAliases = peerAliases,
         edgeMargin = edgeMargin,
         modifier = modifier,
     )
@@ -285,6 +287,7 @@ fun TerminalScreen(
  * @param onVoiceLongPress Callback when the stop voice control is tapped.
  * @param onSpeakRepliesChanged Callback when spoken replies are toggled.
  * @param onCanvasAction Callback when a canvas interactive element is activated.
+ * @param peerAliases List of `@alias` strings for peer agent autocomplete.
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param modifier Modifier applied to the root layout.
  */
@@ -303,6 +306,7 @@ internal fun TerminalContent(
     onVoiceLongPress: () -> Unit = {},
     onSpeakRepliesChanged: (Boolean) -> Unit = {},
     onCanvasAction: (String) -> Unit = {},
+    peerAliases: List<String> = emptyList(),
     edgeMargin: Dp,
     modifier: Modifier = Modifier,
 ) {
@@ -342,6 +346,16 @@ internal fun TerminalContent(
             val prefix = autocompletePrefix
             if (prefix != null) {
                 CommandRegistry.matches(prefix)
+            } else {
+                emptyList()
+            }
+        }
+    }
+    val peerSuggestions by remember(peerAliases) {
+        derivedStateOf {
+            if (inputText.startsWith("@")) {
+                val typed = inputText.lowercase()
+                peerAliases.filter { it.lowercase().startsWith(typed) }
             } else {
                 emptyList()
             }
@@ -475,6 +489,16 @@ internal fun TerminalContent(
                     suggestions = autocompleteSuggestions,
                     onSelect = { command ->
                         inputText = "/${command.name} "
+                    },
+                    modifier = Modifier.padding(horizontal = edgeMargin),
+                )
+            }
+
+            if (peerSuggestions.isNotEmpty()) {
+                PeerAutocompletePopup(
+                    suggestions = peerSuggestions,
+                    onSelect = { alias ->
+                        inputText = "$alias "
                     },
                     modifier = Modifier.padding(horizontal = edgeMargin),
                 )
@@ -732,6 +756,64 @@ private fun AutocompletePopup(
                     Spacer(modifier = Modifier.width(INPUT_BAR_PADDING_DP.dp))
                     Text(
                         text = command.description,
+                        style = TerminalTypography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Autocomplete popup showing matching peer agent aliases above the input bar.
+ *
+ * Each suggestion displays the `@alias` and a "Peer agent" label.
+ * Tapping a suggestion inserts the alias text into the input field.
+ *
+ * @param suggestions Filtered list of matching peer aliases (including `@` prefix).
+ * @param onSelect Callback when a suggestion is tapped.
+ * @param modifier Modifier applied to the popup container.
+ */
+@Composable
+private fun PeerAutocompletePopup(
+    suggestions: List<String>,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(AUTOCOMPLETE_CORNER_DP.dp),
+        tonalElevation = AUTOCOMPLETE_ELEVATION_DP.dp,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .heightIn(max = AUTOCOMPLETE_MAX_HEIGHT_DP.dp)
+                    .verticalScroll(rememberScrollState()),
+        ) {
+            for (alias in suggestions) {
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(alias) }
+                            .padding(
+                                horizontal = AUTOCOMPLETE_ITEM_H_PAD_DP.dp,
+                                vertical = AUTOCOMPLETE_ITEM_V_PAD_DP.dp,
+                            ).semantics {
+                                contentDescription = "$alias: Peer agent"
+                            },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = alias,
+                        style = TerminalTypography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                    Spacer(modifier = Modifier.width(INPUT_BAR_PADDING_DP.dp))
+                    Text(
+                        text = "Peer agent",
                         style = TerminalTypography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

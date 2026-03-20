@@ -3070,6 +3070,64 @@ pub fn tailnet_probe_services(
     })
 }
 
+/// Sends a message to a peer agent and returns the response text.
+///
+/// # Blocking
+///
+/// This function performs a synchronous HTTP request and may block for
+/// up to 63 seconds (3s connect + 60s response timeout). Callers
+/// **must** invoke from a background dispatcher (`Dispatchers.IO`).
+/// Never call from the main thread.
+///
+/// # Errors
+///
+/// - [`FfiError::InvalidArgument`] — malformed IP address or unsupported peer kind
+/// - [`FfiError::NetworkError`] — connection failure, timeout, or malformed response
+/// - [`FfiError::InternalPanic`] — unexpected internal panic (caught)
+#[uniffi::export]
+pub fn peer_send_message(
+    ip: String,
+    port: u16,
+    kind: tailnet::TailnetServiceKind,
+    token: Option<String>,
+    message: String,
+) -> Result<String, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tailnet::peer_send_message_inner(ip, port, kind, token, message)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Sends a formatted response back through a Rust-managed channel.
+///
+/// Called by Kotlin after peer message handling to relay the response
+/// through the originating channel (Telegram, Discord, or CLI).
+///
+/// # Errors
+///
+/// - [`FfiError::StateError`] — daemon is not running
+/// - [`FfiError::NetworkError`] — channel dispatch failure
+/// - [`FfiError::InternalPanic`] — unexpected internal panic (caught)
+#[uniffi::export]
+pub fn peer_send_channel_response(
+    channel: tailnet::PeerChannelKind,
+    recipient: String,
+    message: String,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tailnet::peer_send_channel_response_inner(channel, recipient, message)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {

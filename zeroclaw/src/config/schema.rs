@@ -228,6 +228,10 @@ pub struct Config {
     #[serde(default)]
     pub shared_folder: SharedFolderConfig,
 
+    /// Tailscale peer agent configuration, written by the Android layer.
+    #[serde(default)]
+    pub tailscale_peers: TailscalePeersConfig,
+
     /// Secrets encryption configuration (`[secrets]`).
     #[serde(default)]
     pub secrets: SecretsConfig,
@@ -885,6 +889,39 @@ fn default_gateway_idempotency_max_keys() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+/// Configuration for Tailscale-discovered peer agents.
+///
+/// Written by the Kotlin layer, read by Rust for peer routing context.
+/// Tokens are never stored here — they live in Android's
+/// `EncryptedSharedPreferences` and are passed at call time.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct TailscalePeersConfig {
+    /// List of discovered and configured peer agent entries.
+    pub entries: Vec<TailscalePeerEntry>,
+}
+
+/// A single peer agent discovered on the Tailscale network.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TailscalePeerEntry {
+    /// Tailscale IP address of the peer (e.g. `"100.10.0.5"`).
+    pub ip: String,
+    /// Hostname of the peer (e.g. `"homeserver"`).
+    pub hostname: String,
+    /// Agent type: `"zeroclaw"` or `"openclaw"`.
+    pub kind: String,
+    /// TCP port the agent gateway listens on.
+    pub port: u16,
+    /// User-configurable @mention alias for chat routing.
+    pub alias: String,
+    /// Whether the peer requires a bearer token for API access.
+    #[serde(default)]
+    pub auth_required: bool,
+    /// Whether this peer is enabled for message routing.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 impl Default for GatewayConfig {
@@ -3069,6 +3106,7 @@ impl Default for Config {
             gateway: GatewayConfig::default(),
             composio: ComposioConfig::default(),
             shared_folder: SharedFolderConfig::default(),
+            tailscale_peers: TailscalePeersConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
@@ -4540,6 +4578,7 @@ default_temperature = 0.7
             gateway: GatewayConfig::default(),
             composio: ComposioConfig::default(),
             shared_folder: SharedFolderConfig::default(),
+            tailscale_peers: TailscalePeersConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
@@ -4740,6 +4779,7 @@ tool_dispatcher = "xml"
             gateway: GatewayConfig::default(),
             composio: ComposioConfig::default(),
             shared_folder: SharedFolderConfig::default(),
+            tailscale_peers: TailscalePeersConfig::default(),
             secrets: SecretsConfig::default(),
             browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
