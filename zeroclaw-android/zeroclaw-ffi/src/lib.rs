@@ -3136,7 +3136,7 @@ mod tests {
     #[test]
     fn test_get_version() {
         let version = get_version().unwrap();
-        assert_eq!(version, "0.1.3");
+        assert_eq!(version, "0.1.4");
     }
 
     #[test]
@@ -3441,6 +3441,6 @@ mod tests {
         assert!(panic_result.is_err());
 
         let version = get_version().unwrap();
-        assert_eq!(version, "0.1.3");
+        assert_eq!(version, "0.1.4");
     }
 }
