@@ -4,13 +4,43 @@
  * Licensed under the MIT License. See LICENSE in the project root.
  */
 
-//! Tool inventory browsing for the Android dashboard.
+//! Tool inventory browsing and invocation for the Android dashboard.
 //!
 //! Enumerates all available tools from the daemon config and installed
 //! skills without instantiating the actual tool objects (which require
 //! runtime dependencies like security policies and memory backends).
+//!
+//! Also provides [`invoke_tool_inner`] for executing tools by name from
+//! the scripting runtime.
+
+use once_cell::sync::OnceCell;
 
 use crate::error::FfiError;
+
+static SCRIPT_TOOL_RT: OnceCell<tokio::runtime::Runtime> = OnceCell::new();
+
+/// Returns the dedicated single-threaded Tokio runtime used for script tool callbacks.
+///
+/// A separate `current_thread` runtime prevents thread-pool exhaustion deadlocks that
+/// occur when `invoke_tool_inner` is called from inside a `spawn_blocking` task on the
+/// main multi-thread scheduler (e.g. the cron scheduler). Each call reuses the same
+/// lazily-initialised runtime for the lifetime of the process.
+///
+/// # Errors
+///
+/// Returns [`FfiError::SpawnError`] if the runtime cannot be created (OS resource
+/// exhaustion or similar).
+fn script_tool_runtime() -> Result<&'static tokio::runtime::Runtime, FfiError> {
+    SCRIPT_TOOL_RT
+        .get_or_try_init(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+        })
+        .map_err(|e| FfiError::SpawnError {
+            detail: format!("failed to create script tool runtime: {e}"),
+        })
+}
 
 /// A tool specification suitable for display in the Android tools browser.
 ///
@@ -197,6 +227,17 @@ const SECURITY_POLICY_TOOLS: &[&str] = &[
 /// or capabilities not available on Android.
 const ANDROID_EXCLUDED_TOOLS: &[&str] = &["browser", "screenshot"];
 
+/// Tools that scripts are never permitted to invoke, regardless of config.
+///
+/// This hard denylist blocks execution of privileged shell tools from the
+/// scripting runtime. Even if the daemon config enables these tools for
+/// channel routing, scripts must not be able to execute arbitrary shell
+/// commands without a [`SecurityPolicy`] gate.
+///
+/// `shell_background` is included as a forward-looking guard for when
+/// non-blocking shell execution is added.
+const SCRIPT_TOOL_DENYLIST: &[&str] = &["shell", "shell_background"];
+
 /// Inactive reason for tools that require daemon channel routing.
 const REASON_DAEMON_ONLY: &str = "Available via daemon channels only";
 
@@ -333,6 +374,64 @@ pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
     }
 
     Ok(specs)
+}
+
+/// Invokes a tool by name with the given JSON arguments.
+///
+/// Builds a fresh tools registry from the running daemon's config and
+/// memory backend, locates the named tool, and executes it on the tokio
+/// runtime. Returns the tool's output string on success.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] if `args_json` is not valid JSON.
+/// Returns [`FfiError::StateError`] if the daemon is not running, the
+/// memory backend is unavailable, or no tool with the given name exists.
+/// Returns [`FfiError::StateError`] if the tool execution itself fails.
+pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, FfiError> {
+    // Hard denylist: refuse execution of privileged shell tools from scripts
+    // unconditionally, before any config or tool-registry lookup.
+    if SCRIPT_TOOL_DENYLIST.contains(&name) {
+        return Err(FfiError::InvalidArgument {
+            detail: format!("tool '{name}' is not available to scripts"),
+        });
+    }
+
+    // TODO: integrate SecurityPolicy::can_act() check when wired through.
+    // Once SecurityPolicy is accessible here (e.g. via clone_daemon_security_policy()),
+    // add: if !policy.can_act(name) { return Err(FfiError::InvalidArgument { ... }) }
+
+    let args: serde_json::Value =
+        serde_json::from_str(args_json).map_err(|e| FfiError::InvalidArgument {
+            detail: format!("invalid tool arguments JSON: {e}"),
+        })?;
+
+    let config = crate::runtime::clone_daemon_config()?;
+    let memory = crate::runtime::clone_daemon_memory()?;
+
+    let tools = crate::session::build_tools_registry(&config, memory);
+
+    let tool = tools
+        .iter()
+        .find(|t| t.name() == name)
+        .ok_or_else(|| FfiError::StateError {
+            detail: format!("tool not found: {name}"),
+        })?;
+
+    let rt = script_tool_runtime()?;
+    let result = rt.block_on(tool.execute(args)).map_err(|e| FfiError::StateError {
+        detail: format!("tool execution failed: {e}"),
+    })?;
+
+    if result.success {
+        Ok(result.output)
+    } else {
+        Err(FfiError::StateError {
+            detail: result
+                .error
+                .unwrap_or_else(|| "tool failed without error message".into()),
+        })
+    }
 }
 
 #[cfg(test)]

@@ -7,6 +7,11 @@
 //! runtime, but the capability model and plugin ABI are defined here so
 //! future runtimes can share the same host contract.
 
+pub mod content_hash;
+pub mod plugin_abi;
+pub mod storage;
+pub mod triggers;
+
 use crate::observability::runtime_trace;
 use chrono::Datelike;
 use rhai::packages::{CorePackage, Package};
@@ -15,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 /// Stable identifier for the runtime used by a script or plugin guest.
@@ -252,6 +257,10 @@ pub enum ScriptOperation {
     DiscoverModels,
     DiscoverModelsWithKey,
     DiscoverModelsWithKeyAndBaseUrl,
+    InvokeTool,
+    ReadStorage,
+    WriteStorage,
+    DeleteStorage,
 }
 
 impl ScriptOperation {
@@ -303,6 +312,10 @@ impl ScriptOperation {
             Self::DiscoverModels => "models",
             Self::DiscoverModelsWithKey => "models_with_key",
             Self::DiscoverModelsWithKeyAndBaseUrl => "models_full",
+            Self::InvokeTool => "tool_call",
+            Self::ReadStorage => "storage_read",
+            Self::WriteStorage => "storage_write",
+            Self::DeleteStorage => "storage_delete",
         }
     }
 
@@ -346,6 +359,9 @@ impl ScriptOperation {
             Self::DiscoverModels
             | Self::DiscoverModelsWithKey
             | Self::DiscoverModelsWithKeyAndBaseUrl => "model.read",
+            Self::InvokeTool => "tools.call",
+            Self::ReadStorage => "storage.read",
+            Self::WriteStorage | Self::DeleteStorage => "storage.write",
         }
     }
 }
@@ -412,8 +428,41 @@ pub trait ScriptHost: Send + Sync {
     ) -> Result<ScriptValue, ScriptError>;
 }
 
+/// Stub host that rejects all operations. Used by the cron scheduler
+/// when a full FFI host is unavailable.
+pub struct StubScriptHost;
+
+impl ScriptHost for StubScriptHost {
+    fn call(
+        &self,
+        operation: ScriptOperation,
+        _args: serde_json::Value,
+    ) -> Result<ScriptValue, ScriptError> {
+        Err(ScriptError::HostError {
+            operation: operation.display_name().to_string(),
+            detail: "no host available in this context".to_string(),
+        })
+    }
+}
+
+static CRON_SCRIPT_HOST: OnceLock<Arc<dyn ScriptHost>> = OnceLock::new();
+
+/// Registers the [`ScriptHost`] that cron script jobs should use.
+///
+/// This is typically called once during FFI startup so the cron scheduler
+/// can delegate host operations to the real Android bridge instead of the
+/// stub.
+pub fn set_cron_script_host(host: Arc<dyn ScriptHost>) {
+    let _ = CRON_SCRIPT_HOST.set(host);
+}
+
+/// Returns the registered cron [`ScriptHost`], if any.
+pub fn get_cron_script_host() -> Option<Arc<dyn ScriptHost>> {
+    CRON_SCRIPT_HOST.get().cloned()
+}
+
 struct ScriptExecutionSession {
-    manifest_name: String,
+    pub(crate) manifest_name: String,
     runtime: ScriptRuntimeKind,
     granted_capabilities: BTreeSet<String>,
     requested_capabilities: Vec<String>,
@@ -557,6 +606,34 @@ impl RhaiScriptRuntime {
         manifest: Option<ScriptManifest>,
     ) -> Result<String, ScriptError> {
         let validation = self.validate_script(source, manifest)?;
+
+        if validation.runtime == ScriptRuntimeKind::WasmComponent {
+            #[cfg(feature = "scripting-wasm-component")]
+            {
+                // Wasm Component dispatch — inline source eval is not supported for
+                // .wasm guests; they must be loaded from workspace files via
+                // eval_workspace_script. Return an informative error.
+                return Err(ScriptError::ValidationError {
+                    detail: "Wasm component guests cannot be evaluated from inline source. \
+                             Use eval_workspace_script with a .wasm file path instead."
+                        .to_string(),
+                });
+            }
+            #[cfg(not(feature = "scripting-wasm-component"))]
+            {
+                let detail = format!(
+                    "WasmComponent runtime not available in this build. \
+                     Enable with: features.add(\"scripting-wasm-component\") in \
+                     lib/build.gradle.kts"
+                );
+                record_script_audit_event(
+                    "script_run",
+                    &validation_failure_audit(&validation, detail.clone()),
+                );
+                return Err(ScriptError::ValidationError { detail });
+            }
+        }
+
         if validation.runtime != ScriptRuntimeKind::Rhai {
             let detail = unavailable_runtime_execution_detail(&validation.runtime);
             record_script_audit_event(
@@ -589,30 +666,32 @@ impl RhaiScriptRuntime {
         relative_path: &Path,
         granted_capabilities: Option<Vec<String>>,
     ) -> Result<ScriptValidation, ScriptError> {
-        let path = validate_workspace_relative_path(workspace_dir, relative_path)?;
         let manifest =
             resolve_workspace_script_manifest(workspace_dir, relative_path, granted_capabilities)?;
         match manifest.runtime {
             ScriptRuntimeKind::Rhai => {
-                let source =
-                    std::fs::read_to_string(&path).map_err(|error| ScriptError::InvalidArgument {
-                        detail: format!(
-                            "failed to read workspace script {}: {error}",
-                            path.display()
-                        ),
-                    })?;
+                use std::io::Read;
+                let mut file = open_workspace_file(workspace_dir, relative_path)?;
+                let mut source = String::new();
+                file.read_to_string(&mut source).map_err(|error| ScriptError::InvalidArgument {
+                    detail: format!(
+                        "failed to read workspace script {}: {error}",
+                        relative_path.display()
+                    ),
+                })?;
                 self.validate_script(&source, Some(manifest))
             }
             ScriptRuntimeKind::WasmComponent | ScriptRuntimeKind::Python => {
-                let bytes_len = std::fs::metadata(&path)
-                    .map_err(|error| ScriptError::InvalidArgument {
-                        detail: format!(
-                            "failed to inspect workspace script {}: {error}",
-                            path.display()
-                        ),
-                    })?
-                    .len() as usize;
-                self.validate_guest_manifest(Some(manifest), bytes_len)
+                use std::io::Read;
+                let mut file = open_workspace_file(workspace_dir, relative_path)?;
+                let mut buf = Vec::new();
+                file.read_to_end(&mut buf).map_err(|error| ScriptError::InvalidArgument {
+                    detail: format!(
+                        "failed to inspect workspace script {}: {error}",
+                        relative_path.display()
+                    ),
+                })?;
+                self.validate_guest_manifest(Some(manifest), buf.len())
             }
         }
     }
@@ -627,6 +706,44 @@ impl RhaiScriptRuntime {
         let granted_capabilities_for_manifest = granted_capabilities.clone();
         let validation =
             self.validate_workspace_script(workspace_dir, relative_path, granted_capabilities)?;
+
+        if validation.runtime == ScriptRuntimeKind::WasmComponent {
+            #[cfg(feature = "scripting-wasm-component")]
+            {
+                // Wasm Component dispatch path — stub for now.
+                // Future: load .wasm bytes, instantiate via wasmi/wasmtime,
+                // bind host functions via PluginHost trait.
+                {
+                    use std::io::Read;
+                    let mut file = open_workspace_file(workspace_dir, relative_path)?;
+                    let mut wasm_bytes = Vec::new();
+                    file.read_to_end(&mut wasm_bytes).map_err(|e| ScriptError::HostError {
+                        operation: "wasm_load".to_string(),
+                        detail: format!("Failed to read .wasm file: {e}"),
+                    })?;
+                    let _wasm_bytes = wasm_bytes;
+                }
+                return Err(ScriptError::ValidationError {
+                    detail: "Wasm component loading verified, but host function binding is not \
+                             yet complete. The .wasm file was found and readable."
+                        .to_string(),
+                });
+            }
+            #[cfg(not(feature = "scripting-wasm-component"))]
+            {
+                let detail = format!(
+                    "WasmComponent runtime not available in this build. \
+                     Enable with: features.add(\"scripting-wasm-component\") in \
+                     lib/build.gradle.kts"
+                );
+                record_script_audit_event(
+                    "script_run",
+                    &validation_failure_audit(&validation, detail.clone()),
+                );
+                return Err(ScriptError::ValidationError { detail });
+            }
+        }
+
         if validation.runtime != ScriptRuntimeKind::Rhai {
             let detail = unavailable_runtime_execution_detail(&validation.runtime);
             record_script_audit_event(
@@ -636,10 +753,18 @@ impl RhaiScriptRuntime {
             return Err(ScriptError::ValidationError { detail });
         }
 
-        let path = validate_workspace_relative_path(workspace_dir, relative_path)?;
-        let source = std::fs::read_to_string(&path).map_err(|error| ScriptError::InvalidArgument {
-            detail: format!("failed to read workspace script {}: {error}", path.display()),
-        })?;
+        let source = {
+            use std::io::Read;
+            let mut file = open_workspace_file(workspace_dir, relative_path)?;
+            let mut buf = String::new();
+            file.read_to_string(&mut buf).map_err(|error| ScriptError::InvalidArgument {
+                detail: format!(
+                    "failed to read workspace script {}: {error}",
+                    relative_path.display()
+                ),
+            })?;
+            buf
+        };
         let manifest =
             resolve_workspace_script_manifest(
                 workspace_dir,
@@ -805,31 +930,52 @@ fn unavailable_runtime_execution_detail(kind: &ScriptRuntimeKind) -> String {
 
 const CAPABILITY_DENIED_SENTINEL: &str = "__zero_capability_denied__";
 
+/// Validates a workspace-relative path by attempting to open it via cap-std.
+///
+/// The `open_workspace_file` call (which uses `cap_std::fs::Dir`) structurally
+/// prevents symlink escapes. If the open succeeds, the path is valid and inside
+/// the workspace. The returned `PathBuf` is the simple join (not canonicalized).
 fn validate_workspace_relative_path(
     workspace_dir: &Path,
     relative_path: &Path,
 ) -> Result<PathBuf, ScriptError> {
+    let _file = open_workspace_file(workspace_dir, relative_path)?;
+    Ok(workspace_dir.join(relative_path))
+}
+
+fn open_workspace_file(
+    workspace_dir: &Path,
+    relative_path: &Path,
+) -> Result<cap_std::fs::File, ScriptError> {
+    use cap_std::ambient_authority;
+    use cap_std::fs::Dir;
+
     if relative_path.is_absolute()
         || relative_path
             .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
+            .any(|c| matches!(c, std::path::Component::ParentDir))
     {
         return Err(ScriptError::InvalidArgument {
             detail: format!(
-                "workspace script path must stay inside the workspace: {}",
+                "workspace path must be relative without '..': {}",
                 relative_path.display()
             ),
         });
     }
 
-    let path = workspace_dir.join(relative_path);
-    if !path.exists() {
-        return Err(ScriptError::InvalidArgument {
-            detail: format!("workspace script does not exist: {}", relative_path.display()),
-        });
-    }
+    let dir = Dir::open_ambient_dir(workspace_dir, ambient_authority()).map_err(|e| {
+        ScriptError::HostError {
+            operation: "workspace_open".to_string(),
+            detail: format!("failed to open workspace dir: {e}"),
+        }
+    })?;
 
-    Ok(path)
+    dir.open(relative_path).map_err(|e| ScriptError::InvalidArgument {
+        detail: format!(
+            "cannot open workspace file '{}': {e}",
+            relative_path.display()
+        ),
+    })
 }
 
 fn resolve_workspace_script_manifest(
@@ -1062,6 +1208,21 @@ fn default_script_capabilities() -> Vec<ScriptCapability> {
             scope: None,
         },
         ScriptCapability {
+            name: "tools.call".to_string(),
+            description: "Invoke a registered tool by name".to_string(),
+            scope: Some("tool-name".to_string()),
+        },
+        ScriptCapability {
+            name: "storage.read".to_string(),
+            description: "Read script-scoped persistent storage".to_string(),
+            scope: None,
+        },
+        ScriptCapability {
+            name: "storage.write".to_string(),
+            description: "Write to script-scoped persistent storage".to_string(),
+            scope: None,
+        },
+        ScriptCapability {
             name: "trace.read".to_string(),
             description: "Inspect runtime trace history.".to_string(),
             scope: None,
@@ -1163,6 +1324,14 @@ const INFERRED_BINDINGS: &[(&str, &str)] = &[
     ("skills::tools", "skills.read"),
     ("skills::install", "skills.write"),
     ("skills::remove", "skills.write"),
+    ("tool_call", "tools.call"),
+    ("tools::call", "tools.call"),
+    ("storage_read", "storage.read"),
+    ("storage_write", "storage.write"),
+    ("storage_delete", "storage.write"),
+    ("storage::read", "storage.read"),
+    ("storage::write", "storage.write"),
+    ("storage::delete", "storage.write"),
 ];
 
 impl RhaiScriptRuntime {
@@ -1297,6 +1466,18 @@ impl RhaiScriptRuntime {
         engine.set_max_array_size(self.limits.max_array_size);
         engine.set_max_map_size(self.limits.max_map_size);
         engine.set_max_call_levels(self.limits.max_call_levels);
+
+        // Wall-clock timeout: terminate scripts after 30 seconds regardless
+        // of operation count. A new engine is built per eval call, so
+        // Instant::now() correctly captures the per-invocation start time.
+        let deadline = Instant::now() + std::time::Duration::from_secs(30);
+        engine.on_progress(move |_ops: u64| {
+            if Instant::now() >= deadline {
+                Some(Dynamic::from("script execution timed out (30s limit)"))
+            } else {
+                None
+            }
+        });
 
         self.register_flat_aliases(&mut engine, session.clone());
         self.register_namespaced_modules(&mut engine, session);
@@ -1921,17 +2102,10 @@ impl RhaiScriptRuntime {
             },
         );
 
-        let host = self.host.clone();
-        let session_clone = session.clone();
         engine.register_fn(
             "models_with_key",
-            move |provider: String, api_key: String| -> Result<String, Box<EvalAltResult>> {
-                call_string(
-                    &host,
-                    &session_clone,
-                    ScriptOperation::DiscoverModelsWithKey,
-                    json!({ "provider": provider, "api_key": api_key }),
-                )
+            move |_provider: String, _api_key: String| -> Result<String, Box<EvalAltResult>> {
+                Err("models_with_key is restricted; use models(provider) instead".into())
             },
         );
 
@@ -1943,11 +2117,83 @@ impl RhaiScriptRuntime {
                   api_key: String,
                   base_url: String|
                   -> Result<String, Box<EvalAltResult>> {
+                if !base_url.is_empty() {
+                    is_safe_url(&base_url)
+                        .map_err(|error| -> Box<EvalAltResult> { error.to_string().into() })?;
+                }
                 call_string(
                     &host,
                     &session_clone,
                     ScriptOperation::DiscoverModelsWithKeyAndBaseUrl,
                     json!({ "provider": provider, "api_key": api_key, "base_url": base_url }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        engine.register_fn(
+            "tool_call",
+            move |name: String, args: String| -> Result<String, Box<EvalAltResult>> {
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::InvokeTool,
+                    json!({ "name": name, "args": args }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        engine.register_fn(
+            "storage_read",
+            move |key: String| -> Result<String, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::ReadStorage,
+                    json!({ "key": key, "script": script_name }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        engine.register_fn(
+            "storage_write",
+            move |key: String, value: String| -> Result<String, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::WriteStorage,
+                    json!({ "key": key, "value": value, "script": script_name }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        engine.register_fn(
+            "storage_delete",
+            move |key: String| -> Result<bool, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_bool(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::DeleteStorage,
+                    json!({ "key": key, "script": script_name }),
                 )
             },
         );
@@ -2082,6 +2328,19 @@ impl RhaiScriptRuntime {
                 serde_json::Value::Null,
             )
         });
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        tools_module.set_native_fn(
+            "call",
+            move |name: String, args: String| -> Result<String, Box<EvalAltResult>> {
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::InvokeTool,
+                    json!({ "name": name, "args": args }),
+                )
+            },
+        );
         engine.register_static_module("tools", tools_module.into());
 
         let mut memory_module = Module::new();
@@ -2251,6 +2510,64 @@ impl RhaiScriptRuntime {
             },
         );
         engine.register_static_module("skills", skills_module.into());
+
+        let mut storage_module = Module::new();
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        storage_module.set_native_fn(
+            "read",
+            move |key: String| -> Result<String, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::ReadStorage,
+                    json!({ "key": key, "script": script_name }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        storage_module.set_native_fn(
+            "write",
+            move |key: String, value: String| -> Result<String, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_string(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::WriteStorage,
+                    json!({ "key": key, "value": value, "script": script_name }),
+                )
+            },
+        );
+
+        let host = self.host.clone();
+        let session_clone = session.clone();
+        storage_module.set_native_fn(
+            "delete",
+            move |key: String| -> Result<bool, Box<EvalAltResult>> {
+                let script_name = session_clone
+                    .lock()
+                    .map(|s| s.manifest_name.clone())
+                    .unwrap_or_else(|_| "anonymous".to_string());
+                call_bool(
+                    &host,
+                    &session_clone,
+                    ScriptOperation::DeleteStorage,
+                    json!({ "key": key, "script": script_name }),
+                )
+            },
+        );
+
+        engine.register_static_module("storage", storage_module.into());
     }
 }
 
@@ -2327,6 +2644,93 @@ fn is_identifier_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
+/// Returns true if an IP address is in a private/reserved range.
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    use std::net::IpAddr;
+
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()           // 127.0.0.0/8
+            || v4.is_private()         // 10/8, 172.16/12, 192.168/16
+            || v4.is_link_local()      // 169.254/16
+            || v4.is_broadcast()       // 255.255.255.255
+            || v4.is_unspecified()     // 0.0.0.0
+            || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64  // 100.64/10 (CGNAT)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()           // ::1
+            || v6.is_unspecified()     // ::
+            // IPv4-mapped IPv6 (::ffff:x.x.x.x) — check the inner v4
+            || match v6.to_ipv4_mapped() {
+                Some(v4) => is_private_ip(&IpAddr::V4(v4)),
+                None => false,
+            }
+            // Link-local (fe80::/10)
+            || (v6.segments()[0] & 0xffc0) == 0xfe80
+            // ULA (fc00::/7)
+            || (v6.segments()[0] & 0xfe00) == 0xfc00
+        }
+    }
+}
+
+/// Validates that a URL does not target private/reserved IP space.
+///
+/// Parses the hostname, resolves DNS, and checks every resolved address.
+/// Rejects if ANY resolved IP is private (prevents DNS rebinding where
+/// one A record is public and another is private).
+fn is_safe_url(url: &str) -> Result<(), ScriptError> {
+    use std::net::{IpAddr, ToSocketAddrs};
+
+    let parsed = url::Url::parse(url).map_err(|e| ScriptError::InvalidArgument {
+        detail: format!("invalid URL: {e}"),
+    })?;
+
+    let scheme = parsed.scheme();
+    if scheme != "http" && scheme != "https" {
+        return Err(ScriptError::InvalidArgument {
+            detail: format!("only http/https schemes allowed, got '{scheme}'"),
+        });
+    }
+
+    let host_str = parsed.host_str().ok_or_else(|| ScriptError::InvalidArgument {
+        detail: "URL has no host".to_string(),
+    })?;
+
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let socket_addr = format!("{host_str}:{port}");
+
+    // First try parsing as literal IP (catches decimal, hex, IPv6 literals)
+    if let Ok(ip) = host_str.parse::<IpAddr>() {
+        if is_private_ip(&ip) {
+            return Err(ScriptError::InvalidArgument {
+                detail: format!("URL resolves to private IP: {ip}"),
+            });
+        }
+    }
+
+    // Resolve DNS and check ALL addresses
+    match socket_addr.to_socket_addrs() {
+        Ok(addrs) => {
+            for addr in addrs {
+                if is_private_ip(&addr.ip()) {
+                    return Err(ScriptError::InvalidArgument {
+                        detail: format!(
+                            "URL host '{host_str}' resolves to private IP: {}",
+                            addr.ip()
+                        ),
+                    });
+                }
+            }
+            Ok(())
+        }
+        Err(_) => {
+            // DNS resolution failed — allow it through (the HTTP client
+            // will fail anyway). This prevents blocking on DNS timeouts.
+            Ok(())
+        }
+    }
+}
+
 fn array_to_strings(values: Array) -> Vec<String> {
     values
         .into_iter()
@@ -2364,7 +2768,39 @@ fn call_host(
             })?;
     }
 
-    host.call(operation, args)
+    // Inject the session's manifest name into args so the FFI host can
+    // identify which script/skill is requesting the operation (needed for
+    // capability approval gating at the FFI boundary).
+    let enriched_args = {
+        let guard = session.lock().map_err(|_| -> Box<EvalAltResult> {
+            ScriptError::InternalState {
+                detail: "script execution session mutex poisoned".to_string(),
+            }
+            .to_string()
+            .into()
+        })?;
+        match args {
+            serde_json::Value::Object(mut map) => {
+                map.insert(
+                    "__manifest_name".to_string(),
+                    serde_json::Value::String(guard.manifest_name.clone()),
+                );
+                serde_json::Value::Object(map)
+            }
+            serde_json::Value::Null => {
+                serde_json::json!({ "__manifest_name": guard.manifest_name })
+            }
+            other => {
+                // Wrap non-object args — this shouldn't normally happen.
+                serde_json::json!({
+                    "__args": other,
+                    "__manifest_name": guard.manifest_name,
+                })
+            }
+        }
+    };
+
+    host.call(operation, enriched_args)
         .map_err(|error| -> Box<EvalAltResult> { error.to_string().into() })
 }
 
@@ -2691,5 +3127,85 @@ path = "scripts/triage.rhai"
 
         assert!(validation.requested_capabilities.is_empty());
         assert_eq!(validation.missing_capabilities, vec!["model.chat".to_string()]);
+    }
+
+    #[test]
+    fn new_operations_have_correct_capabilities() {
+        assert_eq!(ScriptOperation::InvokeTool.capability(), "tools.call");
+        assert_eq!(ScriptOperation::InvokeTool.display_name(), "tool_call");
+        assert_eq!(ScriptOperation::ReadStorage.capability(), "storage.read");
+        assert_eq!(ScriptOperation::WriteStorage.capability(), "storage.write");
+        assert_eq!(ScriptOperation::DeleteStorage.capability(), "storage.write");
+    }
+
+    #[test]
+    fn wit_v0_2_0_has_required_functions() {
+        let host = std::sync::Arc::new(StubScriptHost);
+        let rt = RhaiScriptRuntime::new(host);
+        let wit = rt.plugin_host_wit();
+        assert!(wit.contains("@0.2.0"), "version");
+        assert!(wit.contains("invoke-tool"), "invoke-tool");
+        assert!(wit.contains("list-tools"), "list-tools");
+        assert!(wit.contains("agent-status"), "agent-status");
+        assert!(wit.contains("cron-list"), "cron-list");
+        assert!(wit.contains("cost-summary"), "cost-summary");
+        assert!(wit.contains("export run"), "guest run export");
+    }
+
+    #[test]
+    fn infinite_loop_is_terminated() {
+        use std::sync::Arc;
+        let host = Arc::new(StubScriptHost);
+        let runtime = RhaiScriptRuntime::new(host);
+        let result = runtime.eval_script("loop { }", None);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("operations") || err.contains("timed out") || err.contains("progress"),
+            "expected resource limit error, got: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_escape_is_blocked() {
+        let workspace = tempfile::tempdir().unwrap();
+        let escape_target = tempfile::tempdir().unwrap();
+        let secret = escape_target.path().join("secret.txt");
+        std::fs::write(&secret, "stolen data").unwrap();
+
+        let link = workspace.path().join("escape");
+        std::os::unix::fs::symlink(escape_target.path(), &link).unwrap();
+
+        let result = open_workspace_file(
+            workspace.path(),
+            std::path::Path::new("escape/secret.txt"),
+        );
+        // cap-std Dir::open blocks escapes structurally
+        assert!(result.is_err(), "symlink escape should be blocked");
+    }
+
+    #[test]
+    fn is_safe_url_rejects_ipv4_mapped_ipv6() {
+        // ::ffff:127.0.0.1 is localhost via IPv4-mapped IPv6
+        assert!(is_safe_url("http://[::ffff:127.0.0.1]/api").is_err());
+    }
+
+    #[test]
+    fn is_safe_url_rejects_decimal_ip() {
+        // 2130706433 == 127.0.0.1 in decimal notation
+        assert!(is_safe_url("http://2130706433/api").is_err());
+    }
+
+    #[test]
+    fn is_safe_url_rejects_rfc1918() {
+        assert!(is_safe_url("http://10.0.0.1/api").is_err());
+        assert!(is_safe_url("http://172.16.0.1/api").is_err());
+        assert!(is_safe_url("http://192.168.1.1/api").is_err());
+    }
+
+    #[test]
+    fn is_safe_url_allows_public() {
+        assert!(is_safe_url("https://api.openai.com/v1/models").is_ok());
     }
 }

@@ -63,6 +63,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 # URL encoding for web search
 urlencoding = "2.1"
 
+# URL parsing (SSRF guard)
+url = "2"
+
 # HTML to plain text conversion (web_fetch tool)
 nanohtml2text = "0.2"
 
@@ -101,6 +104,9 @@ parking_lot = "0.12"
 # Async traits
 async-trait = "0.1"
 rhai = { version = "1.21", features = ["sync"] }
+
+# Capability-based filesystem access (symlink-escape prevention)
+cap-std = "3"
 
 # Memory / persistence
 rusqlite = { version = "0.37", features = ["bundled"] }

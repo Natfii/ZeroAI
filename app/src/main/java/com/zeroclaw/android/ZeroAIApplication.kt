@@ -56,6 +56,8 @@ import com.zeroclaw.android.data.repository.TerminalEntryRepository
 import com.zeroclaw.android.model.CachedTailscalePeer
 import com.zeroclaw.android.model.RefreshCommand
 import com.zeroclaw.android.model.ServiceState
+import com.zeroclaw.android.service.CapabilityApprovalNotifier
+import com.zeroclaw.android.service.CapabilityGrantsBridge
 import com.zeroclaw.android.service.CostBridge
 import com.zeroclaw.android.service.CredentialBridge
 import com.zeroclaw.android.service.CronBridge
@@ -192,6 +194,14 @@ class ZeroAIApplication :
     lateinit var memoryBridge: MemoryBridge
         private set
 
+    /** Bridge for capability grant listing and revocation FFI calls. */
+    lateinit var capabilityGrantsBridge: CapabilityGrantsBridge
+        private set
+
+    /** Notifier for capability approval requests shown as Android notifications. */
+    lateinit var capabilityApprovalNotifier: CapabilityApprovalNotifier
+        private set
+
     /** Bridge for direct-to-provider multimodal vision API calls. */
     val visionBridge: VisionBridge by lazy { VisionBridge() }
 
@@ -273,12 +283,15 @@ class ZeroAIApplication :
         skillsBridge = SkillsBridge()
         toolsBridge = ToolsBridge()
         memoryBridge = MemoryBridge()
+        capabilityGrantsBridge = CapabilityGrantsBridge(filesDir.absolutePath)
+        capabilityApprovalNotifier = CapabilityApprovalNotifier(this)
         eventBridge =
             EventBridge(
                 activityRepository = activityRepository,
                 scope = ioScope,
                 getPeers = { buildPeerRoutes() },
                 getPeerToken = { ip, port -> readPeerToken(ip, port) },
+                notifier = capabilityApprovalNotifier,
             )
         daemonBridge.eventBridge = eventBridge
         daemonBridge.credentialBridge = CredentialBridge(apiKeyRepository)

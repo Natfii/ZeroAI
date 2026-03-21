@@ -19,6 +19,7 @@ import com.zeroclaw.ffi.PeerChannelKind
 import com.zeroclaw.ffi.TailnetServiceKind
 import com.zeroclaw.ffi.peerSendChannelResponse
 import com.zeroclaw.ffi.peerSendMessage
+import com.zeroclaw.ffi.resolveCapabilityRequest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -49,12 +50,14 @@ import org.json.JSONObject
  * @param scope Coroutine scope for asynchronous emission and persistence.
  * @param getPeers Supplier for the current list of enabled peer route entries.
  * @param getPeerToken Retrieves a stored bearer token for a peer by IP and port.
+ * @param notifier Notifier for capability approval Android notifications.
  */
 class EventBridge(
     private val activityRepository: ActivityRepository,
     private val scope: CoroutineScope,
     private val getPeers: () -> List<PeerRouteEntry> = { emptyList() },
     private val getPeerToken: (String, Int) -> String? = { _, _ -> null },
+    private val notifier: CapabilityApprovalNotifier? = null,
 ) : FfiEventListener {
     private val _events =
         MutableSharedFlow<DaemonEvent>(
@@ -91,6 +94,13 @@ class EventBridge(
                     return
                 }
             }
+        }
+
+        if (event.kind == "capability_approval_required") {
+            scope.launch(Dispatchers.IO) {
+                handleCapabilityApproval(event.data)
+            }
+            return
         }
 
         scope.launch {
@@ -161,6 +171,41 @@ class EventBridge(
                 Log.w(EVENT_BRIDGE_TAG, "Failed to relay peer error to $channel")
             }
         }
+    }
+
+    /**
+     * Routes a capability approval request to the appropriate handler.
+     *
+     * Terminal/REPL sessions are auto-approved (device owner initiated).
+     * All other surfaces dispatch an Android notification with Approve/Deny
+     * action buttons via [CapabilityApprovalNotifier].
+     *
+     * @param data Event data map containing request_id, skill_name, capability, triggered_via.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun handleCapabilityApproval(data: Map<String, String>) {
+        val requestId = data["request_id"] ?: return
+        val skillName = data["skill_name"] ?: "unknown"
+        val capability = data["capability"] ?: "unknown"
+        val triggeredVia = data["triggered_via"] ?: "unknown"
+
+        Log.d(
+            EVENT_BRIDGE_TAG,
+            "Capability approval requested: $skillName wants $capability (via $triggeredVia)",
+        )
+
+        if (triggeredVia == "terminal" || triggeredVia == "repl") {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    resolveCapabilityRequest(requestId, true)
+                } catch (e: Exception) {
+                    Log.w(EVENT_BRIDGE_TAG, "Failed to auto-approve $requestId", e)
+                }
+            }
+            return
+        }
+
+        notifier?.notifyPendingApproval(requestId, skillName, capability)
     }
 
     /**

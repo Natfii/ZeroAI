@@ -10,6 +10,7 @@ use rusqlite::{params, Connection};
 use uuid::Uuid;
 
 const MAX_CRON_OUTPUT_BYTES: usize = 16 * 1024;
+const SCHEMA_VERSION: i32 = 2;
 const TRUNCATED_OUTPUT_MARKER: &str = "\n...[truncated]";
 
 impl rusqlite::types::FromSql for JobType {
@@ -113,11 +114,54 @@ pub fn add_agent_job(
     get_job(config, &id)
 }
 
+pub fn add_script_job(
+    config: &Config,
+    name: Option<String>,
+    schedule: Schedule,
+    script_path: &str,
+    granted_capabilities: &[String],
+) -> Result<CronJob> {
+    let now = Utc::now();
+    validate_schedule(&schedule, now)?;
+    let next_run = next_run_for_schedule(&schedule, now)?;
+    let id = Uuid::new_v4().to_string();
+    let expression = schedule_cron_expression(&schedule).unwrap_or_default();
+    let schedule_json = serde_json::to_string(&schedule)?;
+    let delete_after_run = matches!(schedule, Schedule::At { .. });
+    let caps_json = serde_json::to_string(granted_capabilities)?;
+
+    with_connection(config, |conn| {
+        conn.execute(
+            "INSERT INTO cron_jobs (
+                id, expression, command, schedule, job_type, prompt, name, session_target, model,
+                enabled, delivery, delete_after_run, created_at, next_run, granted_caps
+             ) VALUES (?1, ?2, ?3, ?4, 'script', NULL, ?5, 'isolated', NULL, 1, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                expression,
+                script_path,
+                schedule_json,
+                name,
+                serde_json::to_string(&DeliveryConfig::default())?,
+                if delete_after_run { 1 } else { 0 },
+                now.to_rfc3339(),
+                next_run.to_rfc3339(),
+                caps_json,
+            ],
+        )
+        .context("Failed to insert cron script job")?;
+        Ok(())
+    })?;
+
+    get_job(config, &id)
+}
+
 pub fn list_jobs(config: &Config) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output,
+                    granted_caps
              FROM cron_jobs ORDER BY next_run ASC",
         )?;
 
@@ -135,7 +179,8 @@ pub fn get_job(config: &Config, job_id: &str) -> Result<CronJob> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output,
+                    granted_caps
              FROM cron_jobs WHERE id = ?1",
         )?;
 
@@ -168,7 +213,8 @@ pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     with_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
-                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output
+                    enabled, delivery, delete_after_run, created_at, next_run, last_run, last_status, last_output,
+                    granted_caps
              FROM cron_jobs
              WHERE enabled = 1 AND next_run <= ?1
              ORDER BY next_run ASC
@@ -426,6 +472,16 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
     let last_run_raw: Option<String> = row.get(14)?;
     let created_at_raw: String = row.get(12)?;
 
+    let caps_str: Option<String> = row.get(17)?;
+    let granted_capabilities: Vec<String> = match caps_str {
+        None => Vec::new(),
+        Some(ref s) => serde_json::from_str(s).unwrap_or_else(|e| {
+            let job_id: String = row.get(0).unwrap_or_default();
+            tracing::warn!(job_id = %job_id, "malformed granted_caps JSON: {e}");
+            Vec::new()
+        }),
+    };
+
     Ok(CronJob {
         id: row.get(0)?,
         expression,
@@ -447,6 +503,7 @@ fn map_cron_job_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronJob> {
         },
         last_status: row.get(15)?,
         last_output: row.get(16)?,
+        granted_capabilities,
     })
 }
 
@@ -507,6 +564,86 @@ fn add_column_if_missing(conn: &Connection, name: &str, sql_type: &str) -> Resul
     }
 }
 
+fn migrate(conn: &Connection) -> Result<()> {
+    let version: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+
+    if version < SCHEMA_VERSION {
+        // Move capabilities from prompt to granted_caps
+        let mut stmt = conn.prepare(
+            "SELECT id, prompt FROM cron_jobs WHERE prompt LIKE '[%'",
+        )?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for (id, prompt_json) in &rows {
+            conn.execute(
+                "UPDATE cron_jobs SET granted_caps = ?, prompt = NULL WHERE id = ?",
+                rusqlite::params![prompt_json, id],
+            )?;
+        }
+
+        // Strip unknown capabilities
+        let known: std::collections::HashSet<&str> = [
+            "agent.read",
+            "model.chat",
+            "config.validate",
+            "channel.write",
+            "channel.read",
+            "provider.write",
+            "cost.read",
+            "events.read",
+            "cron.read",
+            "cron.write",
+            "skills.read",
+            "skills.write",
+            "tools.read",
+            "memory.read",
+            "memory.write",
+            "agent.control",
+            "trace.read",
+            "auth.read",
+            "auth.write",
+            "model.read",
+            "tools.call",
+            "storage.read",
+            "storage.write",
+            "storage.delete",
+        ]
+        .into_iter()
+        .collect();
+
+        let mut all_jobs = conn.prepare(
+            "SELECT id, granted_caps FROM cron_jobs WHERE granted_caps IS NOT NULL",
+        )?;
+        let jobs: Vec<(String, String)> = all_jobs
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for (id, caps_json) in &jobs {
+            if let Ok(caps) = serde_json::from_str::<Vec<String>>(caps_json) {
+                let valid: Vec<String> =
+                    caps.into_iter().filter(|c| known.contains(c.as_str())).collect();
+                let valid_json = serde_json::to_string(&valid).unwrap_or_default();
+                if valid_json != *caps_json {
+                    tracing::warn!(job_id = %id, "stripped unknown capabilities during migration");
+                    conn.execute(
+                        "UPDATE cron_jobs SET granted_caps = ? WHERE id = ?",
+                        rusqlite::params![valid_json, id],
+                    )?;
+                }
+            }
+        }
+
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        tracing::info!("cron DB migrated to schema version {SCHEMA_VERSION}");
+    }
+
+    Ok(())
+}
+
 fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
     let db_path = config.workspace_dir.join("cron").join("jobs.db");
     if let Some(parent) = db_path.parent() {
@@ -565,6 +702,9 @@ fn with_connection<T>(config: &Config, f: impl FnOnce(&Connection) -> Result<T>)
     add_column_if_missing(&conn, "enabled", "INTEGER NOT NULL DEFAULT 1")?;
     add_column_if_missing(&conn, "delivery", "TEXT")?;
     add_column_if_missing(&conn, "delete_after_run", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(&conn, "granted_caps", "TEXT")?;
+
+    migrate(&conn)?;
 
     f(&conn)
 }
@@ -855,5 +995,25 @@ mod tests {
         let last_output = stored.last_output.as_deref().unwrap_or_default();
         assert!(last_output.ends_with(TRUNCATED_OUTPUT_MARKER));
         assert!(last_output.len() <= MAX_CRON_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn add_script_job_roundtrip_capabilities() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+
+        let caps = vec!["tools.call".to_string(), "storage.read".to_string()];
+        let job = add_script_job(
+            &config,
+            Some("test-script".to_string()),
+            Schedule::Every { every_ms: 60_000 },
+            "workflows/test.rhai",
+            &caps,
+        )
+        .unwrap();
+
+        let retrieved = get_job(&config, &job.id).unwrap();
+        assert_eq!(retrieved.granted_capabilities, caps);
+        assert!(retrieved.prompt.is_none());
     }
 }

@@ -180,6 +180,36 @@ pub(crate) fn unregister_event_listener_inner() -> Result<(), FfiError> {
     Ok(())
 }
 
+/// Emits a custom event with an arbitrary `kind` and JSON `data` string.
+///
+/// The event is buffered in the ring buffer and forwarded to the Kotlin
+/// listener if one is registered.  Use this for application-level events
+/// that do not map to an [`ObserverEvent`] variant (e.g. capability
+/// approval requests).
+pub(crate) fn emit_custom_event(kind: &str, data_json: &str) {
+    let id = EVENT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let escaped_kind = escape_json_string(kind);
+    let json = format!(
+        r#"{{"id":{id},"timestamp_ms":{now_ms},"kind":"{escaped_kind}","data":{data_json}}}"#
+    );
+
+    // Buffer the event.
+    {
+        let mut buf = lock_event_buffer();
+        if buf.len() >= EVENT_BUFFER_CAPACITY {
+            buf.pop_front();
+        }
+        buf.push_back(json.clone());
+    }
+
+    // Forward to Kotlin listener if registered.
+    let maybe_listener = lock_listener().as_ref().map(Arc::clone);
+    if let Some(listener) = maybe_listener {
+        listener.on_event(json);
+    }
+}
+
 /// Returns the most recent events as a JSON array string.
 ///
 /// Events are ordered chronologically (oldest first). The `limit`
@@ -354,7 +384,7 @@ fn event_to_kind_and_data(event: &ObserverEvent) -> (&'static str, String) {
 /// (`\n`, `\r`, `\t`), and all remaining control characters (`\x00`-`\x1F`)
 /// via `\uXXXX` notation.
 #[allow(dead_code)]
-fn escape_json_string(s: &str) -> String {
+pub(crate) fn escape_json_string(s: &str) -> String {
     use std::fmt::Write;
     let mut out = String::with_capacity(s.len() + 4);
     for c in s.chars() {

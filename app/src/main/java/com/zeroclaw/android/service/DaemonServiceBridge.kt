@@ -19,6 +19,7 @@ import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.ffi.FfiException
 import com.zeroclaw.ffi.getConfiguredChannelNames
 import com.zeroclaw.ffi.getStatus
+import com.zeroclaw.ffi.registerScriptTriggers
 import com.zeroclaw.ffi.registerWebRenderer
 import com.zeroclaw.ffi.scaffoldWorkspace
 import com.zeroclaw.ffi.sendMessage
@@ -306,6 +307,12 @@ class DaemonServiceBridge(
                         registerWebRenderer(it)
                     }
                 }
+                try {
+                    val registered = registerScriptTriggers()
+                    Log.d(TAG, "Registered ${registered.toInt()} script triggers")
+                } catch (e: FfiException) {
+                    Log.w(TAG, "Script trigger registration failed", e)
+                }
             }
             _lastError.value = null
             _serviceState.value = ServiceState.RUNNING
@@ -322,12 +329,18 @@ class DaemonServiceBridge(
                     eventBridge?.register()
                     credentialBridge?.register()
                     appContext?.let { ctx ->
-                        val strippedUa = WebSettings.getDefaultUserAgent(ctx).replaceFirst(" wv)", " )")
+                        val strippedUa =
+                            WebSettings.getDefaultUserAgent(ctx).replaceFirst(" wv)", " )")
                         setWebFetchUserAgent(strippedUa)
                         webRenderer?.let {
                             it.setUserAgent(strippedUa)
                             registerWebRenderer(it)
                         }
+                    }
+                    try {
+                        registerScriptTriggers()
+                    } catch (e: FfiException) {
+                        Log.w(TAG, "Failed to register script triggers on reconnect", e)
                     }
                 }
                 return

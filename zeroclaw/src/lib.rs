@@ -45,7 +45,7 @@ pub mod channels;
 pub mod clawboy_triggers;
 pub mod config;
 pub(crate) mod cost;
-pub(crate) mod cron;
+pub mod cron;
 pub(crate) mod daemon;
 pub(crate) mod doctor;
 pub mod ffi_credential_hook;

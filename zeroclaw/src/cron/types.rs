@@ -7,6 +7,7 @@ pub enum JobType {
     #[default]
     Shell,
     Agent,
+    Script,
 }
 
 impl From<JobType> for &'static str {
@@ -14,6 +15,7 @@ impl From<JobType> for &'static str {
         match value {
             JobType::Shell => "shell",
             JobType::Agent => "agent",
+            JobType::Script => "script",
         }
     }
 }
@@ -25,8 +27,9 @@ impl TryFrom<&str> for JobType {
         match value.to_lowercase().as_str() {
             "shell" => Ok(JobType::Shell),
             "agent" => Ok(JobType::Agent),
+            "script" => Ok(JobType::Script),
             _ => Err(format!(
-                "Invalid job type '{}'. Expected one of: 'shell', 'agent'",
+                "Invalid job type '{}'. Expected one of: 'shell', 'agent', 'script'",
                 value
             )),
         }
@@ -120,6 +123,7 @@ pub struct CronJob {
     pub last_run: Option<DateTime<Utc>>,
     pub last_status: Option<String>,
     pub last_output: Option<String>,
+    pub granted_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +160,12 @@ mod tests {
         assert_eq!(JobType::try_from("SHELL").unwrap(), JobType::Shell);
         assert_eq!(JobType::try_from("agent").unwrap(), JobType::Agent);
         assert_eq!(JobType::try_from("AgEnT").unwrap(), JobType::Agent);
+    }
+
+    #[test]
+    fn job_type_script_round_trips() {
+        assert_eq!(JobType::try_from("script").unwrap(), JobType::Script);
+        assert_eq!(<&str>::from(JobType::Script), "script");
     }
 
     #[test]

@@ -6,18 +6,230 @@
 
 //! Thin FFI bridge over the core Rust scripting runtime.
 
+use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+
+use once_cell::sync::OnceCell;
 
 use crate::error::FfiError;
 use crate::{
-    auth_profiles, cost, cron, events, health, memory_browse, models, runtime, skills,
-    tools_browse, vision,
+    auth_profiles, capability_grants, cost, cron, events, health, memory_browse, models, runtime,
+    skills, tools_browse, vision,
 };
 use zeroclaw::scripting::{
     RhaiScriptRuntime, ScriptError, ScriptHost, ScriptManifest, ScriptOperation, ScriptRuntimeKind,
     ScriptValue,
 };
+use zeroclaw::scripting::storage::ScriptStorage;
+
+static KNOWN_CAPABILITIES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    HashSet::from([
+        "agent.read",
+        "model.chat",
+        "config.validate",
+        "channel.write",
+        "channel.read",
+        "provider.write",
+        "cost.read",
+        "events.read",
+        "cron.read",
+        "cron.write",
+        "skills.read",
+        "skills.write",
+        "tools.read",
+        "memory.read",
+        "memory.write",
+        "agent.control",
+        "trace.read",
+        "auth.read",
+        "auth.write",
+        "model.read",
+        "tools.call",
+        "storage.read",
+        "storage.write",
+        "storage.delete",
+    ])
+});
+
+const DANGEROUS_CAPABILITIES: &[&str] = &[
+    "tools.call",
+    "cron.write",
+    "auth.write",
+    "auth.read",
+];
+
+fn validate_capabilities(caps: &[String]) -> Result<(), ScriptError> {
+    for cap in caps {
+        if !KNOWN_CAPABILITIES.contains(cap.as_str()) {
+            return Err(ScriptError::ValidationError {
+                detail: format!("unknown capability: {cap:?}"),
+            });
+        }
+        if DANGEROUS_CAPABILITIES.contains(&cap.as_str()) {
+            tracing::warn!(capability = %cap, "skill requests dangerous capability");
+        }
+    }
+    Ok(())
+}
+
+/// Maps a [`ScriptOperation`] to its required capability string.
+///
+/// Mirrors the upstream `ScriptOperation::capability()` method which is
+/// module-private in the core crate and inaccessible from the FFI layer.
+fn operation_capability(op: ScriptOperation) -> &'static str {
+    match op {
+        ScriptOperation::Status
+        | ScriptOperation::Version
+        | ScriptOperation::RunningConfig
+        | ScriptOperation::HealthDetail
+        | ScriptOperation::HealthComponent
+        | ScriptOperation::DoctorChannels => "agent.read",
+        ScriptOperation::SendMessage | ScriptOperation::SendVision => "model.chat",
+        ScriptOperation::ValidateConfig => "config.validate",
+        ScriptOperation::BindChannelIdentity => "channel.write",
+        ScriptOperation::ChannelAllowlist => "channel.read",
+        ScriptOperation::SwapProvider => "provider.write",
+        ScriptOperation::CostSummary
+        | ScriptOperation::DailyCost
+        | ScriptOperation::MonthlyCost
+        | ScriptOperation::CheckBudget => "cost.read",
+        ScriptOperation::RecentEvents => "events.read",
+        ScriptOperation::ListCronJobs | ScriptOperation::GetCronJob => "cron.read",
+        ScriptOperation::AddCronJob
+        | ScriptOperation::AddOneShotJob
+        | ScriptOperation::AddCronJobAt
+        | ScriptOperation::AddCronJobEvery
+        | ScriptOperation::RemoveCronJob
+        | ScriptOperation::PauseCronJob
+        | ScriptOperation::ResumeCronJob => "cron.write",
+        ScriptOperation::ListSkills | ScriptOperation::GetSkillTools => "skills.read",
+        ScriptOperation::InstallSkill | ScriptOperation::RemoveSkill => "skills.write",
+        ScriptOperation::ListTools => "tools.read",
+        ScriptOperation::ListMemories
+        | ScriptOperation::ListMemoriesByCategory
+        | ScriptOperation::RecallMemory
+        | ScriptOperation::MemoryCount => "memory.read",
+        ScriptOperation::ForgetMemory => "memory.write",
+        ScriptOperation::EngageEStop
+        | ScriptOperation::GetEStopStatus
+        | ScriptOperation::ResumeEStop => "agent.control",
+        ScriptOperation::QueryTraces | ScriptOperation::QueryTracesByFilter => "trace.read",
+        ScriptOperation::ListAuthProfiles => "auth.read",
+        ScriptOperation::RemoveAuthProfile => "auth.write",
+        ScriptOperation::DiscoverModels
+        | ScriptOperation::DiscoverModelsWithKey
+        | ScriptOperation::DiscoverModelsWithKeyAndBaseUrl => "model.read",
+        ScriptOperation::InvokeTool => "tools.call",
+        ScriptOperation::ReadStorage => "storage.read",
+        ScriptOperation::WriteStorage | ScriptOperation::DeleteStorage => "storage.write",
+    }
+}
+
+/// Returns a human-readable description of what a dangerous capability allows.
+fn capability_description(capability: &str) -> &'static str {
+    match capability {
+        "tools.call" => "Execute arbitrary tools on the device (shell commands, file access, etc.)",
+        "cron.write" => "Create, modify, or remove scheduled background tasks",
+        "auth.write" => "Modify or remove stored authentication profiles",
+        "auth.read" => "Read stored authentication profiles and credentials",
+        _ => "Perform a privileged operation",
+    }
+}
+
+/// Checks whether the given operation requires a dangerous capability that has
+/// not yet been approved by the user. If approval is needed, emits an event to
+/// Kotlin, blocks the current thread until the user responds, and either
+/// persists the grant or returns [`ScriptError::CapabilityDenied`].
+///
+/// # Blocking
+///
+/// This function calls `blocking_recv()` on a tokio oneshot channel. It is safe
+/// to call from JNI threads (REPL) and `spawn_blocking` threads (cron) but must
+/// **never** be called from within a tokio async context.
+fn require_dangerous_capability_approval(
+    operation: ScriptOperation,
+    manifest_name: &str,
+) -> Result<(), ScriptError> {
+    let capability = operation_capability(operation);
+    if !DANGEROUS_CAPABILITIES.contains(&capability) {
+        return Ok(());
+    }
+
+    // Check persisted grants first.
+    let ws_dir = workspace_dir().map_err(|e| ScriptError::HostError {
+        operation: "capability_check".to_string(),
+        detail: e.to_string(),
+    })?;
+    if capability_grants::is_capability_granted(&ws_dir, manifest_name, capability) {
+        return Ok(());
+    }
+
+    tracing::info!(
+        skill = %manifest_name,
+        capability = %capability,
+        "dangerous capability requires user approval; blocking until resolved"
+    );
+
+    // Create a pending approval and emit an event for Kotlin.
+    let triggered_via = "terminal"; // TODO: propagate from session/channel context
+    let (request_id, rx) =
+        capability_grants::request_capability_approval(manifest_name, capability, triggered_via);
+
+    let description = capability_description(capability);
+    let esc = events::escape_json_string;
+    let event_data = format!(
+        r#"{{"request_id":"{}","skill_name":"{}","capability":"{}","triggered_via":"{}","description":"{}"}}"#,
+        esc(&request_id),
+        esc(manifest_name),
+        esc(capability),
+        esc(triggered_via),
+        esc(description),
+    );
+    events::emit_custom_event("capability_approval_required", &event_data);
+
+    // Block the script's thread until the user approves or denies.
+    // SAFETY (threading): scripts run on JNI threads (REPL) or
+    // spawn_blocking threads (cron), so blocking_recv() will not
+    // deadlock the tokio runtime.
+    let approved = rx.blocking_recv().unwrap_or(false);
+
+    if approved {
+        tracing::info!(
+            skill = %manifest_name,
+            capability = %capability,
+            "capability approved by user"
+        );
+        // Compute content hash from the script file for grant binding.
+        let hash = {
+            let script_path = ws_dir
+                .join("workflows")
+                .join(manifest_name)
+                .with_extension("rhai");
+            zeroclaw::scripting::content_hash::hash_file(&script_path)
+                .unwrap_or_default()
+        };
+        if let Err(e) = capability_grants::save_grant(&ws_dir, manifest_name, capability, triggered_via, &hash) {
+            tracing::warn!(
+                skill = %manifest_name,
+                capability = %capability,
+                error = %e,
+                "failed to persist capability grant; approval is session-only"
+            );
+        }
+        Ok(())
+    } else {
+        tracing::warn!(
+            skill = %manifest_name,
+            capability = %capability,
+            "capability denied by user"
+        );
+        Err(ScriptError::CapabilityDenied {
+            operation: manifest_name.to_string(),
+            capability: capability.to_string(),
+        })
+    }
+}
 
 /// Typed validation response surfaced to UniFFI callers.
 #[derive(Debug, Clone, uniffi::Record)]
@@ -71,6 +283,30 @@ pub struct FfiWorkspaceScript {
 }
 
 static SCRIPT_RUNTIME: OnceLock<RhaiScriptRuntime> = OnceLock::new();
+static SCRIPT_STORAGE: OnceCell<Mutex<ScriptStorage>> = OnceCell::new();
+
+fn with_script_storage<T>(
+    f: impl FnOnce(&ScriptStorage) -> Result<T, anyhow::Error>,
+) -> Result<T, ScriptError> {
+    let storage = SCRIPT_STORAGE
+        .get_or_try_init(|| -> Result<Mutex<ScriptStorage>, anyhow::Error> {
+            let dir = workspace_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+            let store = ScriptStorage::open(&dir)?;
+            Ok(Mutex::new(store))
+        })
+        .map_err(|e| ScriptError::HostError {
+            operation: "storage_init".to_string(),
+            detail: e.to_string(),
+        })?;
+    let guard = storage.lock().map_err(|e| ScriptError::HostError {
+        operation: "storage_lock".to_string(),
+        detail: e.to_string(),
+    })?;
+    f(&guard).map_err(|e| ScriptError::HostError {
+        operation: "storage".to_string(),
+        detail: e.to_string(),
+    })
+}
 
 struct FfiScriptHost;
 
@@ -81,6 +317,27 @@ impl ScriptHost for FfiScriptHost {
         operation: ScriptOperation,
         args: serde_json::Value,
     ) -> Result<ScriptValue, ScriptError> {
+        // Extract the manifest name injected by call_host() and strip it
+        // from the args before dispatching to the operation handler.
+        let manifest_name = args
+            .get("__manifest_name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("anonymous")
+            .to_string();
+        let args = {
+            if let serde_json::Value::Object(mut map) = args {
+                map.remove("__manifest_name");
+                serde_json::Value::Object(map)
+            } else {
+                args
+            }
+        };
+
+        // Gate: dangerous capabilities require explicit user approval
+        // persisted in capability_grants.json. If the grant doesn't exist
+        // yet, block this thread while Kotlin presents the approval prompt.
+        require_dangerous_capability_approval(operation, &manifest_name)?;
+
         match operation {
             ScriptOperation::Status => Ok(ScriptValue::String(
                 runtime::get_status_inner().map_err(script_host_error("status"))?,
@@ -356,6 +613,45 @@ impl ScriptHost for FfiScriptHost {
                 )
                 .map_err(script_host_error("models_full"))?,
             )),
+            ScriptOperation::InvokeTool => {
+                let name = string_arg(&args, "name")?;
+                let tool_args = optional_string_arg(&args, "args")
+                    .unwrap_or_else(|| "{}".to_string());
+                Ok(ScriptValue::String(
+                    tools_browse::invoke_tool_inner(&name, &tool_args)
+                        .map_err(script_host_error("tool_call"))?,
+                ))
+            }
+            ScriptOperation::ReadStorage => {
+                let key = string_arg(&args, "key")?;
+                let script_name = optional_string_arg(&args, "script")
+                    .unwrap_or_else(|| "anonymous".to_string());
+                match with_script_storage(|store| store.read(&script_name, &key))? {
+                    Some(v) => Ok(ScriptValue::String(v)),
+                    None => Ok(ScriptValue::Unit),
+                }
+            }
+            ScriptOperation::WriteStorage => {
+                let key = string_arg(&args, "key")?;
+                let value = string_arg(&args, "value")?;
+                if value.len() > 1_048_576 {
+                    return Err(ScriptError::InvalidArgument {
+                        detail: "storage value exceeds 1 MiB limit".to_string(),
+                    });
+                }
+                let script_name = optional_string_arg(&args, "script")
+                    .unwrap_or_else(|| "anonymous".to_string());
+                with_script_storage(|store| store.write(&script_name, &key, &value))?;
+                Ok(ScriptValue::Unit)
+            }
+            ScriptOperation::DeleteStorage => {
+                let key = string_arg(&args, "key")?;
+                let script_name = optional_string_arg(&args, "script")
+                    .unwrap_or_else(|| "anonymous".to_string());
+                let deleted =
+                    with_script_storage(|store| store.delete(&script_name, &key))?;
+                Ok(ScriptValue::Bool(deleted))
+            }
         }
     }
 }
@@ -443,7 +739,7 @@ fn map_script_error(error: ScriptError) -> FfiError {
         ScriptError::InvalidArgument { .. }
         | ScriptError::ValidationError { .. }
         | ScriptError::CapabilityDenied { .. } => FfiError::InvalidArgument { detail },
-        ScriptError::HostError { .. } => FfiError::SpawnError { detail },
+        ScriptError::HostError { .. } => FfiError::StateError { detail },
         ScriptError::InternalState { .. } => FfiError::StateCorrupted { detail },
     }
 }
@@ -513,9 +809,27 @@ fn float_arg(args: &serde_json::Value, key: &str) -> Result<f64, ScriptError> {
         })
 }
 
+fn repl_default_manifest() -> ScriptManifest {
+    ScriptManifest {
+        name: "repl".to_string(),
+        explicit_capabilities: true,
+        capabilities: vec![
+            "model.chat".to_string(),
+            "model.read".to_string(),
+            "status.read".to_string(),
+            "storage.read".to_string(),
+            "storage.write".to_string(),
+            "memory.read".to_string(),
+            "cost.read".to_string(),
+            "events.read".to_string(),
+        ],
+        ..Default::default()
+    }
+}
+
 pub(crate) fn eval_script_inner(source: String) -> Result<String, FfiError> {
     script_runtime()
-        .eval_script(&source, None)
+        .eval_script(&source, Some(repl_default_manifest()))
         .map_err(map_script_error)
 }
 
@@ -611,6 +925,59 @@ pub(crate) fn list_script_runtimes_inner() -> Vec<FfiScriptRuntime> {
             notes: runtime.notes,
         })
         .collect()
+}
+
+pub(crate) fn register_script_triggers_inner() -> Result<u32, FfiError> {
+    let workspace_dir = workspace_dir()?;
+
+    // Register the real FfiScriptHost so cron script jobs can call back
+    // into the Android bridge instead of falling back to StubScriptHost.
+    let host: Arc<dyn zeroclaw::scripting::ScriptHost> = Arc::new(FfiScriptHost);
+    zeroclaw::scripting::set_cron_script_host(host);
+
+    let scripts = zeroclaw::scripting::discover_workspace_scripts(&workspace_dir);
+    let cron_triggers = zeroclaw::scripting::triggers::collect_cron_triggers(&scripts);
+
+    let config = crate::runtime::clone_daemon_config()?;
+    let existing = zeroclaw::cron::list_jobs(&config)
+        .map_err(|e| FfiError::StateError { detail: e.to_string() })?;
+
+    let mut registered = 0u32;
+    for resolved in &cron_triggers {
+        let Some(schedule_expr) = resolved.trigger.schedule.as_deref() else { continue };
+        let script_path = match resolved.manifest.script_path.as_ref() {
+            Some(p) => p.to_string_lossy().to_string(),
+            None => continue,
+        };
+        let trigger_name = format!("trigger:{}", resolved.manifest.name);
+
+        // Idempotent: skip if job with this name already exists
+        if existing
+            .iter()
+            .any(|j| j.name.as_deref() == Some(trigger_name.as_str()))
+        {
+            continue;
+        }
+
+        validate_capabilities(&resolved.manifest.capabilities).map_err(map_script_error)?;
+
+        let schedule = zeroclaw::cron::Schedule::Cron {
+            expr: schedule_expr.to_string(),
+            tz: None,
+        };
+        match zeroclaw::cron::add_script_job(
+            &config,
+            Some(trigger_name.clone()),
+            schedule,
+            &script_path,
+            &resolved.manifest.capabilities,
+        ) {
+            Ok(_) => registered += 1,
+            Err(e) => tracing::warn!("Failed to register trigger {trigger_name}: {e}"),
+        }
+    }
+
+    Ok(registered)
 }
 
 pub(crate) fn script_plugin_host_wit_inner() -> String {

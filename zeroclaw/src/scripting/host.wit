@@ -1,45 +1,70 @@
-// Copyright (c) 2026 Zeroclaw Labs. All rights reserved.
+// Copyright (c) 2026 @Natfii. All rights reserved.
 
-package zero:scripting@0.1.0;
+package zero:scripting@0.2.0;
 
 interface host {
-    record tool-call {
-        name: string,
-        args-json: string,
-    }
-
-    record memory-query {
-        query: string,
-        limit: u32,
-    }
-
-    record memory-write {
-        key: string,
-        value: string,
-    }
-
-    record storage-read {
-        path: string,
-    }
-
-    record storage-write {
-        path: string,
-        value: string,
-    }
-
-    record model-request {
-        prompt: string,
-    }
-
+    // --- Tool invocation ---
+    record tool-call { name: string, args-json: string }
     invoke-tool: func(call: tool-call) -> result<string, string>;
+    list-tools: func() -> result<string, string>;
+
+    // --- Memory ---
+    record memory-query { query: string, limit: u32 }
+    record memory-write { key: string, value: string }
     read-memory: func(query: memory-query) -> result<string, string>;
     write-memory: func(write: memory-write) -> result<bool, string>;
-    subscribe-events: func(filter: option<string>) -> result<string, string>;
-    read-storage: func(request: storage-read) -> result<string, string>;
-    write-storage: func(request: storage-write) -> result<bool, string>;
+    list-memories: func(limit: u32) -> result<string, string>;
+    memory-count: func() -> result<u32, string>;
+
+    // --- Script-scoped storage ---
+    record storage-key { key: string }
+    record storage-entry { key: string, value: string }
+    read-storage: func(request: storage-key) -> result<option<string>, string>;
+    write-storage: func(entry: storage-entry) -> result<bool, string>;
+    delete-storage: func(request: storage-key) -> result<bool, string>;
+
+    // --- Model / LLM ---
+    record model-request { prompt: string }
+    record vision-request { text: string, images: list<string>, mime-types: list<string> }
     model-chat: func(request: model-request) -> result<string, string>;
+    model-vision: func(request: vision-request) -> result<string, string>;
+    discover-models: func(provider: string) -> result<string, string>;
+
+    // --- Agent ---
+    agent-status: func() -> result<string, string>;
+    agent-version: func() -> result<string, string>;
+    agent-health: func() -> result<string, string>;
+    agent-health-component: func(name: string) -> result<string, string>;
+
+    // --- Events ---
+    recent-events: func(limit: u32) -> result<string, string>;
+
+    // --- Cron ---
+    record cron-add-request { expression: string, command: string }
+    cron-list: func() -> result<string, string>;
+    cron-add: func(request: cron-add-request) -> result<string, string>;
+    cron-remove: func(id: string) -> result<bool, string>;
+    cron-pause: func(id: string) -> result<bool, string>;
+    cron-resume: func(id: string) -> result<bool, string>;
+
+    // --- Skills ---
+    skills-list: func() -> result<string, string>;
+    skill-tools: func(name: string) -> result<string, string>;
+    skill-install: func(source: string) -> result<string, string>;
+    skill-remove: func(name: string) -> result<bool, string>;
+
+    // --- Cost ---
+    cost-summary: func() -> result<string, string>;
+    cost-daily: func() -> result<string, string>;
+    cost-monthly: func() -> result<string, string>;
+
+    // --- Capabilities ---
+    list-capabilities: func() -> result<string, string>;
 }
 
 world zero-scripting-plugin {
     import host;
+
+    /// Guest must export a run function.
+    export run: func(input-json: string) -> result<string, string>;
 }

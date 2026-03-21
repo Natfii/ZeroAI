@@ -66,4 +66,7 @@ sealed interface SettingsNavAction {
 
     /** Opens the web dashboard (full engine config in a WebView). */
     data object WebDashboard : SettingsNavAction
+
+    /** Navigate to the skill permissions (capability grants) screen. */
+    data object SkillPermissions : SettingsNavAction
 }

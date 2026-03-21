@@ -246,6 +246,38 @@ impl Tool for CronAddTool {
                     delete_after_run,
                 )
             }
+            JobType::Script => {
+                let script_path =
+                    match args.get("command").and_then(serde_json::Value::as_str) {
+                        Some(path) if !path.trim().is_empty() => path,
+                        _ => {
+                            return Ok(ToolResult {
+                                success: false,
+                                output: String::new(),
+                                error: Some(
+                                    "Missing 'command' (script path) for script job".to_string(),
+                                ),
+                            });
+                        }
+                    };
+
+                let granted_capabilities: Vec<String> = args
+                    .get("granted_capabilities")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+
+                if let Some(blocked) = self.enforce_mutation_allowed("cron_add") {
+                    return Ok(blocked);
+                }
+
+                cron::add_script_job(
+                    &self.config,
+                    name,
+                    schedule,
+                    script_path,
+                    &granted_capabilities,
+                )
+            }
         };
 
         match result {

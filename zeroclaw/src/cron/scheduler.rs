@@ -63,6 +63,19 @@ async fn execute_job_with_retry(
         let (success, output) = match job.job_type {
             JobType::Shell => run_job_command(config, security, job).await,
             JobType::Agent => run_agent_job(config, security, job).await,
+            JobType::Script => {
+                // Use the FfiScriptHost from the repl module if available,
+                // otherwise fall back to StubScriptHost with a warning.
+                let host: Arc<dyn crate::scripting::ScriptHost> =
+                    crate::scripting::get_cron_script_host()
+                        .unwrap_or_else(|| {
+                            tracing::warn!(
+                                "no FFI script host available for cron; using stub"
+                            );
+                            Arc::new(crate::scripting::StubScriptHost)
+                        });
+                run_script_job(config, job, host).await
+            }
         };
         last_output = output;
 
@@ -276,6 +289,14 @@ fn warn_if_high_frequency_agent_job(job: &CronJob) {
     }
 }
 
+fn validate_delivery_target(channel: &str, target: &str) -> bool {
+    match channel {
+        "discord" => target.parse::<u64>().is_ok(),
+        "telegram" => target.parse::<i64>().is_ok(),
+        _ => true,
+    }
+}
+
 async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> Result<()> {
     let delivery: &DeliveryConfig = &job.delivery;
     if !delivery.mode.eq_ignore_ascii_case("announce") {
@@ -290,6 +311,16 @@ async fn deliver_if_configured(config: &Config, job: &CronJob, output: &str) -> 
         .to
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("delivery.to is required for announce mode"))?;
+
+    if !validate_delivery_target(channel, target) {
+        tracing::warn!(
+            job_id = %job.id,
+            channel = %channel,
+            target = %target,
+            "skipping delivery: invalid target format for channel"
+        );
+        return Ok(());
+    }
 
     deliver_announcement(config, channel, target, output).await
 }
@@ -337,6 +368,53 @@ pub(crate) async fn deliver_announcement(
     }
 
     Ok(())
+}
+
+async fn run_script_job(
+    config: &Config,
+    job: &CronJob,
+    host: Arc<dyn crate::scripting::ScriptHost>,
+) -> (bool, String) {
+    let script_path = job.command.clone();
+    let granted: Vec<String> = job.granted_capabilities.clone();
+    let workspace = config.workspace_dir.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        let full_path = std::path::Path::new(&workspace).join(&script_path);
+
+        // Verify script still exists
+        if !full_path.exists() {
+            return Err(format!("script not found: {script_path}"));
+        }
+
+        // Compute current content hash and log it
+        let current_hash = crate::scripting::content_hash::hash_file(&full_path)
+            .unwrap_or_else(|e| {
+                tracing::warn!(script = %script_path, "hash failed: {e}");
+                String::new()
+            });
+
+        tracing::info!(
+            script = %script_path,
+            hash = %current_hash,
+            "executing cron script job"
+        );
+
+        let runtime = crate::scripting::RhaiScriptRuntime::new(host);
+        runtime.eval_workspace_script(
+            std::path::Path::new(&workspace),
+            std::path::Path::new(&script_path),
+            Some(granted),
+        )
+        .map_err(|e| format!("{e}"))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(output)) => (true, output),
+        Ok(Err(e)) => (false, format!("script failed: {e}")),
+        Err(e) => (false, format!("script task panicked: {e}")),
+    }
 }
 
 async fn run_job_command(
@@ -474,6 +552,7 @@ mod tests {
             last_run: None,
             last_status: None,
             last_output: None,
+            granted_capabilities: Vec::new(),
         }
     }
 

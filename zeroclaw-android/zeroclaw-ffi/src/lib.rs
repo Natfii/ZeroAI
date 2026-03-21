@@ -15,6 +15,7 @@
 uniffi::setup_scaffolding!();
 
 mod auth_profiles;
+mod capability_grants;
 mod cost;
 mod credentials;
 mod cron;
@@ -1702,6 +1703,23 @@ pub fn get_script_plugin_host_wit() -> Result<String, FfiError> {
     })
 }
 
+/// Scan workspace skills for cron triggers and register them as scheduled jobs.
+///
+/// Idempotent: existing script jobs with the same name are skipped.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn register_script_triggers() -> Result<u32, FfiError> {
+    catch_unwind(AssertUnwindSafe(repl::register_script_triggers_inner)).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Evaluates a Rhai expression against the embedded REPL engine.
 ///
 /// This is a backward-compatible alias for [`eval_script`].
@@ -3120,6 +3138,106 @@ pub fn peer_send_channel_response(
 ) -> Result<(), FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         tailnet::peer_send_channel_response_inner(channel, recipient, message)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Capability grants
+// ---------------------------------------------------------------------------
+
+/// Returns all pending capability approval requests.
+///
+/// Kotlin UI should poll this to discover new approval prompts, then call
+/// [`resolve_capability_request`] with the user's decision.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the internal lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn get_pending_approvals(
+) -> Result<Vec<capability_grants::PendingApprovalInfo>, FfiError> {
+    catch_unwind(capability_grants::get_pending_approvals_inner).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Resolves a pending capability approval request.
+///
+/// Sends the user's decision (`approved`) back to the waiting Rust task.
+/// If the request ID is not found (already resolved or expired), returns
+/// [`FfiError::InvalidArgument`].
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] if `request_id` is unknown,
+/// [`FfiError::StateError`] if the internal lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn resolve_capability_request(
+    request_id: String,
+    approved: bool,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        capability_grants::resolve_capability_request_inner(request_id, approved)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Lists all persisted capability grants from the workspace grants file.
+///
+/// `data_dir` is the absolute path to the app's files directory (typically
+/// `context.filesDir` from Kotlin). The grants file is read from
+/// `<data_dir>/capability_grants.json`.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn list_capability_grants(
+    data_dir: String,
+) -> Result<Vec<capability_grants::CapabilityGrantInfo>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let path = std::path::Path::new(&data_dir);
+        capability_grants::list_capability_grants_inner(path)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Revokes a persisted capability grant for a specific skill and capability.
+///
+/// `data_dir` is the absolute path to the app's files directory. The grants
+/// file at `<data_dir>/capability_grants.json` is updated atomically.
+/// If the grant does not exist, this is a no-op.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] on I/O or serialisation failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn revoke_capability_grant(
+    data_dir: String,
+    skill_name: String,
+    capability: String,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let path = std::path::Path::new(&data_dir);
+        capability_grants::revoke_capability_grant_inner(path, &skill_name, &capability)
     }))
     .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {

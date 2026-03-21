@@ -11,6 +11,9 @@ ignore = [
     # serde_yml unmaintained advisory — no drop-in replacement available yet.
     # Tracked upstream: https://github.com/rustsec/advisory-db/issues/2395
     "RUSTSEC-2025-0068",
+    # rustls-webpki CRL distribution point matching — low impact, transitive dep.
+    # Fix requires rustls-webpki >= 0.103.10 (not yet released for 0.103.x branch).
+    "RUSTSEC-2026-0049",
 ]
 
 [licenses]
@@ -33,9 +36,6 @@ confidence-threshold = 0.8
 name = "ar_archive_writer"
 allow = ["Apache-2.0 WITH LLVM-exception"]
 
-[[licenses.exceptions]]
-name = "aws-lc-sys"
-allow = ["OpenSSL"]
 
 [[licenses.clarify]]
 name = "ring"

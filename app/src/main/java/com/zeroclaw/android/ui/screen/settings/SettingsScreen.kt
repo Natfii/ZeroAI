@@ -152,6 +152,12 @@ internal fun SettingsContent(
                 subtitle = settings.autonomyLevel,
                 onClick = { onNavigate(SettingsNavAction.Autonomy) },
             )
+            SettingsListItem(
+                icon = Icons.Outlined.TaskAlt,
+                title = "Skill Permissions",
+                subtitle = "View and revoke dangerous capability grants",
+                onClick = { onNavigate(SettingsNavAction.SkillPermissions) },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 

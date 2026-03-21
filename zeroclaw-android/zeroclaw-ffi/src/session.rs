@@ -963,7 +963,10 @@ impl Tool for FfiHttpRequestTool {
 const MAX_SESSION_TOOLS: usize = 20;
 
 #[allow(clippy::too_many_lines)]
-fn build_tools_registry(config: &zeroclaw::Config, memory: Arc<dyn Memory>) -> Vec<Box<dyn Tool>> {
+pub(crate) fn build_tools_registry(
+    config: &zeroclaw::Config,
+    memory: Arc<dyn Memory>,
+) -> Vec<Box<dyn Tool>> {
     let config_arc = Arc::new(config.clone());
     let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(FfiMemoryStoreTool {

@@ -192,3 +192,7 @@ data object GoogleMessagesRoute
 /** Tailscale tailnet service discovery configuration screen. */
 @Serializable
 data object TailscaleConfigRoute
+
+/** Skill permissions (capability grants) management sub-screen. */
+@Serializable
+data object SkillPermissionsRoute
