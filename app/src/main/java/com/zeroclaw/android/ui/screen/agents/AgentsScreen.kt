@@ -249,5 +249,7 @@ private fun agentSlotProviderIconId(slot: AgentSlotItem): String =
         "openai-api", "chatgpt" -> "openai"
         "anthropic-api", "claude-code" -> "anthropic"
         "ollama" -> "ollama"
+        "xai-api" -> "xai"
+        "openrouter-api" -> "openrouter"
         else -> slot.providerName
     }

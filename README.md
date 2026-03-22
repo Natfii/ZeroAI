@@ -99,12 +99,14 @@ That means your in-app Zero can live inside the app, speak through connected cha
 - vision / multimodal support
 - smart message routing + provider cascade
 - Twitter/X browsing via authenticated cookies
+- **eval_script** — sandboxed Rhai scripting (agent writes and runs scripts during its own reasoning)
 
 ### Core systems
 
 - agent config + routing
 - memory backends
 - cron / scheduling
+- Rhai scripting engine with 24-capability security model
 - plugin management (Hub: Apps, Skills, Plugins)
 - ClawBoy — AI-played Game Boy emulator
 - Android-native settings and service controls
