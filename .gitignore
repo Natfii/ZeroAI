@@ -53,8 +53,9 @@ node_modules/
 # MCP config (local)
 .mcp.json
 
-# Design documents (local only)
-docs/
+# Design documents (local only — docs/guides/ is tracked)
+docs/*
+!docs/guides/
 
 # Hook scripts (local machine paths)
 scripts/hooks/
