@@ -42,7 +42,7 @@ class DaemonServiceBridgeTest {
         mockkStatic("com.zeroclaw.ffi.Zeroclaw_androidKt")
         every { com.zeroclaw.ffi.unregisterWebRenderer() } returns Unit
         every { com.zeroclaw.ffi.stopDaemon() } returns Unit
-        every { com.zeroclaw.ffi.unregisterWebRenderer() } returns Unit
+        every { com.zeroclaw.ffi.registerScriptTriggers() } returns 0u
         bridge = DaemonServiceBridge("/tmp/test", ioDispatcher = UnconfinedTestDispatcher())
     }
 
