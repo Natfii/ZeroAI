@@ -977,6 +977,7 @@ pub(crate) fn build_tools_registry(
         Box::new(zeroclaw::tools::CronListTool::new(config_arc.clone())),
         Box::new(zeroclaw::tools::CronRunsTool::new(config_arc)),
     ];
+    tools.push(Box::new(crate::eval_script_tool::EvalScriptTool::new()));
 
     if config.web_search.enabled {
         let provider = resolve_ffi_provider(

@@ -131,6 +131,10 @@ const CORE_TOOLS: &[BuiltInTool] = &[
         name: "image_info",
         description: "Extract metadata and dimensions from image files",
     },
+    BuiltInTool {
+        name: "eval_script",
+        description: "Execute sandboxed Rhai scripts for batch computation and multi-tool operations",
+    },
 ];
 
 /// Optional tools that depend on config flags.
@@ -201,6 +205,7 @@ const SESSION_TOOLS: &[&str] = &[
     "memory_forget",
     "cron_list",
     "cron_runs",
+    "eval_script",
 ];
 
 /// Tools that require a [`SecurityPolicy`] and can only execute via daemon
@@ -236,7 +241,7 @@ const ANDROID_EXCLUDED_TOOLS: &[&str] = &["browser", "screenshot"];
 ///
 /// `shell_background` is included as a forward-looking guard for when
 /// non-blocking shell execution is added.
-const SCRIPT_TOOL_DENYLIST: &[&str] = &["shell", "shell_background"];
+const SCRIPT_TOOL_DENYLIST: &[&str] = &["shell", "shell_background", "eval_script"];
 
 /// Inactive reason for tools that require daemon channel routing.
 const REASON_DAEMON_ONLY: &str = "Available via daemon channels only";
@@ -397,9 +402,19 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
         });
     }
 
-    // TODO: integrate SecurityPolicy::can_act() check when wired through.
-    // Once SecurityPolicy is accessible here (e.g. via clone_daemon_security_policy()),
-    // add: if !policy.can_act(name) { return Err(FfiError::InvalidArgument { ... }) }
+    // Enforce SecurityPolicy (autonomy level + rate limits) when the daemon is running.
+    // If the daemon isn't running (no config), fall through — session tools don't require it.
+    if let Ok(config) = crate::runtime::clone_daemon_config() {
+        use zeroclaw::security::policy::{SecurityPolicy, ToolOperation};
+        let policy = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
+        let op = match name {
+            "memory_recall" | "cron_list" | "cron_runs" => ToolOperation::Read,
+            _ => ToolOperation::Act,
+        };
+        policy
+            .enforce_tool_operation(op, name)
+            .map_err(|reason| FfiError::InvalidArgument { detail: reason })?;
+    }
 
     let args: serde_json::Value =
         serde_json::from_str(args_json).map_err(|e| FfiError::InvalidArgument {
@@ -440,6 +455,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn eval_script_in_script_tool_denylist() {
+        assert!(
+            SCRIPT_TOOL_DENYLIST.contains(&"eval_script"),
+            "eval_script must be in SCRIPT_TOOL_DENYLIST to prevent recursive script execution"
+        );
+    }
+
+    #[test]
     fn test_list_tools_not_running() {
         let result = list_tools_inner();
         assert!(result.is_err());
@@ -453,7 +476,7 @@ mod tests {
 
     #[test]
     fn test_core_tools_count() {
-        assert_eq!(CORE_TOOLS.len(), 12);
+        assert_eq!(CORE_TOOLS.len(), 13);
     }
 
     #[test]

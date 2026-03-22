@@ -308,10 +308,329 @@ fn with_script_storage<T>(
     })
 }
 
+/// Dispatches a script operation that does not require `SendMessage`
+/// interception or dangerous-capability approval.
+///
+/// Used by both [`FfiScriptHost`] and [`AgentScriptHost`](crate::agent_script_host::AgentScriptHost)
+/// to share the common operation handling logic.
+#[allow(clippy::too_many_lines)]
+pub(crate) fn dispatch_common_operation(
+    operation: ScriptOperation,
+    args: serde_json::Value,
+) -> Result<ScriptValue, ScriptError> {
+    match operation {
+        ScriptOperation::Status => Ok(ScriptValue::String(
+            runtime::get_status_inner().map_err(script_host_error("status"))?,
+        )),
+        ScriptOperation::Version => Ok(ScriptValue::String(
+            crate::get_version().map_err(script_host_error("version"))?,
+        )),
+        ScriptOperation::ValidateConfig => {
+            let config_toml = string_arg(&args, "config_toml")?;
+            Ok(ScriptValue::String(
+                runtime::validate_config_inner(config_toml)
+                    .map_err(script_host_error("validate_config"))?,
+            ))
+        }
+        ScriptOperation::RunningConfig => Ok(ScriptValue::String(
+            runtime::get_running_config_inner().map_err(script_host_error("config"))?,
+        )),
+        ScriptOperation::BindChannelIdentity => {
+            let channel = string_arg(&args, "channel")?;
+            let user_id = string_arg(&args, "user_id")?;
+            let field = runtime::bind_channel_identity_inner(channel.clone(), user_id.clone())
+                .map_err(script_host_error("bind"))?;
+            let message = if field == "already_bound" {
+                format!("{user_id} is already bound to {channel}")
+            } else {
+                format!("Bound {user_id} to {channel} ({field}). Restart daemon to apply.")
+            };
+            Ok(ScriptValue::String(message))
+        }
+        ScriptOperation::ChannelAllowlist => {
+            let channel = string_arg(&args, "channel")?;
+            let allowlist = runtime::get_channel_allowlist_inner(channel)
+                .map_err(script_host_error("allowlist"))?;
+            Ok(ScriptValue::String(to_json(&allowlist)?))
+        }
+        ScriptOperation::SwapProvider => {
+            let provider = string_arg(&args, "provider")?;
+            let model = string_arg(&args, "model")?;
+            runtime::swap_provider_inner(provider, model, None)
+                .map_err(script_host_error("swap_provider"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::HealthDetail => Ok(ScriptValue::String(to_json(
+            &health::get_health_detail_inner().map_err(script_host_error("health"))?,
+        )?)),
+        ScriptOperation::HealthComponent => {
+            let name = string_arg(&args, "name")?;
+            Ok(ScriptValue::String(to_json(
+                &health::get_component_health_inner(name),
+            )?))
+        }
+        ScriptOperation::DoctorChannels => {
+            let config_toml = args
+                .get("config_toml")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let data_dir = args
+                .get("data_dir")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            Ok(ScriptValue::String(
+                runtime::doctor_channels_inner(config_toml, data_dir)
+                    .map_err(script_host_error("doctor"))?,
+            ))
+        }
+        ScriptOperation::CostSummary => Ok(ScriptValue::String(to_json(
+            &cost::get_cost_summary_inner().map_err(script_host_error("cost"))?,
+        )?)),
+        ScriptOperation::DailyCost => Ok(ScriptValue::Float(
+            cost::get_daily_cost_inner(
+                i32_arg(&args, "year")?,
+                u32_arg(&args, "month")?,
+                u32_arg(&args, "day")?,
+            )
+            .map_err(script_host_error("cost_daily"))?,
+        )),
+        ScriptOperation::MonthlyCost => Ok(ScriptValue::Float(
+            cost::get_monthly_cost_inner(i32_arg(&args, "year")?, u32_arg(&args, "month")?)
+                .map_err(script_host_error("cost_monthly"))?,
+        )),
+        ScriptOperation::CheckBudget => Ok(ScriptValue::String(to_json(
+            &cost::check_budget_inner(float_arg(&args, "estimated")?)
+                .map_err(script_host_error("budget"))?,
+        )?)),
+        ScriptOperation::RecentEvents => Ok(ScriptValue::String(
+            events::get_recent_events_inner(u32_arg(&args, "limit")?)
+                .map_err(script_host_error("events"))?,
+        )),
+        ScriptOperation::ListCronJobs => Ok(ScriptValue::String(to_json(
+            &cron::list_cron_jobs_inner().map_err(script_host_error("cron_list"))?,
+        )?)),
+        ScriptOperation::GetCronJob => Ok(ScriptValue::String(to_json(
+            &cron::get_cron_job_inner(string_arg(&args, "id")?)
+                .map_err(script_host_error("cron_get"))?,
+        )?)),
+        ScriptOperation::AddCronJob => Ok(ScriptValue::String(to_json(
+            &cron::add_cron_job_inner(
+                string_arg(&args, "expression")?,
+                string_arg(&args, "command")?,
+            )
+            .map_err(script_host_error("cron_add"))?,
+        )?)),
+        ScriptOperation::AddOneShotJob => Ok(ScriptValue::String(to_json(
+            &cron::add_one_shot_job_inner(
+                string_arg(&args, "delay")?,
+                string_arg(&args, "command")?,
+            )
+            .map_err(script_host_error("cron_oneshot"))?,
+        )?)),
+        ScriptOperation::AddCronJobAt => Ok(ScriptValue::String(to_json(
+            &cron::add_cron_job_at_inner(
+                string_arg(&args, "timestamp")?,
+                string_arg(&args, "command")?,
+            )
+            .map_err(script_host_error("cron_add_at"))?,
+        )?)),
+        ScriptOperation::AddCronJobEvery => Ok(ScriptValue::String(to_json(
+            &cron::add_cron_job_every_inner(
+                u64_arg(&args, "every_ms")?,
+                string_arg(&args, "command")?,
+            )
+            .map_err(script_host_error("cron_add_every"))?,
+        )?)),
+        ScriptOperation::RemoveCronJob => {
+            cron::remove_cron_job_inner(string_arg(&args, "id")?)
+                .map_err(script_host_error("cron_remove"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::PauseCronJob => {
+            cron::pause_cron_job_inner(string_arg(&args, "id")?)
+                .map_err(script_host_error("cron_pause"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::ResumeCronJob => {
+            cron::resume_cron_job_inner(string_arg(&args, "id")?)
+                .map_err(script_host_error("cron_resume"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::ListSkills => Ok(ScriptValue::String(to_json(
+            &skills::list_skills_inner().map_err(script_host_error("skills"))?,
+        )?)),
+        ScriptOperation::GetSkillTools => Ok(ScriptValue::String(to_json(
+            &skills::get_skill_tools_inner(string_arg(&args, "name")?)
+                .map_err(script_host_error("skill_tools"))?,
+        )?)),
+        ScriptOperation::InstallSkill => {
+            skills::install_skill_inner(string_arg(&args, "source")?)
+                .map_err(script_host_error("skill_install"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::RemoveSkill => {
+            skills::remove_skill_inner(string_arg(&args, "name")?)
+                .map_err(script_host_error("skill_remove"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::ListTools => Ok(ScriptValue::String(to_json(
+            &tools_browse::list_tools_inner().map_err(script_host_error("tools"))?,
+        )?)),
+        ScriptOperation::ListMemories => Ok(ScriptValue::String(to_json(
+            &memory_browse::list_memories_inner(None, u32_arg(&args, "limit")?, None)
+                .map_err(script_host_error("memories"))?,
+        )?)),
+        ScriptOperation::ListMemoriesByCategory => Ok(ScriptValue::String(to_json(
+            &memory_browse::list_memories_inner(
+                Some(string_arg(&args, "category")?),
+                u32_arg(&args, "limit")?,
+                None,
+            )
+            .map_err(script_host_error("memories_by_category"))?,
+        )?)),
+        ScriptOperation::RecallMemory => Ok(ScriptValue::String(to_json(
+            &memory_browse::recall_memory_inner(
+                string_arg(&args, "query")?,
+                u32_arg(&args, "limit")?,
+                None,
+            )
+            .map_err(script_host_error("memory_recall"))?,
+        )?)),
+        ScriptOperation::ForgetMemory => Ok(ScriptValue::Bool(
+            memory_browse::forget_memory_inner(string_arg(&args, "key")?)
+                .map_err(script_host_error("memory_forget"))?,
+        )),
+        ScriptOperation::MemoryCount => Ok(ScriptValue::Int(i64::from(
+            memory_browse::memory_count_inner().map_err(script_host_error("memory_count"))?,
+        ))),
+        ScriptOperation::EngageEStop => {
+            crate::estop::engage_estop_inner().map_err(script_host_error("estop"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::GetEStopStatus => {
+            let status = crate::estop::get_estop_status_inner()
+                .map_err(script_host_error("estop_status"))?;
+            Ok(ScriptValue::String(
+                serde_json::to_string(&serde_json::json!({
+                    "engaged": status.engaged,
+                    "engaged_at_ms": status.engaged_at_ms,
+                }))
+                .map_err(json_error("estop_status"))?,
+            ))
+        }
+        ScriptOperation::ResumeEStop => {
+            crate::estop::resume_estop_inner().map_err(script_host_error("estop_resume"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::QueryTraces => Ok(ScriptValue::String(
+            crate::traces::query_traces_inner(None, None, u32_arg(&args, "limit")?)
+                .map_err(script_host_error("traces"))?,
+        )),
+        ScriptOperation::QueryTracesByFilter => Ok(ScriptValue::String(
+            crate::traces::query_traces_inner(
+                Some(string_arg(&args, "filter")?),
+                None,
+                u32_arg(&args, "limit")?,
+            )
+            .map_err(script_host_error("traces_filter"))?,
+        )),
+        ScriptOperation::ListAuthProfiles => Ok(ScriptValue::String(to_json(
+            &auth_profiles::list_auth_profiles_inner()
+                .map_err(script_host_error("auth_list"))?
+                .iter()
+                .map(|profile| {
+                    serde_json::json!({
+                        "id": profile.id,
+                        "provider": profile.provider,
+                        "kind": profile.kind,
+                        "active": profile.is_active,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )?)),
+        ScriptOperation::RemoveAuthProfile => {
+            auth_profiles::remove_auth_profile_inner(
+                string_arg(&args, "provider")?,
+                string_arg(&args, "profile_name")?,
+            )
+            .map_err(script_host_error("auth_remove"))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::DiscoverModels => Ok(ScriptValue::String(
+            models::discover_models_inner(string_arg(&args, "provider")?, String::new(), None)
+                .map_err(script_host_error("models"))?,
+        )),
+        ScriptOperation::DiscoverModelsWithKey => Ok(ScriptValue::String(
+            models::discover_models_inner(
+                string_arg(&args, "provider")?,
+                string_arg(&args, "api_key")?,
+                None,
+            )
+            .map_err(script_host_error("models_with_key"))?,
+        )),
+        ScriptOperation::DiscoverModelsWithKeyAndBaseUrl => Ok(ScriptValue::String(
+            models::discover_models_inner(
+                string_arg(&args, "provider")?,
+                string_arg(&args, "api_key")?,
+                optional_string_arg(&args, "base_url"),
+            )
+            .map_err(script_host_error("models_full"))?,
+        )),
+        ScriptOperation::InvokeTool => {
+            let name = string_arg(&args, "name")?;
+            let tool_args =
+                optional_string_arg(&args, "args").unwrap_or_else(|| "{}".to_string());
+            Ok(ScriptValue::String(
+                tools_browse::invoke_tool_inner(&name, &tool_args)
+                    .map_err(script_host_error("tool_call"))?,
+            ))
+        }
+        ScriptOperation::ReadStorage => {
+            let key = string_arg(&args, "key")?;
+            let script_name = optional_string_arg(&args, "script")
+                .unwrap_or_else(|| "anonymous".to_string());
+            match with_script_storage(|store| store.read(&script_name, &key))? {
+                Some(v) => Ok(ScriptValue::String(v)),
+                None => Ok(ScriptValue::Unit),
+            }
+        }
+        ScriptOperation::WriteStorage => {
+            let key = string_arg(&args, "key")?;
+            let value = string_arg(&args, "value")?;
+            if value.len() > 1_048_576 {
+                return Err(ScriptError::InvalidArgument {
+                    detail: "storage value exceeds 1 MiB limit".to_string(),
+                });
+            }
+            let script_name = optional_string_arg(&args, "script")
+                .unwrap_or_else(|| "anonymous".to_string());
+            with_script_storage(|store| store.write(&script_name, &key, &value))?;
+            Ok(ScriptValue::Unit)
+        }
+        ScriptOperation::DeleteStorage => {
+            let key = string_arg(&args, "key")?;
+            let script_name = optional_string_arg(&args, "script")
+                .unwrap_or_else(|| "anonymous".to_string());
+            let deleted = with_script_storage(|store| store.delete(&script_name, &key))?;
+            Ok(ScriptValue::Bool(deleted))
+        }
+        // SendMessage and SendVision are handled by each ScriptHost
+        // implementation directly, not through common dispatch.
+        ScriptOperation::SendMessage | ScriptOperation::SendVision => {
+            Err(ScriptError::HostError {
+                operation: operation.display_name().to_string(),
+                detail: "SendMessage/SendVision must be handled by the ScriptHost implementation"
+                    .to_string(),
+            })
+        }
+    }
+}
+
 struct FfiScriptHost;
 
 impl ScriptHost for FfiScriptHost {
-    #[allow(clippy::too_many_lines)]
     fn call(
         &self,
         operation: ScriptOperation,
@@ -339,12 +658,6 @@ impl ScriptHost for FfiScriptHost {
         require_dangerous_capability_approval(operation, &manifest_name)?;
 
         match operation {
-            ScriptOperation::Status => Ok(ScriptValue::String(
-                runtime::get_status_inner().map_err(script_host_error("status"))?,
-            )),
-            ScriptOperation::Version => Ok(ScriptValue::String(
-                crate::get_version().map_err(script_host_error("version"))?,
-            )),
             ScriptOperation::SendMessage => {
                 let message = string_arg(&args, "message")?;
                 Ok(ScriptValue::String(
@@ -360,298 +673,7 @@ impl ScriptHost for FfiScriptHost {
                         .map_err(script_host_error("send_vision"))?,
                 ))
             }
-            ScriptOperation::ValidateConfig => {
-                let config_toml = string_arg(&args, "config_toml")?;
-                Ok(ScriptValue::String(
-                    runtime::validate_config_inner(config_toml)
-                        .map_err(script_host_error("validate_config"))?,
-                ))
-            }
-            ScriptOperation::RunningConfig => Ok(ScriptValue::String(
-                runtime::get_running_config_inner().map_err(script_host_error("config"))?,
-            )),
-            ScriptOperation::BindChannelIdentity => {
-                let channel = string_arg(&args, "channel")?;
-                let user_id = string_arg(&args, "user_id")?;
-                let field = runtime::bind_channel_identity_inner(channel.clone(), user_id.clone())
-                    .map_err(script_host_error("bind"))?;
-                let message = if field == "already_bound" {
-                    format!("{user_id} is already bound to {channel}")
-                } else {
-                    format!("Bound {user_id} to {channel} ({field}). Restart daemon to apply.")
-                };
-                Ok(ScriptValue::String(message))
-            }
-            ScriptOperation::ChannelAllowlist => {
-                let channel = string_arg(&args, "channel")?;
-                let allowlist = runtime::get_channel_allowlist_inner(channel)
-                    .map_err(script_host_error("allowlist"))?;
-                Ok(ScriptValue::String(to_json(&allowlist)?))
-            }
-            ScriptOperation::SwapProvider => {
-                let provider = string_arg(&args, "provider")?;
-                let model = string_arg(&args, "model")?;
-                runtime::swap_provider_inner(provider, model, None)
-                    .map_err(script_host_error("swap_provider"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::HealthDetail => Ok(ScriptValue::String(to_json(
-                &health::get_health_detail_inner().map_err(script_host_error("health"))?,
-            )?)),
-            ScriptOperation::HealthComponent => {
-                let name = string_arg(&args, "name")?;
-                Ok(ScriptValue::String(to_json(
-                    &health::get_component_health_inner(name),
-                )?))
-            }
-            ScriptOperation::DoctorChannels => {
-                let config_toml = args
-                    .get("config_toml")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                let data_dir = args
-                    .get("data_dir")
-                    .and_then(serde_json::Value::as_str)
-                    .unwrap_or_default()
-                    .to_string();
-                Ok(ScriptValue::String(
-                    runtime::doctor_channels_inner(config_toml, data_dir)
-                        .map_err(script_host_error("doctor"))?,
-                ))
-            }
-            ScriptOperation::CostSummary => Ok(ScriptValue::String(to_json(
-                &cost::get_cost_summary_inner().map_err(script_host_error("cost"))?,
-            )?)),
-            ScriptOperation::DailyCost => Ok(ScriptValue::Float(
-                cost::get_daily_cost_inner(
-                    i32_arg(&args, "year")?,
-                    u32_arg(&args, "month")?,
-                    u32_arg(&args, "day")?,
-                )
-                .map_err(script_host_error("cost_daily"))?,
-            )),
-            ScriptOperation::MonthlyCost => Ok(ScriptValue::Float(
-                cost::get_monthly_cost_inner(i32_arg(&args, "year")?, u32_arg(&args, "month")?)
-                    .map_err(script_host_error("cost_monthly"))?,
-            )),
-            ScriptOperation::CheckBudget => Ok(ScriptValue::String(to_json(
-                &cost::check_budget_inner(float_arg(&args, "estimated")?)
-                    .map_err(script_host_error("budget"))?,
-            )?)),
-            ScriptOperation::RecentEvents => Ok(ScriptValue::String(
-                events::get_recent_events_inner(u32_arg(&args, "limit")?)
-                    .map_err(script_host_error("events"))?,
-            )),
-            ScriptOperation::ListCronJobs => Ok(ScriptValue::String(to_json(
-                &cron::list_cron_jobs_inner().map_err(script_host_error("cron_list"))?,
-            )?)),
-            ScriptOperation::GetCronJob => Ok(ScriptValue::String(to_json(
-                &cron::get_cron_job_inner(string_arg(&args, "id")?)
-                    .map_err(script_host_error("cron_get"))?,
-            )?)),
-            ScriptOperation::AddCronJob => Ok(ScriptValue::String(to_json(
-                &cron::add_cron_job_inner(
-                    string_arg(&args, "expression")?,
-                    string_arg(&args, "command")?,
-                )
-                .map_err(script_host_error("cron_add"))?,
-            )?)),
-            ScriptOperation::AddOneShotJob => Ok(ScriptValue::String(to_json(
-                &cron::add_one_shot_job_inner(
-                    string_arg(&args, "delay")?,
-                    string_arg(&args, "command")?,
-                )
-                .map_err(script_host_error("cron_oneshot"))?,
-            )?)),
-            ScriptOperation::AddCronJobAt => Ok(ScriptValue::String(to_json(
-                &cron::add_cron_job_at_inner(
-                    string_arg(&args, "timestamp")?,
-                    string_arg(&args, "command")?,
-                )
-                .map_err(script_host_error("cron_add_at"))?,
-            )?)),
-            ScriptOperation::AddCronJobEvery => Ok(ScriptValue::String(to_json(
-                &cron::add_cron_job_every_inner(
-                    u64_arg(&args, "every_ms")?,
-                    string_arg(&args, "command")?,
-                )
-                .map_err(script_host_error("cron_add_every"))?,
-            )?)),
-            ScriptOperation::RemoveCronJob => {
-                cron::remove_cron_job_inner(string_arg(&args, "id")?)
-                    .map_err(script_host_error("cron_remove"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::PauseCronJob => {
-                cron::pause_cron_job_inner(string_arg(&args, "id")?)
-                    .map_err(script_host_error("cron_pause"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::ResumeCronJob => {
-                cron::resume_cron_job_inner(string_arg(&args, "id")?)
-                    .map_err(script_host_error("cron_resume"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::ListSkills => Ok(ScriptValue::String(to_json(
-                &skills::list_skills_inner().map_err(script_host_error("skills"))?,
-            )?)),
-            ScriptOperation::GetSkillTools => Ok(ScriptValue::String(to_json(
-                &skills::get_skill_tools_inner(string_arg(&args, "name")?)
-                    .map_err(script_host_error("skill_tools"))?,
-            )?)),
-            ScriptOperation::InstallSkill => {
-                skills::install_skill_inner(string_arg(&args, "source")?)
-                    .map_err(script_host_error("skill_install"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::RemoveSkill => {
-                skills::remove_skill_inner(string_arg(&args, "name")?)
-                    .map_err(script_host_error("skill_remove"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::ListTools => Ok(ScriptValue::String(to_json(
-                &tools_browse::list_tools_inner().map_err(script_host_error("tools"))?,
-            )?)),
-            ScriptOperation::ListMemories => Ok(ScriptValue::String(to_json(
-                &memory_browse::list_memories_inner(None, u32_arg(&args, "limit")?, None)
-                    .map_err(script_host_error("memories"))?,
-            )?)),
-            ScriptOperation::ListMemoriesByCategory => Ok(ScriptValue::String(to_json(
-                &memory_browse::list_memories_inner(
-                    Some(string_arg(&args, "category")?),
-                    u32_arg(&args, "limit")?,
-                    None,
-                )
-                .map_err(script_host_error("memories_by_category"))?,
-            )?)),
-            ScriptOperation::RecallMemory => Ok(ScriptValue::String(to_json(
-                &memory_browse::recall_memory_inner(
-                    string_arg(&args, "query")?,
-                    u32_arg(&args, "limit")?,
-                    None,
-                )
-                .map_err(script_host_error("memory_recall"))?,
-            )?)),
-            ScriptOperation::ForgetMemory => Ok(ScriptValue::Bool(
-                memory_browse::forget_memory_inner(string_arg(&args, "key")?)
-                    .map_err(script_host_error("memory_forget"))?,
-            )),
-            ScriptOperation::MemoryCount => Ok(ScriptValue::Int(i64::from(
-                memory_browse::memory_count_inner().map_err(script_host_error("memory_count"))?,
-            ))),
-            ScriptOperation::EngageEStop => {
-                crate::estop::engage_estop_inner().map_err(script_host_error("estop"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::GetEStopStatus => {
-                let status = crate::estop::get_estop_status_inner()
-                    .map_err(script_host_error("estop_status"))?;
-                Ok(ScriptValue::String(
-                    serde_json::to_string(&serde_json::json!({
-                        "engaged": status.engaged,
-                        "engaged_at_ms": status.engaged_at_ms,
-                    }))
-                    .map_err(json_error("estop_status"))?,
-                ))
-            }
-            ScriptOperation::ResumeEStop => {
-                crate::estop::resume_estop_inner().map_err(script_host_error("estop_resume"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::QueryTraces => Ok(ScriptValue::String(
-                crate::traces::query_traces_inner(None, None, u32_arg(&args, "limit")?)
-                    .map_err(script_host_error("traces"))?,
-            )),
-            ScriptOperation::QueryTracesByFilter => Ok(ScriptValue::String(
-                crate::traces::query_traces_inner(
-                    Some(string_arg(&args, "filter")?),
-                    None,
-                    u32_arg(&args, "limit")?,
-                )
-                .map_err(script_host_error("traces_filter"))?,
-            )),
-            ScriptOperation::ListAuthProfiles => Ok(ScriptValue::String(to_json(
-                &auth_profiles::list_auth_profiles_inner()
-                    .map_err(script_host_error("auth_list"))?
-                    .iter()
-                    .map(|profile| {
-                        serde_json::json!({
-                            "id": profile.id,
-                            "provider": profile.provider,
-                            "kind": profile.kind,
-                            "active": profile.is_active,
-                        })
-                    })
-                    .collect::<Vec<_>>(),
-            )?)),
-            ScriptOperation::RemoveAuthProfile => {
-                auth_profiles::remove_auth_profile_inner(
-                    string_arg(&args, "provider")?,
-                    string_arg(&args, "profile_name")?,
-                )
-                .map_err(script_host_error("auth_remove"))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::DiscoverModels => Ok(ScriptValue::String(
-                models::discover_models_inner(string_arg(&args, "provider")?, String::new(), None)
-                    .map_err(script_host_error("models"))?,
-            )),
-            ScriptOperation::DiscoverModelsWithKey => Ok(ScriptValue::String(
-                models::discover_models_inner(
-                    string_arg(&args, "provider")?,
-                    string_arg(&args, "api_key")?,
-                    None,
-                )
-                .map_err(script_host_error("models_with_key"))?,
-            )),
-            ScriptOperation::DiscoverModelsWithKeyAndBaseUrl => Ok(ScriptValue::String(
-                models::discover_models_inner(
-                    string_arg(&args, "provider")?,
-                    string_arg(&args, "api_key")?,
-                    optional_string_arg(&args, "base_url"),
-                )
-                .map_err(script_host_error("models_full"))?,
-            )),
-            ScriptOperation::InvokeTool => {
-                let name = string_arg(&args, "name")?;
-                let tool_args = optional_string_arg(&args, "args")
-                    .unwrap_or_else(|| "{}".to_string());
-                Ok(ScriptValue::String(
-                    tools_browse::invoke_tool_inner(&name, &tool_args)
-                        .map_err(script_host_error("tool_call"))?,
-                ))
-            }
-            ScriptOperation::ReadStorage => {
-                let key = string_arg(&args, "key")?;
-                let script_name = optional_string_arg(&args, "script")
-                    .unwrap_or_else(|| "anonymous".to_string());
-                match with_script_storage(|store| store.read(&script_name, &key))? {
-                    Some(v) => Ok(ScriptValue::String(v)),
-                    None => Ok(ScriptValue::Unit),
-                }
-            }
-            ScriptOperation::WriteStorage => {
-                let key = string_arg(&args, "key")?;
-                let value = string_arg(&args, "value")?;
-                if value.len() > 1_048_576 {
-                    return Err(ScriptError::InvalidArgument {
-                        detail: "storage value exceeds 1 MiB limit".to_string(),
-                    });
-                }
-                let script_name = optional_string_arg(&args, "script")
-                    .unwrap_or_else(|| "anonymous".to_string());
-                with_script_storage(|store| store.write(&script_name, &key, &value))?;
-                Ok(ScriptValue::Unit)
-            }
-            ScriptOperation::DeleteStorage => {
-                let key = string_arg(&args, "key")?;
-                let script_name = optional_string_arg(&args, "script")
-                    .unwrap_or_else(|| "anonymous".to_string());
-                let deleted =
-                    with_script_storage(|store| store.delete(&script_name, &key))?;
-                Ok(ScriptValue::Bool(deleted))
-            }
+            other => dispatch_common_operation(other, args),
         }
     }
 }
@@ -719,21 +741,28 @@ fn workspace_script_to_ffi(manifest: zeroclaw::scripting::ScriptManifest) -> Ffi
     }
 }
 
-fn script_host_error(operation: &'static str) -> impl FnOnce(FfiError) -> ScriptError {
+/// Wraps an [`FfiError`] into a [`ScriptError::HostError`] with the given
+/// operation label.
+pub(crate) fn script_host_error(operation: &'static str) -> impl FnOnce(FfiError) -> ScriptError {
     move |error| ScriptError::HostError {
         operation: operation.to_string(),
         detail: error.to_string(),
     }
 }
 
-fn json_error(operation: &'static str) -> impl FnOnce(serde_json::Error) -> ScriptError {
+/// Wraps a [`serde_json::Error`] into a [`ScriptError::HostError`] with a
+/// serialization-failure message.
+pub(crate) fn json_error(
+    operation: &'static str,
+) -> impl FnOnce(serde_json::Error) -> ScriptError {
     move |error| ScriptError::HostError {
         operation: operation.to_string(),
         detail: format!("serialization failed: {error}"),
     }
 }
 
-fn map_script_error(error: ScriptError) -> FfiError {
+/// Converts a [`ScriptError`] into the appropriate [`FfiError`] variant.
+pub(crate) fn map_script_error(error: ScriptError) -> FfiError {
     let detail = error.to_string();
     match error {
         ScriptError::InvalidArgument { .. }
@@ -744,11 +773,13 @@ fn map_script_error(error: ScriptError) -> FfiError {
     }
 }
 
-fn to_json<T: serde::Serialize>(value: &T) -> Result<String, ScriptError> {
+/// Serializes a value to JSON, mapping failures to [`ScriptError`].
+pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> Result<String, ScriptError> {
     serde_json::to_string(value).map_err(json_error("json"))
 }
 
-fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, ScriptError> {
+/// Extracts a required string argument from a JSON value map.
+pub(crate) fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, ScriptError> {
     args.get(key)
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string)
@@ -757,7 +788,8 @@ fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, ScriptError
         })
 }
 
-fn optional_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
+/// Extracts an optional string argument, returning `None` when absent or empty.
+pub(crate) fn optional_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
     args.get(key)
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
@@ -765,7 +797,8 @@ fn optional_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-fn string_list_arg(args: &serde_json::Value, key: &str) -> Vec<String> {
+/// Extracts a list of strings from a JSON array argument.
+pub(crate) fn string_list_arg(args: &serde_json::Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -775,7 +808,8 @@ fn string_list_arg(args: &serde_json::Value, key: &str) -> Vec<String> {
         .collect()
 }
 
-fn int_arg(args: &serde_json::Value, key: &str) -> Result<i64, ScriptError> {
+/// Extracts a required `i64` argument from a JSON value map.
+pub(crate) fn int_arg(args: &serde_json::Value, key: &str) -> Result<i64, ScriptError> {
     args.get(key)
         .and_then(serde_json::Value::as_i64)
         .ok_or_else(|| ScriptError::InvalidArgument {
@@ -783,25 +817,29 @@ fn int_arg(args: &serde_json::Value, key: &str) -> Result<i64, ScriptError> {
         })
 }
 
-fn i32_arg(args: &serde_json::Value, key: &str) -> Result<i32, ScriptError> {
+/// Extracts a required `i32` argument from a JSON value map.
+pub(crate) fn i32_arg(args: &serde_json::Value, key: &str) -> Result<i32, ScriptError> {
     i32::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
         detail: format!("integer argument out of range for i32: {key}"),
     })
 }
 
-fn u32_arg(args: &serde_json::Value, key: &str) -> Result<u32, ScriptError> {
+/// Extracts a required non-negative `u32` argument from a JSON value map.
+pub(crate) fn u32_arg(args: &serde_json::Value, key: &str) -> Result<u32, ScriptError> {
     u32::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
         detail: format!("integer argument must be a non-negative u32: {key}"),
     })
 }
 
-fn u64_arg(args: &serde_json::Value, key: &str) -> Result<u64, ScriptError> {
+/// Extracts a required non-negative `u64` argument from a JSON value map.
+pub(crate) fn u64_arg(args: &serde_json::Value, key: &str) -> Result<u64, ScriptError> {
     u64::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
         detail: format!("integer argument must be a non-negative u64: {key}"),
     })
 }
 
-fn float_arg(args: &serde_json::Value, key: &str) -> Result<f64, ScriptError> {
+/// Extracts a required `f64` argument from a JSON value map.
+pub(crate) fn float_arg(args: &serde_json::Value, key: &str) -> Result<f64, ScriptError> {
     args.get(key)
         .and_then(serde_json::Value::as_f64)
         .ok_or_else(|| ScriptError::InvalidArgument {

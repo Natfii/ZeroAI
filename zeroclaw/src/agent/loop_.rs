@@ -2502,6 +2502,15 @@ pub async fn run(
             "Query connected hardware for reported GPIO pins and LED pin. Use when: user asks what pins are available.",
         ));
     }
+    tool_descs.push((
+        "eval_script",
+        "Execute a Rhai script in a sandboxed environment. Use for batch data \
+         processing, multi-step computations, JSON manipulation, and composing \
+         multiple operations (memory, storage, tools) into a single call. Has \
+         access to: memory read/write, storage read/write, tool listing/invocation, \
+         cost/event reading, and on-device LLM (when available). 10M operation \
+         budget, 30s timeout. Returns JSON. Prefer this over shell for non-OS tasks.",
+    ));
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
     } else {
@@ -2886,6 +2895,10 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
             "Query connected hardware for reported GPIO pins and LED pin. Use when user asks what pins are available.",
         ));
     }
+    tool_descs.push((
+        "eval_script",
+        "Execute sandboxed Rhai scripts for batch computation and multi-tool operations.",
+    ));
     let bootstrap_max_chars = if config.agent.compact_context {
         Some(6000)
     } else {

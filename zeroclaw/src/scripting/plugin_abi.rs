@@ -117,6 +117,7 @@ impl PluginHost for ScriptHostPluginAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scripting::ScriptValue;
 
     struct MockHost;
 

@@ -14,6 +14,7 @@
 
 uniffi::setup_scaffolding!();
 
+mod agent_script_host;
 mod auth_profiles;
 mod capability_grants;
 mod cost;
@@ -22,6 +23,7 @@ mod cron;
 mod discord;
 mod error;
 mod estop;
+mod eval_script_tool;
 mod events;
 mod ffi_health;
 mod gateway_client;
@@ -716,6 +718,33 @@ pub fn get_gateway_port() -> Result<u16, FfiError> {
             detail: panic_detail(&e),
         })
     })
+}
+
+/// Update on-device Gemini Nano availability.
+///
+/// Called from Kotlin after ML Kit `checkModelStatus()` at daemon startup
+/// and on config changes. Default is `false` (Nano unavailable).
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn set_nano_available(available: bool) -> Result<(), FfiError> {
+    std::panic::catch_unwind(|| {
+        crate::runtime::set_nano_available_inner(available);
+        Ok(())
+    })
+    .unwrap_or_else(|_| {
+        Err(FfiError::InternalPanic {
+            detail: "set_nano_available panicked".into(),
+        })
+    })
+}
+
+/// Check if on-device Gemini Nano is available for agent scripting.
+#[uniffi::export]
+pub fn is_nano_available() -> bool {
+    std::panic::catch_unwind(crate::runtime::is_nano_available_inner).unwrap_or(false)
 }
 
 /// Generate a bearer token for WebView authentication.

@@ -8,12 +8,26 @@ use crate::error::FfiError;
 use chrono::Utc;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once, OnceLock};
 use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use zeroclaw::Config;
 use zeroclaw::PairingGuard;
+
+/// On-device Gemini Nano availability, set from Kotlin.
+static NANO_AVAILABLE: AtomicBool = AtomicBool::new(false);
+
+/// Set on-device Nano availability from Kotlin after ML Kit status check.
+pub(crate) fn set_nano_available_inner(available: bool) {
+    NANO_AVAILABLE.store(available, Ordering::Release);
+}
+
+/// Query on-device Nano availability for agent eval_script.
+pub(crate) fn is_nano_available_inner() -> bool {
+    NANO_AVAILABLE.load(Ordering::Acquire)
+}
 
 /// Tokio runtime, recreated on each daemon lifecycle.
 ///
@@ -372,8 +386,17 @@ pub(crate) fn start_daemon_inner(
         "Shared folder config check"
     );
     if config.shared_folder.enabled {
-        tracing::info!("Registering shared folder tool factory");
-        zeroclaw::tools::set_global_extra_tools(crate::shared_folder::create_shared_folder_tools);
+        tracing::info!("Registering shared folder + eval_script tool factory");
+        zeroclaw::tools::set_global_extra_tools_factory(Box::new(|| {
+            let mut tools = crate::shared_folder::create_shared_folder_tools();
+            tools.push(Box::new(crate::eval_script_tool::EvalScriptTool::new()));
+            tools
+        }));
+    } else {
+        tracing::info!("Registering eval_script tool factory");
+        zeroclaw::tools::set_global_extra_tools_factory(Box::new(|| {
+            vec![Box::new(crate::eval_script_tool::EvalScriptTool::new())]
+        }));
     }
 
     std::fs::create_dir_all(&config.workspace_dir).map_err(|e| FfiError::ConfigError {

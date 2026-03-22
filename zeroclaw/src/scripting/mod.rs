@@ -92,6 +92,19 @@ impl Default for ScriptLimits {
     }
 }
 
+impl ScriptLimits {
+    /// Limits for agent eval_script: 10M operations (100x default) to
+    /// support batch data processing. All other limits match default.
+    /// The 30s wall-clock timeout is enforced separately via
+    /// `engine.on_progress()`, not by this struct.
+    pub fn for_agent_eval() -> Self {
+        Self {
+            max_operations: 10_000_000,
+            ..Self::default()
+        }
+    }
+}
+
 /// Trigger metadata for packaged scripts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ScriptTrigger {
@@ -264,7 +277,7 @@ pub enum ScriptOperation {
 }
 
 impl ScriptOperation {
-    fn display_name(self) -> &'static str {
+    pub fn display_name(self) -> &'static str {
         match self {
             Self::Status => "status",
             Self::Version => "version",
@@ -1246,6 +1259,31 @@ fn default_script_capabilities() -> Vec<ScriptCapability> {
             scope: Some("<path-scope>".to_string()),
         },
     ]
+}
+
+/// Build the fixed capability set for agent eval_script invocations.
+///
+/// Grants a safe subset of capabilities: storage, memory, tools, cost,
+/// events, config validation. Conditionally adds `model.chat` when
+/// on-device Gemini Nano is available (never `model.read`).
+///
+/// See spec: `docs/superpowers/specs/2026-03-21-eval-script-agent-tool-design.md`
+pub fn build_agent_capabilities(nano_available: bool) -> Vec<String> {
+    let mut caps = vec![
+        "storage.read".to_string(),
+        "storage.write".to_string(),  // also covers storage_delete operations
+        "memory.read".to_string(),
+        "memory.write".to_string(),
+        "tools.read".to_string(),
+        "tools.call".to_string(),
+        "cost.read".to_string(),
+        "events.read".to_string(),
+        "config.validate".to_string(),
+    ];
+    if nano_available {
+        caps.push("model.chat".to_string());
+    }
+    caps
 }
 
 fn validation_available_capability_names() -> Vec<String> {
@@ -3207,5 +3245,43 @@ path = "scripts/triage.rhai"
     #[test]
     fn is_safe_url_allows_public() {
         assert!(is_safe_url("https://api.openai.com/v1/models").is_ok());
+    }
+
+    #[test]
+    fn agent_eval_limits_have_higher_operations() {
+        let agent = ScriptLimits::for_agent_eval();
+        let default = ScriptLimits::default();
+        assert_eq!(agent.max_operations, 10_000_000);
+        assert_eq!(agent.max_call_levels, default.max_call_levels);
+        assert_eq!(agent.max_expr_depth, default.max_expr_depth);
+        assert_eq!(agent.max_string_size, default.max_string_size);
+        assert_eq!(agent.max_array_size, default.max_array_size);
+        assert_eq!(agent.max_map_size, default.max_map_size);
+        assert_eq!(agent.max_script_bytes, default.max_script_bytes);
+    }
+
+    #[test]
+    fn agent_capabilities_without_nano() {
+        let caps = build_agent_capabilities(false);
+        assert!(caps.contains(&"storage.read".to_string()));
+        assert!(caps.contains(&"storage.write".to_string()));
+        assert!(caps.contains(&"memory.read".to_string()));
+        assert!(caps.contains(&"memory.write".to_string()));
+        assert!(caps.contains(&"tools.read".to_string()));
+        assert!(caps.contains(&"tools.call".to_string()));
+        assert!(caps.contains(&"cost.read".to_string()));
+        assert!(caps.contains(&"events.read".to_string()));
+        assert!(caps.contains(&"config.validate".to_string()));
+        assert!(!caps.contains(&"model.chat".to_string()));
+        assert!(!caps.contains(&"model.read".to_string()));
+        assert!(!caps.contains(&"auth.read".to_string()));
+        assert!(!caps.contains(&"trace.read".to_string()));
+    }
+
+    #[test]
+    fn agent_capabilities_with_nano() {
+        let caps = build_agent_capabilities(true);
+        assert!(caps.contains(&"model.chat".to_string()));
+        assert!(!caps.contains(&"model.read".to_string()));
     }
 }

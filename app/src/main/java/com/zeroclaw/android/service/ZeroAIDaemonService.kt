@@ -48,6 +48,7 @@ import com.zeroclaw.ffi.listPersistedSessions
 import com.zeroclaw.ffi.registerSharedFolderHandler
 import com.zeroclaw.ffi.restoreSessionState
 import com.zeroclaw.ffi.saveSessionState
+import com.zeroclaw.ffi.setNanoAvailable
 import com.zeroclaw.ffi.unregisterSharedFolderHandler
 import com.zeroclaw.ffi.validateConfig
 import kotlinx.coroutines.CoroutineDispatcher
@@ -1474,14 +1475,17 @@ class ZeroAIDaemonService : Service() {
                 val nanoBridge = OnDeviceInferenceBridge()
                 if (nanoBridge.checkModelStatus() is com.zeroclaw.android.model.OnDeviceStatus.Available) {
                     nanoBridge.warmup()
+                    setNanoAvailable(true)
                     NanoClassifier(nanoBridge)
                 } else {
+                    setNanoAvailable(false)
                     null
                 }
             } catch (
                 @Suppress("TooGenericExceptionCaught") e: Exception,
             ) {
                 Log.w(TAG, "Nano model unavailable: ${e.message}")
+                setNanoAvailable(false)
                 null
             }
 
