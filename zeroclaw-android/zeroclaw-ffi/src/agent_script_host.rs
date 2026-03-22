@@ -58,14 +58,11 @@ impl ScriptHost for AgentScriptHost {
                     });
                 }
                 let message = crate::repl::string_arg(&args, "message")?;
-                let result = crate::runtime::send_message_routed_inner(
-                    message,
-                    "nano".to_string(),
-                )
-                .map_err(|e| ScriptError::HostError {
-                    operation: operation.display_name().to_string(),
-                    detail: e.to_string(),
-                })?;
+                let result = crate::runtime::send_message_routed_inner(message, "nano".to_string())
+                    .map_err(|e| ScriptError::HostError {
+                        operation: operation.display_name().to_string(),
+                        detail: e.to_string(),
+                    })?;
                 Ok(ScriptValue::String(result))
             }
             ScriptOperation::SendVision => {

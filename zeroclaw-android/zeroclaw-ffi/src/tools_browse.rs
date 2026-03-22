@@ -434,9 +434,11 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
         })?;
 
     let rt = script_tool_runtime()?;
-    let result = rt.block_on(tool.execute(args)).map_err(|e| FfiError::StateError {
-        detail: format!("tool execution failed: {e}"),
-    })?;
+    let result = rt
+        .block_on(tool.execute(args))
+        .map_err(|e| FfiError::StateError {
+            detail: format!("tool execution failed: {e}"),
+        })?;
 
     if result.success {
         Ok(result.output)

@@ -17,11 +17,11 @@ use crate::{
     auth_profiles, capability_grants, cost, cron, events, health, memory_browse, models, runtime,
     skills, tools_browse, vision,
 };
+use zeroclaw::scripting::storage::ScriptStorage;
 use zeroclaw::scripting::{
     RhaiScriptRuntime, ScriptError, ScriptHost, ScriptManifest, ScriptOperation, ScriptRuntimeKind,
     ScriptValue,
 };
-use zeroclaw::scripting::storage::ScriptStorage;
 
 static KNOWN_CAPABILITIES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
@@ -52,12 +52,7 @@ static KNOWN_CAPABILITIES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     ])
 });
 
-const DANGEROUS_CAPABILITIES: &[&str] = &[
-    "tools.call",
-    "cron.write",
-    "auth.write",
-    "auth.read",
-];
+const DANGEROUS_CAPABILITIES: &[&str] = &["tools.call", "cron.write", "auth.write", "auth.read"];
 
 fn validate_capabilities(caps: &[String]) -> Result<(), ScriptError> {
     for cap in caps {
@@ -206,10 +201,11 @@ fn require_dangerous_capability_approval(
                 .join("workflows")
                 .join(manifest_name)
                 .with_extension("rhai");
-            zeroclaw::scripting::content_hash::hash_file(&script_path)
-                .unwrap_or_default()
+            zeroclaw::scripting::content_hash::hash_file(&script_path).unwrap_or_default()
         };
-        if let Err(e) = capability_grants::save_grant(&ws_dir, manifest_name, capability, triggered_via, &hash) {
+        if let Err(e) =
+            capability_grants::save_grant(&ws_dir, manifest_name, capability, triggered_via, &hash)
+        {
             tracing::warn!(
                 skill = %manifest_name,
                 capability = %capability,
@@ -580,8 +576,7 @@ pub(crate) fn dispatch_common_operation(
         )),
         ScriptOperation::InvokeTool => {
             let name = string_arg(&args, "name")?;
-            let tool_args =
-                optional_string_arg(&args, "args").unwrap_or_else(|| "{}".to_string());
+            let tool_args = optional_string_arg(&args, "args").unwrap_or_else(|| "{}".to_string());
             Ok(ScriptValue::String(
                 tools_browse::invoke_tool_inner(&name, &tool_args)
                     .map_err(script_host_error("tool_call"))?,
@@ -589,8 +584,8 @@ pub(crate) fn dispatch_common_operation(
         }
         ScriptOperation::ReadStorage => {
             let key = string_arg(&args, "key")?;
-            let script_name = optional_string_arg(&args, "script")
-                .unwrap_or_else(|| "anonymous".to_string());
+            let script_name =
+                optional_string_arg(&args, "script").unwrap_or_else(|| "anonymous".to_string());
             match with_script_storage(|store| store.read(&script_name, &key))? {
                 Some(v) => Ok(ScriptValue::String(v)),
                 None => Ok(ScriptValue::Unit),
@@ -604,27 +599,25 @@ pub(crate) fn dispatch_common_operation(
                     detail: "storage value exceeds 1 MiB limit".to_string(),
                 });
             }
-            let script_name = optional_string_arg(&args, "script")
-                .unwrap_or_else(|| "anonymous".to_string());
+            let script_name =
+                optional_string_arg(&args, "script").unwrap_or_else(|| "anonymous".to_string());
             with_script_storage(|store| store.write(&script_name, &key, &value))?;
             Ok(ScriptValue::Unit)
         }
         ScriptOperation::DeleteStorage => {
             let key = string_arg(&args, "key")?;
-            let script_name = optional_string_arg(&args, "script")
-                .unwrap_or_else(|| "anonymous".to_string());
+            let script_name =
+                optional_string_arg(&args, "script").unwrap_or_else(|| "anonymous".to_string());
             let deleted = with_script_storage(|store| store.delete(&script_name, &key))?;
             Ok(ScriptValue::Bool(deleted))
         }
         // SendMessage and SendVision are handled by each ScriptHost
         // implementation directly, not through common dispatch.
-        ScriptOperation::SendMessage | ScriptOperation::SendVision => {
-            Err(ScriptError::HostError {
-                operation: operation.display_name().to_string(),
-                detail: "SendMessage/SendVision must be handled by the ScriptHost implementation"
-                    .to_string(),
-            })
-        }
+        ScriptOperation::SendMessage | ScriptOperation::SendVision => Err(ScriptError::HostError {
+            operation: operation.display_name().to_string(),
+            detail: "SendMessage/SendVision must be handled by the ScriptHost implementation"
+                .to_string(),
+        }),
     }
 }
 
@@ -752,9 +745,7 @@ pub(crate) fn script_host_error(operation: &'static str) -> impl FnOnce(FfiError
 
 /// Wraps a [`serde_json::Error`] into a [`ScriptError::HostError`] with a
 /// serialization-failure message.
-pub(crate) fn json_error(
-    operation: &'static str,
-) -> impl FnOnce(serde_json::Error) -> ScriptError {
+pub(crate) fn json_error(operation: &'static str) -> impl FnOnce(serde_json::Error) -> ScriptError {
     move |error| ScriptError::HostError {
         operation: operation.to_string(),
         detail: format!("serialization failed: {error}"),
@@ -977,12 +968,15 @@ pub(crate) fn register_script_triggers_inner() -> Result<u32, FfiError> {
     let cron_triggers = zeroclaw::scripting::triggers::collect_cron_triggers(&scripts);
 
     let config = crate::runtime::clone_daemon_config()?;
-    let existing = zeroclaw::cron::list_jobs(&config)
-        .map_err(|e| FfiError::StateError { detail: e.to_string() })?;
+    let existing = zeroclaw::cron::list_jobs(&config).map_err(|e| FfiError::StateError {
+        detail: e.to_string(),
+    })?;
 
     let mut registered = 0u32;
     for resolved in &cron_triggers {
-        let Some(schedule_expr) = resolved.trigger.schedule.as_deref() else { continue };
+        let Some(schedule_expr) = resolved.trigger.schedule.as_deref() else {
+            continue;
+        };
         let script_path = match resolved.manifest.script_path.as_ref() {
             Some(p) => p.to_string_lossy().to_string(),
             None => continue,

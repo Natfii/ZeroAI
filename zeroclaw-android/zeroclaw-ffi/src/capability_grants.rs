@@ -9,8 +9,8 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -139,9 +139,7 @@ pub(crate) fn is_grant_valid_for_hash(
         .grants
         .get(skill_name)
         .and_then(|m| m.get(capability))
-        .is_some_and(|entry| {
-            !entry.content_hash.is_empty() && entry.content_hash == current_hash
-        })
+        .is_some_and(|entry| !entry.content_hash.is_empty() && entry.content_hash == current_hash)
 }
 
 /// Atomically persists a capability grant for `skill_name`/`capability`.
@@ -171,10 +169,9 @@ pub(crate) fn save_grant(
                 content_hash: content_hash.to_string(),
             },
         );
-    let json = serde_json::to_string_pretty(&grants)
-        .map_err(|e| FfiError::StateError {
-            detail: e.to_string(),
-        })?;
+    let json = serde_json::to_string_pretty(&grants).map_err(|e| FfiError::StateError {
+        detail: e.to_string(),
+    })?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, &json).map_err(|e| FfiError::StateError {
         detail: e.to_string(),
@@ -219,11 +216,9 @@ pub(crate) fn request_capability_approval(
 
 /// Returns all currently pending capability approval requests.
 pub(crate) fn get_pending_approvals_inner() -> Result<Vec<PendingApprovalInfo>, FfiError> {
-    let map = PENDING_APPROVALS
-        .lock()
-        .map_err(|e| FfiError::StateError {
-            detail: e.to_string(),
-        })?;
+    let map = PENDING_APPROVALS.lock().map_err(|e| FfiError::StateError {
+        detail: e.to_string(),
+    })?;
     Ok(map
         .iter()
         .map(|(id, entry)| PendingApprovalInfo {
@@ -241,14 +236,14 @@ pub(crate) fn resolve_capability_request_inner(
     request_id: String,
     approved: bool,
 ) -> Result<(), FfiError> {
-    let mut map = PENDING_APPROVALS
-        .lock()
-        .map_err(|e| FfiError::StateError {
-            detail: e.to_string(),
-        })?;
-    let mut entry = map.remove(&request_id).ok_or_else(|| FfiError::InvalidArgument {
-        detail: format!("no pending approval with id '{request_id}'"),
+    let mut map = PENDING_APPROVALS.lock().map_err(|e| FfiError::StateError {
+        detail: e.to_string(),
     })?;
+    let mut entry = map
+        .remove(&request_id)
+        .ok_or_else(|| FfiError::InvalidArgument {
+            detail: format!("no pending approval with id '{request_id}'"),
+        })?;
     if let Some(tx) = entry.reply_tx.take() {
         let _ = tx.send(approved);
     }
@@ -293,10 +288,9 @@ pub(crate) fn revoke_capability_grant_inner(
             grants.grants.remove(skill_name);
         }
     }
-    let json = serde_json::to_string_pretty(&grants)
-        .map_err(|e| FfiError::StateError {
-            detail: e.to_string(),
-        })?;
+    let json = serde_json::to_string_pretty(&grants).map_err(|e| FfiError::StateError {
+        detail: e.to_string(),
+    })?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, &json).map_err(|e| FfiError::StateError {
         detail: e.to_string(),

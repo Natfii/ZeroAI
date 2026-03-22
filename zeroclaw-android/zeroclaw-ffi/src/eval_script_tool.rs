@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
 use zeroclaw::scripting::{
-    build_agent_capabilities, RhaiScriptRuntime, ScriptError, ScriptHost, ScriptLimits,
-    ScriptManifest, ScriptRuntimeKind,
+    RhaiScriptRuntime, ScriptError, ScriptHost, ScriptLimits, ScriptManifest, ScriptRuntimeKind,
+    build_agent_capabilities,
 };
 use zeroclaw::tools::traits::{Tool, ToolResult};
 
@@ -32,6 +32,7 @@ impl EvalScriptTool {
 }
 
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl Tool for EvalScriptTool {
     fn name(&self) -> &str {
         "eval_script"
@@ -102,7 +103,11 @@ impl Tool for EvalScriptTool {
             nano_available = nano_available,
             "[eval_script] Nano available: {} — model.chat {}",
             nano_available,
-            if nano_available { "granted" } else { "withheld" }
+            if nano_available {
+                "granted"
+            } else {
+                "withheld"
+            }
         );
         tracing::debug!(
             code_bytes = code.len(),
@@ -125,8 +130,9 @@ impl Tool for EvalScriptTool {
         let start = std::time::Instant::now();
 
         // Build AgentScriptHost fresh each invocation (Nano flag may change).
-        let host: Arc<dyn ScriptHost> =
-            Arc::new(crate::agent_script_host::AgentScriptHost::new(nano_available));
+        let host: Arc<dyn ScriptHost> = Arc::new(crate::agent_script_host::AgentScriptHost::new(
+            nano_available,
+        ));
         let engine = RhaiScriptRuntime::with_limits(host, manifest.limits.clone());
 
         // SAFETY (threading): Rhai host functions (dispatch_common_operation,
@@ -139,11 +145,10 @@ impl Tool for EvalScriptTool {
         // RhaiScriptRuntime::eval_script() is synchronous. Calling block_on
         // from a tokio worker panics — spawn_blocking avoids this.
         let source_owned = code.to_string();
-        let result = tokio::task::spawn_blocking(move || {
-            engine.eval_script(&source_owned, Some(manifest))
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("eval_script task panicked: {e}"))?;
+        let result =
+            tokio::task::spawn_blocking(move || engine.eval_script(&source_owned, Some(manifest)))
+                .await
+                .map_err(|e| anyhow::anyhow!("eval_script task panicked: {e}"))?;
 
         let duration_ms = start.elapsed().as_millis();
 

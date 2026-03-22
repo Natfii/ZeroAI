@@ -3189,8 +3189,7 @@ pub fn peer_send_channel_response(
 /// Returns [`FfiError::StateError`] if the internal lock is poisoned, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
-pub fn get_pending_approvals(
-) -> Result<Vec<capability_grants::PendingApprovalInfo>, FfiError> {
+pub fn get_pending_approvals() -> Result<Vec<capability_grants::PendingApprovalInfo>, FfiError> {
     catch_unwind(capability_grants::get_pending_approvals_inner).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
@@ -3210,10 +3209,7 @@ pub fn get_pending_approvals(
 /// [`FfiError::StateError`] if the internal lock is poisoned, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
-pub fn resolve_capability_request(
-    request_id: String,
-    approved: bool,
-) -> Result<(), FfiError> {
+pub fn resolve_capability_request(request_id: String, approved: bool) -> Result<(), FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         capability_grants::resolve_capability_request_inner(request_id, approved)
     }))
