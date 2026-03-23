@@ -53,9 +53,15 @@ node_modules/
 # MCP config (local)
 .mcp.json
 
-# Design documents (local only — docs/guides/ is tracked)
+# Design documents (local only — docs/guides/ and docs/research/ are tracked)
 docs/*
 !docs/guides/
+!docs/research/
+docs/research/*
+!docs/research/google-messages-bugle-protocol.md
+
+# Upstream engine docs (absorbed, local reference only)
+zeroclaw/docs/
 
 # Hook scripts (local machine paths)
 scripts/hooks/

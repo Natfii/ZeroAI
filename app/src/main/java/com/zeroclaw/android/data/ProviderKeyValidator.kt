@@ -30,11 +30,13 @@ object ProviderKeyValidator {
     /**
      * Validates that [key] matches the expected format for [providerInfo].
      *
-     * Returns a human-readable warning hint if the key does not start with
-     * the provider's expected prefix. Returns null if the key is valid,
-     * blank, or if the provider has no expected prefix.
+     * Checks the key prefix first, then enforces a minimum length when
+     * [ProviderInfo.minKeyLength] is non-zero. Returns null if the key is
+     * blank or passes all checks. Error messages never include any portion
+     * of the entered key.
      *
-     * @param providerInfo Provider metadata containing the expected [ProviderInfo.keyPrefix].
+     * @param providerInfo Provider metadata containing the expected [ProviderInfo.keyPrefix]
+     *   and [ProviderInfo.minKeyLength].
      * @param key The API key value entered by the user.
      * @return Warning hint string, or null if no issue detected.
      */
@@ -42,10 +44,14 @@ object ProviderKeyValidator {
         providerInfo: ProviderInfo,
         key: String,
     ): String? {
-        if (providerInfo.keyPrefix.isEmpty()) return null
         if (key.isBlank()) return null
-        if (key.startsWith(providerInfo.keyPrefix)) return null
-        return providerInfo.keyPrefixHint
+        if (providerInfo.keyPrefix.isNotEmpty() && !key.startsWith(providerInfo.keyPrefix)) {
+            return providerInfo.keyPrefixHint
+        }
+        if (providerInfo.minKeyLength > 0 && key.length < providerInfo.minKeyLength) {
+            return "Key appears too short (expected at least ${providerInfo.minKeyLength} characters)"
+        }
+        return null
     }
 
     /**

@@ -68,6 +68,41 @@ fn factory_grok_alias_resolves_to_xai() {
     assert_provider_ok("grok", Some("test-key"), None);
 }
 
+#[test]
+fn factory_resolves_deepseek_provider() {
+    assert_provider_ok("deepseek", Some("test-key"), None);
+}
+
+#[test]
+fn factory_resolves_qwen_provider() {
+    assert_provider_ok("qwen", Some("test-key"), None);
+}
+
+#[test]
+fn factory_qwen_cn_alias_resolves() {
+    assert_provider_ok("qwen-cn", Some("test-key"), None);
+}
+
+#[test]
+fn factory_qwen_us_alias_resolves() {
+    assert_provider_ok("qwen-us", Some("test-key"), None);
+}
+
+#[test]
+fn factory_dashscope_alias_resolves_to_qwen() {
+    assert_provider_ok("dashscope", Some("test-key"), None);
+}
+
+#[test]
+fn factory_dashscope_cn_alias_resolves() {
+    assert_provider_ok("dashscope-cn", Some("test-key"), None);
+}
+
+#[test]
+fn factory_dashscope_us_alias_resolves() {
+    assert_provider_ok("dashscope-us", Some("test-key"), None);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom URL provider creation
 // ─────────────────────────────────────────────────────────────────────────────

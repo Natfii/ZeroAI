@@ -3529,6 +3529,10 @@ impl Config {
             "openai" => "openai/gpt-4.1",
             "gemini" => "gemini/gemini-2.5-flash",
             "xai" | "grok" => "xai/grok-4",
+            "deepseek" => "deepseek/deepseek-chat",
+            "qwen" | "qwen-cn" | "qwen-us" | "dashscope" | "dashscope-cn" | "dashscope-us" => {
+                "qwen/qwen3.5-plus"
+            }
             _ => "anthropic/claude-sonnet-4-20250514",
         }
     }

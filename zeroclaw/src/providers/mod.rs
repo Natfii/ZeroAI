@@ -15,6 +15,9 @@ pub mod gemini;
 pub mod ollama;
 pub mod openai;
 pub mod xai;
+pub mod deepseek;
+pub mod qwen;
+pub mod openai_compat;
 pub mod traits;
 
 #[allow(unused_imports)]
@@ -188,6 +191,10 @@ fn resolve_provider_credential(name: &str, credential_override: Option<&str>) ->
         "gemini" | "google" | "google-gemini" => vec!["GEMINI_API_KEY", "GOOGLE_API_KEY"],
         "openrouter" => vec!["OPENROUTER_API_KEY"],
         "xai" | "grok" => vec!["XAI_API_KEY"],
+        "deepseek" => vec!["DEEPSEEK_API_KEY"],
+        "qwen" | "qwen-cn" | "qwen-us" | "dashscope" | "dashscope-cn" | "dashscope-us" => {
+            vec!["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
+        }
         _ => vec![],
     };
 
@@ -327,6 +334,22 @@ pub(crate) fn create_provider_with_url_and_options(
             xai::XaiProvider::new(key).with_custom_headers(headers),
         )),
 
+        "deepseek" => Ok(Box::new(
+            deepseek::DeepSeekProvider::new(key).with_custom_headers(headers),
+        )),
+        "qwen" | "dashscope" => Ok(Box::new(
+            qwen::QwenProvider::new(qwen::QwenRegion::International, key)
+                .with_custom_headers(headers),
+        )),
+        "qwen-cn" | "dashscope-cn" => Ok(Box::new(
+            qwen::QwenProvider::new(qwen::QwenRegion::China, key)
+                .with_custom_headers(headers),
+        )),
+        "qwen-us" | "dashscope-us" => Ok(Box::new(
+            qwen::QwenProvider::new(qwen::QwenRegion::Us, key)
+                .with_custom_headers(headers),
+        )),
+
         name if name.starts_with("custom:") => {
             let base_url = parse_custom_provider_url(
                 name.strip_prefix("custom:").unwrap_or(""),
@@ -352,7 +375,7 @@ pub(crate) fn create_provider_with_url_and_options(
         }
 
         _ => anyhow::bail!(
-            "Unknown provider: {name}. Supported: openai, anthropic, gemini, ollama, openrouter, xai.\n\
+            "Unknown provider: {name}. Supported: openai, anthropic, gemini, ollama, openrouter, xai, deepseek, qwen.\n\
              Tip: Use \"custom:https://your-api.com\" for OpenAI-compatible endpoints.\n\
              Tip: Use \"anthropic-custom:https://your-api.com\" for Anthropic-compatible endpoints."
         ),
@@ -466,6 +489,18 @@ pub fn list_providers() -> Vec<ProviderInfo> {
             aliases: &[],
             local: true,
         },
+        ProviderInfo {
+            name: "deepseek",
+            display_name: "DeepSeek",
+            aliases: &[],
+            local: false,
+        },
+        ProviderInfo {
+            name: "qwen",
+            display_name: "Qwen (Alibaba)",
+            aliases: &["dashscope", "qwen-cn", "qwen-us", "dashscope-cn", "dashscope-us"],
+            local: false,
+        },
     ]
 }
 
@@ -486,15 +521,17 @@ mod tests {
     }
 
     #[test]
-    fn list_providers_returns_six_entries() {
+    fn list_providers_returns_eight_entries() {
         let providers = list_providers();
-        assert_eq!(providers.len(), 6);
+        assert_eq!(providers.len(), 8);
         assert!(providers.iter().any(|p| p.name == "anthropic"));
         assert!(providers.iter().any(|p| p.name == "openai"));
         assert!(providers.iter().any(|p| p.name == "gemini"));
         assert!(providers.iter().any(|p| p.name == "openrouter"));
         assert!(providers.iter().any(|p| p.name == "ollama"));
         assert!(providers.iter().any(|p| p.name == "xai"));
+        assert!(providers.iter().any(|p| p.name == "deepseek"));
+        assert!(providers.iter().any(|p| p.name == "qwen"));
     }
 
     #[test]
@@ -511,6 +548,13 @@ mod tests {
         let result = scrub_secret_patterns(input);
         assert!(!result.contains("xai-abc123xyz456"));
         assert!(result.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_secret_patterns_redacts_deepseek_sk_key() {
+        let input = "Error: invalid key sk-d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6";
+        let result = scrub_secret_patterns(input);
+        assert!(!result.contains("sk-d1e2f3"));
     }
 
     #[test]

@@ -354,6 +354,7 @@ private fun ProviderStepCollector(coordinator: OnboardingCoordinator) {
         onBaseUrlChanged = coordinator::setBaseUrl,
         onModelChanged = coordinator::setModel,
         onValidate = coordinator::validateProvider,
+        onProviderVariantChanged = coordinator::setProviderVariant,
         isOAuthInProgress = state.isOAuthInProgress,
         oauthEmail = state.oauthEmail,
         onOAuthLogin = { coordinator.startOAuthLogin(context) },

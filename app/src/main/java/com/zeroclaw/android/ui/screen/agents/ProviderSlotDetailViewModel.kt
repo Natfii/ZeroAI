@@ -55,6 +55,9 @@ private const val MODEL_FETCH_DEBOUNCE_MS = 500L
  * @property isLoadingModels Whether a model fetch is currently running.
  * @property isOAuthInProgress Whether an OAuth/session login flow is running.
  * @property oauthDisplayLabel Display label for a connected OAuth/session login.
+ * @property providerVariantId Regional variant ID for providers with multiple endpoint regions
+ *   (e.g., `"qwen-cn"` for Qwen China). Blank when no variant is selected, in which case
+ *   [effectiveProviderId] falls back to [ProviderSlot.providerRegistryId].
  */
 data class ProviderSlotDetailState(
     val slot: ProviderSlot,
@@ -71,7 +74,16 @@ data class ProviderSlotDetailState(
     val isLoadingModels: Boolean,
     val isOAuthInProgress: Boolean,
     val oauthDisplayLabel: String,
-)
+    val providerVariantId: String = "",
+) {
+    /**
+     * Effective provider ID to use for config generation and credential validation.
+     *
+     * Returns [providerVariantId] when set (e.g., `"qwen-cn"`), otherwise falls back to
+     * [ProviderSlot.providerRegistryId] (e.g., `"qwen"`).
+     */
+    val effectiveProviderId: String get() = providerVariantId.ifBlank { slot.providerRegistryId }
+}
 
 /** UI state for the provider-slot detail screen. */
 sealed interface ProviderSlotDetailUiState {
@@ -195,7 +207,7 @@ class ProviderSlotDetailViewModel(
                     id = detail.slot.slotId,
                     slotId = detail.slot.slotId,
                     name = detail.slot.displayName,
-                    provider = detail.slot.providerRegistryId,
+                    provider = detail.effectiveProviderId,
                     modelName = modelName.trim(),
                     isEnabled = isEnabled,
                 ),
@@ -299,6 +311,24 @@ class ProviderSlotDetailViewModel(
         }
     }
 
+    /**
+     * Updates the regional provider variant without resetting credentials or model.
+     *
+     * Only relevant for providers with multiple endpoint regions (e.g., Qwen).
+     * Resets the validation result and reschedules model fetching with the new variant.
+     *
+     * @param variantId Regional provider variant ID (e.g., `"qwen-cn"`, `"qwen-us"`).
+     */
+    fun setProviderVariant(variantId: String) {
+        updateContent {
+            copy(
+                providerVariantId = variantId,
+                validationResult = ValidationResult.Idle,
+            )
+        }
+        scheduleFetchModels()
+    }
+
     /** Updates the editable API key and schedules model reloading when relevant. */
     fun setApiKey(value: String) {
         updateContent {
@@ -336,7 +366,7 @@ class ProviderSlotDetailViewModel(
             updateContent { copy(validationResult = ValidationResult.Loading) }
             val result =
                 ProviderValidator.validate(
-                    providerId = detail.slot.providerRegistryId,
+                    providerId = detail.effectiveProviderId,
                     apiKey = detail.apiKeyInput,
                     baseUrl = detail.baseUrlInput,
                 )
@@ -431,6 +461,8 @@ class ProviderSlotDetailViewModel(
                         else -> "Not configured"
                     }
             }
+        val persistedVariant =
+            agent.provider.takeIf { it != slot.providerRegistryId }.orEmpty()
         return ProviderSlotDetailState(
             slot = slot,
             agent = agent,
@@ -446,6 +478,7 @@ class ProviderSlotDetailViewModel(
             isLoadingModels = false,
             isOAuthInProgress = false,
             oauthDisplayLabel = authProfile?.accountId?.takeIf { it.isNotBlank() } ?: oauthFallbackLabel(slot),
+            providerVariantId = persistedVariant,
         )
     }
 

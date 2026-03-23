@@ -85,6 +85,7 @@ enum class ModelListFormat {
  * @property keyCreationUrl URL to the provider's API key creation page, opened in the system browser.
  * @property keyPrefix Expected prefix for client-side key format validation (e.g. "sk-").
  * @property keyPrefixHint Human-readable hint shown when the key does not match [keyPrefix].
+ * @property minKeyLength Minimum expected key length for client-side validation. 0 means no length check.
  * @property helpText Provider-specific onboarding note displayed below the provider dropdown.
  * @property oauthClientId OAuth client ID for providers supporting OAuth login, empty otherwise.
  * @property internal When true, the provider is excluded from user-facing dropdowns but
@@ -105,6 +106,8 @@ data class ProviderInfo(
     val keyCreationUrl: String = "",
     val keyPrefix: String = "",
     val keyPrefixHint: String = "",
+    /** Minimum expected API key length. 0 means no length validation. */
+    val minKeyLength: Int = 0,
     val helpText: String = "",
     val oauthClientId: String = "",
     val internal: Boolean = false,

@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.zeroclaw.android.data.ProviderRegistry
 import com.zeroclaw.android.data.ProviderSlot
 import com.zeroclaw.android.data.ProviderSlotRegistry
 import com.zeroclaw.android.data.validation.ValidationResult
@@ -90,7 +91,8 @@ private val OnboardingSlots: List<ProviderSlot> = ProviderSlotRegistry.allRoutin
  * provider catalog on phones.
  *
  * @param selectedSlotId Currently selected fixed slot ID.
- * @param selectedProvider Currently selected provider registry ID.
+ * @param selectedProvider Currently selected provider registry ID (may include
+ *   regional variants such as `"qwen-cn"` or `"qwen-us"`).
  * @param apiKey Current API key input value.
  * @param baseUrl Current base URL input value.
  * @param selectedModel Current model name input value.
@@ -102,6 +104,8 @@ private val OnboardingSlots: List<ProviderSlot> = ProviderSlotRegistry.allRoutin
  * @param onBaseUrlChanged Callback when base URL text changes.
  * @param onModelChanged Callback when model text changes.
  * @param onValidate Callback to trigger credential validation.
+ * @param onProviderVariantChanged Callback invoked when the user selects a regional
+ *   provider variant (e.g., Qwen region picker). Receives the variant ID such as `"qwen-cn"`.
  * @param isOAuthInProgress Whether an OAuth login flow is currently running.
  * @param oauthEmail Display email or label for the connected OAuth session,
  *   or empty string when not connected.
@@ -128,6 +132,7 @@ fun ProviderStep(
     onBaseUrlChanged: (String) -> Unit,
     onModelChanged: (String) -> Unit,
     onValidate: () -> Unit = {},
+    onProviderVariantChanged: (String) -> Unit = {},
     isOAuthInProgress: Boolean = false,
     oauthEmail: String = "",
     onOAuthLogin: (() -> Unit)? = null,
@@ -144,9 +149,11 @@ fun ProviderStep(
                 ?: selectedProvider
                     .takeIf { it.isNotBlank() }
                     ?.let { providerId ->
+                        val canonicalId =
+                            ProviderRegistry.findById(providerId)?.id ?: providerId
                         ProviderSlotRegistry
                             .resolveSlotId(
-                                providerRegistryId = providerId,
+                                providerRegistryId = canonicalId,
                                 isOAuth = oauthEmail.isNotBlank(),
                             )?.let(ProviderSlotRegistry::findById)
                             ?.takeIf { slot -> slot.routesModelRequests }
@@ -189,6 +196,7 @@ fun ProviderStep(
         } else {
             SelectedProviderSection(
                 slot = selectedSlot,
+                selectedProvider = selectedProvider,
                 apiKey = apiKey,
                 baseUrl = baseUrl,
                 selectedModel = selectedModel,
@@ -199,6 +207,7 @@ fun ProviderStep(
                 onBaseUrlChanged = onBaseUrlChanged,
                 onModelChanged = onModelChanged,
                 onValidate = onValidate,
+                onProviderVariantChanged = onProviderVariantChanged,
                 isOAuthInProgress = isOAuthInProgress,
                 oauthEmail = oauthEmail,
                 onOAuthLogin = onOAuthLogin,
@@ -271,6 +280,7 @@ private fun ProviderPicker(
  * Selected-provider stage that keeps the chosen card visible above the form.
  *
  * @param slot Selected provider slot.
+ * @param selectedProvider Effective provider ID (may include regional variant such as `"qwen-cn"`).
  * @param apiKey Current API key input value.
  * @param baseUrl Current base URL input value.
  * @param selectedModel Current model name input value.
@@ -281,6 +291,7 @@ private fun ProviderPicker(
  * @param onBaseUrlChanged Callback when base URL text changes.
  * @param onModelChanged Callback when model text changes.
  * @param onValidate Callback to trigger credential validation.
+ * @param onProviderVariantChanged Callback invoked when the user picks a regional variant.
  * @param isOAuthInProgress Whether an OAuth login flow is currently running.
  * @param oauthEmail Display email or label for the connected OAuth session.
  * @param onOAuthLogin Callback to initiate the OAuth login flow.
@@ -291,6 +302,7 @@ private fun ProviderPicker(
 @Suppress("LongParameterList")
 private fun SelectedProviderSection(
     slot: ProviderSlot,
+    selectedProvider: String,
     apiKey: String,
     baseUrl: String,
     selectedModel: String,
@@ -301,6 +313,7 @@ private fun SelectedProviderSection(
     onBaseUrlChanged: (String) -> Unit,
     onModelChanged: (String) -> Unit,
     onValidate: () -> Unit,
+    onProviderVariantChanged: (String) -> Unit,
     isOAuthInProgress: Boolean,
     oauthEmail: String,
     onOAuthLogin: (() -> Unit)?,
@@ -349,6 +362,8 @@ private fun SelectedProviderSection(
         onOAuthLogin = onOAuthLogin,
         onOAuthDisconnect = onOAuthDisconnect,
         showSkipHint = true,
+        selectedProviderVariant = selectedProvider,
+        onProviderVariantChanged = onProviderVariantChanged,
         modifier = Modifier.fillMaxWidth(),
     )
 }

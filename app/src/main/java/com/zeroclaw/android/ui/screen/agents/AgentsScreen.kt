@@ -251,5 +251,7 @@ private fun agentSlotProviderIconId(slot: AgentSlotItem): String =
         "ollama" -> "ollama"
         "xai-api" -> "xai"
         "openrouter-api" -> "openrouter"
+        "deepseek-api" -> "deepseek"
+        "qwen-api" -> "qwen"
         else -> slot.providerName
     }

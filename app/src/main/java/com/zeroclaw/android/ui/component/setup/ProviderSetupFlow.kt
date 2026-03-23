@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,6 +29,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -101,6 +103,35 @@ private const val ANTHROPIC_OAUTH_RISK =
 
 /** Stroke width for the OAuth progress indicator. */
 private val OAuthProgressStroke = 2.dp
+
+/** Set of provider IDs that identify any Qwen regional variant. */
+private val QWEN_PROVIDER_IDS = setOf("qwen", "qwen-cn", "qwen-us")
+
+/**
+ * DashScope regional endpoint selection for Qwen.
+ *
+ * Each entry maps to a distinct provider ID written to the daemon TOML config.
+ * The [disclosure] field is shown as a small warning when the user picks a
+ * region with notable data-routing implications.
+ *
+ * @property providerId Provider ID written to the daemon TOML config.
+ * @property displayName Human-readable region label.
+ * @property disclosure Optional data-residency disclosure shown below the label.
+ */
+enum class QwenRegion(
+    val providerId: String,
+    val displayName: String,
+    val disclosure: String = "",
+) {
+    /** International DashScope endpoint (default). */
+    INTERNATIONAL("qwen", "International"),
+
+    /** China mainland DashScope endpoint. */
+    CHINA("qwen-cn", "China", "Traffic and credentials route through Alibaba Cloud (China)."),
+
+    /** US-region DashScope endpoint. */
+    US("qwen-us", "US"),
+}
 
 /** Internal padding for the OAuth connected chip. */
 private val ChipPadding = 12.dp
@@ -190,12 +221,19 @@ fun ProviderSetupFlow(
     oauthButtonLabelOverride: String? = null,
     showModelPicker: Boolean = true,
 ) {
-    val providerInfo = ProviderRegistry.findById(selectedProvider)
+    val isQwenProvider = selectedProvider in QWEN_PROVIDER_IDS
+    val selectedQwenRegion =
+        remember(selectedProvider) {
+            QwenRegion.entries.firstOrNull { it.providerId == selectedProvider }
+                ?: QwenRegion.INTERNATIONAL
+        }
+    val effectiveProvider = if (isQwenProvider) selectedQwenRegion.providerId else selectedProvider
+    val providerInfo = ProviderRegistry.findById(effectiveProvider)
     val suggestedModels = providerInfo?.suggestedModels.orEmpty()
-    val consoleTarget = ExternalAppLauncher.providerConsoleTarget(selectedProvider)
+    val consoleTarget = ExternalAppLauncher.providerConsoleTarget(effectiveProvider)
     val isOAuthConnected = oauthEmail.isNotEmpty()
     val validateEnabled =
-        selectedProvider.isNotBlank() &&
+        effectiveProvider.isNotBlank() &&
             (apiKey.isNotBlank() || baseUrl.isNotBlank())
 
     val columnModifier =
@@ -221,7 +259,7 @@ fun ProviderSetupFlow(
         modifier = columnModifier,
     ) {
         ProviderCredentialForm(
-            selectedProviderId = selectedProvider,
+            selectedProviderId = effectiveProvider,
             apiKey = apiKey,
             baseUrl = baseUrl,
             onProviderChanged = onProviderChanged,
@@ -233,6 +271,15 @@ fun ProviderSetupFlow(
             credentialTypeOverride = credentialTypeOverride,
             modifier = Modifier.fillMaxWidth(),
         )
+
+        if (isQwenProvider) {
+            Spacer(modifier = Modifier.height(FieldSpacing))
+            QwenRegionPicker(
+                selectedRegion = selectedQwenRegion,
+                onRegionSelected = { region -> onProviderChanged(region.providerId) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         if (showOAuthSection) {
             val isAnthropic = selectedProvider == "anthropic"
@@ -364,7 +411,7 @@ fun ProviderSetupFlow(
 
         Spacer(modifier = Modifier.height(FieldSpacing))
 
-        if (showModelPicker && selectedProvider.isNotBlank()) {
+        if (showModelPicker && effectiveProvider.isNotBlank()) {
             ModelSuggestionField(
                 value = selectedModel,
                 onValueChanged = onModelChanged,
@@ -525,6 +572,61 @@ private fun OAuthConnectedChip(
             }
             TextButton(onClick = onDisconnect) {
                 Text("Disconnect")
+            }
+        }
+    }
+}
+
+/**
+ * Radio-group picker for Qwen's three regional DashScope endpoints.
+ *
+ * Displayed below the API key field whenever the selected provider is any
+ * Qwen variant (`"qwen"`, `"qwen-cn"`, `"qwen-us"`). Each option maps to a
+ * distinct [QwenRegion.providerId] that is written to the daemon TOML config.
+ * The China entry shows a [QwenRegion.disclosure] warning explaining that
+ * traffic and credentials route through Alibaba Cloud's Chinese infrastructure.
+ *
+ * @param selectedRegion Currently selected [QwenRegion].
+ * @param onRegionSelected Callback invoked when the user picks a different region.
+ * @param modifier Modifier applied to the root [Column].
+ */
+@Composable
+private fun QwenRegionPicker(
+    selectedRegion: QwenRegion,
+    onRegionSelected: (QwenRegion) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        Text(
+            text = "Region",
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        QwenRegion.entries.forEach { region ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = selectedRegion == region,
+                            onClick = { onRegionSelected(region) },
+                        ).padding(vertical = 4.dp),
+            ) {
+                RadioButton(
+                    selected = selectedRegion == region,
+                    onClick = { onRegionSelected(region) },
+                )
+                Column(modifier = Modifier.padding(start = 8.dp)) {
+                    Text(text = region.displayName)
+                    if (region.disclosure.isNotEmpty()) {
+                        Text(
+                            text = region.disclosure,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
     }
@@ -764,6 +866,46 @@ private fun PreviewAnthropicOAuthConnected() {
                 onOAuthLogin = {},
                 onOAuthDisconnect = {},
                 showSkipHint = true,
+            )
+        }
+    }
+}
+
+@Preview(name = "Provider Setup - Qwen International")
+@Composable
+private fun PreviewQwenInternational() {
+    ZeroAITheme {
+        Surface {
+            ProviderSetupFlow(
+                selectedProvider = "qwen",
+                apiKey = "sk-testqwenkey1234567890",
+                baseUrl = "",
+                selectedModel = "qwen3.5-plus",
+                onProviderChanged = {},
+                onApiKeyChanged = {},
+                onBaseUrlChanged = {},
+                onModelChanged = {},
+                showSkipHint = true,
+            )
+        }
+    }
+}
+
+@Preview(name = "Provider Setup - Qwen China")
+@Composable
+private fun PreviewQwenChina() {
+    ZeroAITheme {
+        Surface {
+            ProviderSetupFlow(
+                selectedProvider = "qwen-cn",
+                apiKey = "sk-testqwenkey1234567890",
+                baseUrl = "",
+                selectedModel = "qwen3.5-plus",
+                onProviderChanged = {},
+                onApiKeyChanged = {},
+                onBaseUrlChanged = {},
+                onModelChanged = {},
+                showSkipHint = false,
             )
         }
     }

@@ -1443,6 +1443,24 @@ object ConfigTomlBuilder {
             return "custom:$trimmedUrl"
         }
 
+        val chinaSensitiveProviders =
+            setOf(
+                "deepseek",
+                "qwen",
+                "qwen-cn",
+                "qwen-us",
+                "dashscope",
+                "dashscope-cn",
+                "dashscope-us",
+            )
+        require(
+            provider !in chinaSensitiveProviders ||
+                trimmedUrl.isEmpty() ||
+                trimmedUrl.startsWith("https://"),
+        ) {
+            "Base URL for $provider must use HTTPS to protect API credentials"
+        }
+
         return provider
     }
 

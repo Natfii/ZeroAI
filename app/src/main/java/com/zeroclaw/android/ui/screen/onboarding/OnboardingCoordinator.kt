@@ -400,6 +400,23 @@ class OnboardingCoordinator(
     }
 
     /**
+     * Updates the provider ID to a regional variant without resetting the API key or model.
+     *
+     * Used when the user changes a sub-selection within the same provider family
+     * (e.g., switching Qwen from International to China). Only updates [ProviderStepState.providerId]
+     * and resets the validation result; the API key, model, and slot ID are unchanged.
+     *
+     * @param variantId Regional provider variant ID (e.g., `"qwen-cn"`, `"qwen-us"`).
+     */
+    fun setProviderVariant(variantId: String) {
+        _providerState.value =
+            _providerState.value.copy(
+                providerId = variantId,
+                validationResult = ValidationResult.Idle,
+            )
+    }
+
+    /**
      * Updates the API key value and triggers a debounced model fetch.
      *
      * @param key The API key string.

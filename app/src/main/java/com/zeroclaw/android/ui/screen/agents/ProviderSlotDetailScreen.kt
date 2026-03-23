@@ -114,6 +114,7 @@ fun ProviderSlotDetailScreen(
                         onConnect = { viewModel.connect(context) },
                         onReasoningEffortChanged = viewModel::updateReasoningEffort,
                         onDisconnect = viewModel::disconnect,
+                        onProviderVariantChanged = viewModel::setProviderVariant,
                     )
             }
         }
@@ -132,6 +133,8 @@ fun ProviderSlotDetailScreen(
  * @param onConnect Callback to launch OAuth connection.
  * @param onReasoningEffortChanged Callback to update the global reasoning-effort override.
  * @param onDisconnect Callback to disconnect OAuth state.
+ * @param onProviderVariantChanged Callback invoked when the user selects a regional variant
+ *   (e.g., Qwen region picker). Receives the variant ID such as `"qwen-cn"`.
  */
 @Composable
 private fun ProviderSlotDetailContent(
@@ -144,6 +147,7 @@ private fun ProviderSlotDetailContent(
     onConnect: () -> Unit,
     onReasoningEffortChanged: (String) -> Unit,
     onDisconnect: () -> Unit,
+    onProviderVariantChanged: (String) -> Unit = {},
 ) {
     var isEnabled by remember(state.agent.id, state.agent.isEnabled) {
         mutableStateOf(state.agent.isEnabled)
@@ -213,6 +217,8 @@ private fun ProviderSlotDetailContent(
                     onOAuthLogin = onConnect,
                     onOAuthDisconnect = onDisconnect,
                     showSkipHint = false,
+                    selectedProviderVariant = state.providerVariantId,
+                    onProviderVariantChanged = onProviderVariantChanged,
                 )
                 if (state.slot.providerRegistryId == OPENAI_PROVIDER_ID && state.slot.routesModelRequests) {
                     ReasoningEffortDropdown(

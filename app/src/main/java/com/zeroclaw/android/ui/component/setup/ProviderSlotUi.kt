@@ -142,8 +142,13 @@ fun ProviderSlotSelectionCard(
  * @param onOAuthDisconnect Callback to disconnect the OAuth/session login.
  * @param showSkipHint Whether to show the onboarding skip hint.
  * @param modifier Modifier applied to the root layout.
+ * @param selectedProviderVariant Effective provider ID when regional variants apply
+ *   (e.g., `"qwen-cn"`). Defaults to [ProviderSlot.providerRegistryId] when blank.
+ * @param onProviderVariantChanged Callback invoked when the user selects a regional
+ *   provider variant (e.g., Qwen region picker). Ignored by default.
  */
 @Composable
+@Suppress("LongParameterList")
 fun ProviderSlotSetupSection(
     slot: ProviderSlot,
     apiKey: String,
@@ -162,7 +167,12 @@ fun ProviderSlotSetupSection(
     onOAuthDisconnect: (() -> Unit)?,
     showSkipHint: Boolean,
     modifier: Modifier = Modifier,
+    selectedProviderVariant: String = "",
+    onProviderVariantChanged: (String) -> Unit = {},
 ) {
+    val effectiveProviderId =
+        selectedProviderVariant.ifBlank { slot.providerRegistryId }
+
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -177,13 +187,13 @@ fun ProviderSlotSetupSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         ProviderSetupFlow(
-            selectedProvider = slot.providerRegistryId,
+            selectedProvider = effectiveProviderId,
             apiKey = apiKey,
             baseUrl = baseUrl,
             selectedModel = selectedModel,
             availableModels = availableModels,
             validationResult = validationResult,
-            onProviderChanged = {},
+            onProviderChanged = onProviderVariantChanged,
             onApiKeyChanged = onApiKeyChanged,
             onBaseUrlChanged = onBaseUrlChanged,
             onModelChanged = onModelChanged,
@@ -223,6 +233,8 @@ fun providerSlotCardDescription(slot: ProviderSlot): String =
         "anthropic-api" -> "Use a direct Anthropic API key."
         "claude-code" ->
             "Connect your Claude account. Live daemon routing still uses the Anthropic API slot today."
+        "qwen-api" ->
+            "Use a DashScope API key for Qwen models. Choose International, China, or US routing."
         "ollama" -> "Point Zero at your local Ollama server and choose a model."
         else -> slot.displayName
     }
@@ -236,6 +248,9 @@ fun providerSlotSetupDescription(slot: ProviderSlot): String =
         "claude-code" ->
             "Claude login is stored separately from Anthropic API keys. " +
                 "Use the Anthropic API slot for live daemon routing today."
+        "qwen-api" ->
+            "Enter your DashScope API key and pick the regional endpoint. " +
+                "International is the default; China routes traffic through Alibaba Cloud (China)."
         else ->
             when (slot.credentialType) {
                 SlotCredentialType.API_KEY ->

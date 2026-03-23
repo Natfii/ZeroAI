@@ -288,6 +288,10 @@ fn default_base_url(provider: &str) -> String {
         "deepseek" => "https://api.deepseek.com".into(),
         "together" => "https://api.together.xyz".into(),
         "xai" | "grok" => "https://api.x.ai".into(),
+        "qwen" | "dashscope" | "qwen-us" | "dashscope-us" => {
+            "https://dashscope-intl.aliyuncs.com/compatible-mode".into()
+        }
+        "qwen-cn" | "dashscope-cn" => "https://dashscope.aliyuncs.com/compatible-mode".into(),
         _ => "https://api.openai.com".into(),
     }
 }
