@@ -15,7 +15,7 @@
 
 <p align="center">
     <img alt="UniFFI" src="https://img.shields.io/badge/bridge-UniFFI-blueviolet"/>
-    <img alt="Providers" src="https://img.shields.io/badge/providers-OpenAI%20%7C%20Anthropic%20%7C%20Gemini%20%7C%20xAI%20%7C%20Ollama%20%7C%20OpenRouter-blue"/>
+    <img alt="Providers" src="https://img.shields.io/badge/providers-OpenAI%20%7C%20Anthropic%20%7C%20Gemini%20%7C%20xAI%20%7C%20DeepSeek%20%7C%20Qwen%20%7C%20Ollama%20%7C%20OpenRouter-blue"/>
     <img alt="Channels" src="https://img.shields.io/badge/channels-Telegram%20%7C%20Discord%20%7C%20Email%20%7C%20Messages%20%7C%20CLI-blue"/>
   </p>
 
@@ -78,6 +78,8 @@ Zero is designed to be private by default, configurable, and capable of running 
 - Anthropic
 - Google Gemini
 - xAI (Grok)
+- DeepSeek
+- Qwen (Alibaba DashScope) — International, China, and US regional endpoints
 - Ollama
 - OpenRouter
 
