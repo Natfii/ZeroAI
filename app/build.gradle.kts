@@ -198,9 +198,6 @@ dokka {
         suppressInheritedMembers.set(true)
     }
     dokkaSourceSets.configureEach {
-        sourceLink {
-            localDirectory.set(projectDir.resolve("src"))
-        }
         perPackageOption {
             matchingRegex.set(".*\\.generated\\..*")
             suppress.set(true)
