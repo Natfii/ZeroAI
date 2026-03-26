@@ -121,6 +121,45 @@ Together, these systems make the in-app Zero more than a front-end character - t
   <img src="assets/mini-zero-idle.svg" alt="Zero idle" width="40" />
 </p>
 
+## Usage
+
+### Terminal & REPL
+
+The **Terminal** tab is your in-app command center. Type messages to talk to your Zero, or use slash commands:
+
+- `/help` — list available commands
+- `/nano <prompt>` — on-device Gemini Nano inference
+- `/cost` — current session cost summary
+- `@tty` — switch to the full TTY terminal mode
+
+### SSH from your phone
+
+Once in TTY mode (`@tty`), connect to any SSH server:
+
+```
+/ssh user@hostname
+/ssh user@hostname -p 2222
+```
+
+Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.
+
+Manage SSH keys in **Settings > SSH Keys** (generate Ed25519/RSA, import from file, copy public key).
+
+### Channels
+
+Connect your Zero to external channels so it can respond on your behalf:
+
+- **Telegram** — link a bot token, Zero replies in your Telegram chats
+- **Discord** — link a bot token, Zero joins your Discord servers
+- **Email** — IMAP/SMTP, Zero reads and drafts email responses
+- **Google Messages** — experimental Bugle protocol bridge
+
+Configure channels in **Hub > Apps**.
+
+### ClawBoy
+
+A Game Boy emulator that your Zero plays autonomously. Start a game by chatting "play pokemon" in the Terminal, Telegram, or Discord. Watch the AI make decisions in real-time through the Hub viewer.
+
 ## Architecture
 
 Zero is split into a few major parts:
