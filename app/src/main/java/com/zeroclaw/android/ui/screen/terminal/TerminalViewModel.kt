@@ -76,6 +76,7 @@ import com.zeroclaw.ffi.ttyResize
 import com.zeroclaw.ffi.ttyStartSsh
 import com.zeroclaw.ffi.ttySubmitKey
 import com.zeroclaw.ffi.ttySubmitPassword
+import com.zeroclaw.ffi.ttyWaitForRenderSignal
 import com.zeroclaw.ffi.ttyWrite
 import com.zeroclaw.ffi.validateScript
 import com.zeroclaw.ffi.validateWorkspaceScript
@@ -245,8 +246,9 @@ class TerminalViewModel(
     /**
      * Lines of ANSI-stripped output from the active PTY session.
      *
-     * Populated by a polling coroutine that calls [ttyGetOutputSnapshot]
-     * at [TTY_POLL_INTERVAL_MS] intervals while TTY mode is active.
+     * Populated by an event-driven coroutine that calls [ttyGetOutputSnapshot]
+     * after [ttyWaitForRenderSignal] signals new data, with a [TTY_RENDER_WAIT_TIMEOUT_MS]
+     * heartbeat interval while TTY mode is active.
      */
     private val _ttyOutputLines = MutableStateFlow<List<String>>(emptyList())
 
@@ -755,8 +757,12 @@ class TerminalViewModel(
     }
 
     /**
-     * Starts the coroutine that polls [ttyGetOutputSnapshot] at regular
-     * intervals and updates [_ttyOutputLines].
+     * Starts the coroutine that waits for render-signal notifications from the PTY read loop
+     * and updates [_ttyOutputLines] and [_ttyRenderFrame] when new data arrives.
+     *
+     * Uses [ttyWaitForRenderSignal] which blocks on [Dispatchers.IO] until the Rust PTY read
+     * loop signals new data via a Condvar, or until [TTY_RENDER_WAIT_TIMEOUT_MS] elapses.
+     * This replaces the previous fixed-interval polling approach with an event-driven model.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun startTtyPolling() {
@@ -764,29 +770,50 @@ class TerminalViewModel(
         ttyPollJob =
             viewModelScope.launch(Dispatchers.IO) {
                 while (true) {
-                    val textLines =
-                        try {
-                            val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
-                            _ttyOutputLines.value = lines
-                            lines
-                        } catch (e: Exception) {
-                            _ttyOutputLines.value
-                        }
-                    val nextFrame =
-                        try {
-                            val frame = ttyGetRenderFrame()
-                            if (frame.rows.isNotEmpty()) {
-                                frame
-                            } else {
-                                buildFallbackFrame(textLines)
-                            }
-                        } catch (e: Exception) {
-                            buildFallbackFrame(textLines)
-                        }
-                    _ttyRenderFrame.value = nextFrame
-                    delay(TTY_POLL_INTERVAL_MS)
+                    val hasData = waitForRenderSignal()
+                    if (hasData) applyTtyRenderFrame()
                 }
             }
+    }
+
+    /**
+     * Blocks on [Dispatchers.IO] until the Rust PTY read loop signals new render data or the
+     * [TTY_RENDER_WAIT_TIMEOUT_MS] heartbeat elapses.
+     *
+     * @return `true` if new data is available; `false` on a clean timeout (no new data).
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private suspend fun waitForRenderSignal(): Boolean =
+        try {
+            ttyWaitForRenderSignal(TTY_RENDER_WAIT_TIMEOUT_MS.toULong())
+        } catch (e: Exception) {
+            delay(TTY_RENDER_WAIT_TIMEOUT_MS)
+            true
+        }
+
+    /**
+     * Reads the latest PTY output snapshot and render frame from Rust, then pushes both to
+     * [_ttyOutputLines] and [_ttyRenderFrame]. Falls back to [buildFallbackFrame] if the frame
+     * is empty or an FFI exception is thrown.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun applyTtyRenderFrame() {
+        val textLines =
+            try {
+                val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
+                _ttyOutputLines.value = lines
+                lines
+            } catch (e: Exception) {
+                _ttyOutputLines.value
+            }
+        val nextFrame =
+            try {
+                val frame = ttyGetRenderFrame()
+                if (frame.rows.isNotEmpty()) frame else buildFallbackFrame(textLines)
+            } catch (e: Exception) {
+                buildFallbackFrame(textLines)
+            }
+        _ttyRenderFrame.value = nextFrame
     }
 
     /** Cancels the PTY output polling coroutine. */
@@ -3282,8 +3309,9 @@ class TerminalViewModel(
         /** Default PTY row count. */
         private const val TTY_DEFAULT_ROWS = 24
 
-        /** Interval in milliseconds between PTY output polls. */
-        private const val TTY_POLL_INTERVAL_MS = 100L
+        /** Timeout for the blocking render-data wait (ms). Also serves as
+         *  the heartbeat interval for cursor blink and connection health. */
+        private const val TTY_RENDER_WAIT_TIMEOUT_MS = 500L
 
         /** Maximum number of lines to retrieve per output snapshot. */
         private const val TTY_SNAPSHOT_MAX_LINES = 500
