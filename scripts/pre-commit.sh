@@ -47,12 +47,20 @@ if [[ "$HAS_KOTLIN" == true ]]; then
 fi
 
 # --- Rust checks ---
+# Clippy requires Android NDK cross-compilation targets (aarch64/x86_64-linux-android).
+# Skip on Windows/macOS host builds where std::os::fd and nix Unix APIs are unavailable.
+# On Linux CI with NDK installed, ANDROID_NDK_HOME must be set for clippy to run.
 if [[ "$HAS_RUST" == true ]]; then
-    echo "==> Running clippy..."
-    if ! cargo clippy --manifest-path "$ROOT_DIR/zeroclaw-android/Cargo.toml" \
-         --all-targets -- -D warnings 2>&1; then
-        echo "    FAILED: clippy found warnings/errors."
-        FAILED=1
+    if [[ -n "${ANDROID_NDK_HOME:-}" ]]; then
+        echo "==> Running clippy (Android target)..."
+        if ! cargo clippy --manifest-path "$ROOT_DIR/zeroclaw-android/Cargo.toml" \
+             --target aarch64-linux-android \
+             -- -D warnings 2>&1; then
+            echo "    FAILED: clippy found warnings/errors."
+            FAILED=1
+        fi
+    else
+        echo "==> Skipping clippy (ANDROID_NDK_HOME not set — Android NDK required for cross-compile)."
     fi
 
     echo "==> Running cargo-deny..."
