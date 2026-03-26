@@ -113,7 +113,7 @@ fun TtyCanvasView(
         }
 
         val cursor = frame.cursor
-        val cursorScreenRow = cursor.row.toInt() - startRow
+        val cursorScreenRow = cursor.row.toInt()
         if (cursorVisible && cursor.visible && cursorScreenRow in 0 until visibleRows) {
             drawCursor(
                 col = cursor.col.toInt(),

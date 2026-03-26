@@ -20,7 +20,8 @@
 //! delegates actual writes to `spawn_blocking` as well.
 
 use std::os::fd::{AsRawFd, OwnedFd};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
 
 use super::backend::TerminalBackend;
 use super::context::LineRingBuffer;
@@ -33,6 +34,16 @@ use crate::error::FfiError;
 /// Only one local shell session can run at a time. Uses the same
 /// poison-recovery pattern as [`crate::clawboy::session`].
 static TTY_SESSION: Mutex<Option<TtySession>> = Mutex::new(None);
+
+/// Signal that new render data is available. Set by read loops (local
+/// PTY and SSH), consumed by `wait_for_render_signal()`.
+static RENDER_DIRTY: AtomicBool = AtomicBool::new(false);
+
+/// Condvar paired with a dummy mutex for blocking wait. The mutex
+/// guard is not used for data protection — only to satisfy the
+/// Condvar API.
+static RENDER_CONDVAR: std::sync::LazyLock<(Mutex<()>, Condvar)> =
+    std::sync::LazyLock::new(|| (Mutex::new(()), Condvar::new()));
 
 // ── Session state ───────────────────────────────────────────────────
 
@@ -77,6 +88,44 @@ fn lock_session() -> std::sync::MutexGuard<'static, Option<TtySession>> {
         );
         e.into_inner()
     })
+}
+
+// ── Render signal ───────────────────────────────────────────────────
+
+/// Signals that new render data is available.
+///
+/// Called by both the local PTY read loop and the SSH read loop after
+/// feeding bytes into the terminal backend.
+pub(crate) fn notify_render_dirty() {
+    RENDER_DIRTY.store(true, Ordering::Release);
+    let (_, condvar) = &*RENDER_CONDVAR;
+    condvar.notify_all();
+}
+
+/// Blocks until new render data is available or `timeout_ms` elapses.
+///
+/// Returns `true` if data became available, `false` on timeout. Resets
+/// the dirty flag on return so the next call blocks until new data
+/// arrives.
+pub(crate) fn wait_for_render_signal(timeout_ms: u64) -> bool {
+    let (lock, condvar) = &*RENDER_CONDVAR;
+    let guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+
+    if RENDER_DIRTY.load(Ordering::Acquire) {
+        RENDER_DIRTY.store(false, Ordering::Release);
+        return true;
+    }
+
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+    let (_guard, _result) = condvar
+        .wait_timeout_while(guard, timeout, |_| {
+            !RENDER_DIRTY.load(Ordering::Acquire)
+        })
+        .unwrap_or_else(|e| e.into_inner());
+
+    let was_dirty = RENDER_DIRTY.load(Ordering::Acquire);
+    RENDER_DIRTY.store(false, Ordering::Release);
+    was_dirty
 }
 
 // ── Public API ──────────────────────────────────────────────────────
@@ -758,6 +807,9 @@ fn read_loop(
                 );
             }
         }
+
+        // Signal the render thread that new data is available.
+        notify_render_dirty();
     }
 
     tracing::debug!(target: "tty::session", "read loop exited");
