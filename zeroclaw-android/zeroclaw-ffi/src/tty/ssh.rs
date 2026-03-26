@@ -966,6 +966,8 @@ async fn ssh_read_loop(
                 if let Ok(mut guard) = backend.lock() {
                     let _ = guard.feed_input(data);
                 }
+                // Signal the render thread that new SSH data is available.
+                super::session::notify_render_dirty();
             }
             Some(ChannelMsg::ExtendedData { ref data, .. }) => {
                 // stderr -- push to ring buffer too.

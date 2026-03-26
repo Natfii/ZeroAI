@@ -14,6 +14,14 @@ ignore = [
     # rustls-webpki CRL distribution point matching — low impact, transitive dep.
     # Fix requires rustls-webpki >= 0.103.10 (not yet released for 0.103.x branch).
     "RUSTSEC-2026-0049",
+    # RSA timing sidechannel (Marvin Attack) — transitive via russh-keys/ssh-key.
+    # No safe upgrade available; russh 0.56 depends on rsa 0.9.x. SSH keys are
+    # not exposed to remote timing oracle in this Android use case (local device only).
+    "RUSTSEC-2023-0071",
+    # libcrux-sha3 incorrect SHAKE output — transitive via russh/libcrux-ml-kem.
+    # No safe upgrade available in russh 0.56 dependency tree; key exchange
+    # impact is low for interactive SSH sessions on a trusted local device.
+    "RUSTSEC-2026-0074",
 ]
 
 [licenses]
