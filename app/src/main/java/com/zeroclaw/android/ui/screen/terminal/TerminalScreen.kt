@@ -49,6 +49,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Hearing
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -95,6 +96,8 @@ import com.zeroclaw.android.ui.component.LoadingIndicator
 import com.zeroclaw.android.ui.component.MiniZeroMascot
 import com.zeroclaw.android.ui.component.MiniZeroMascotState
 import com.zeroclaw.android.ui.component.VoiceFab
+import com.zeroclaw.android.ui.screen.terminal.theme.TerminalTheme
+import com.zeroclaw.android.ui.screen.terminal.theme.TerminalThemePicker
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import com.zeroclaw.android.util.LocalPowerSaveMode
 import com.zeroclaw.ffi.TtyRenderFrame
@@ -247,6 +250,7 @@ fun TerminalScreen(
     val ttyFontSize by terminalViewModel.ttyFontSize.collectAsStateWithLifecycle()
     val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
     val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
+    val currentTheme by terminalViewModel.currentTheme.collectAsStateWithLifecycle()
     val isPowerSave = LocalPowerSaveMode.current
 
     Crossfade(
@@ -293,6 +297,9 @@ fun TerminalScreen(
                     onSubmitPassword = terminalViewModel::sshSubmitPassword,
                     onSubmitKey = terminalViewModel::sshSubmitKey,
                     onDisconnect = terminalViewModel::sshDisconnect,
+                    themes = terminalViewModel.allThemes(),
+                    currentThemeName = currentTheme?.name,
+                    onApplyTheme = terminalViewModel::applyTheme,
                 )
             }
         }
@@ -1173,6 +1180,9 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
  * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
  * @param onDisconnect Callback to disconnect and dismiss the current SSH auth prompt.
+ * @param themes All available terminal color themes shown in the [TerminalThemePicker] dialog.
+ * @param currentThemeName Name of the currently active theme, or null if none is set.
+ * @param onApplyTheme Callback invoked with the chosen [TerminalTheme] when the user selects one.
  */
 @Composable
 fun TtySessionContent(
@@ -1191,9 +1201,22 @@ fun TtySessionContent(
     onSubmitPassword: (CharArray) -> Unit = {},
     @Suppress("UnusedParameter") onSubmitKey: (String) -> Unit = {},
     onDisconnect: () -> Unit = {},
+    themes: List<TerminalTheme> = emptyList(),
+    currentThemeName: String? = null,
+    onApplyTheme: (TerminalTheme) -> Unit = {},
 ) {
     var inputText by remember { mutableStateOf("") }
+    var showThemePicker by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+
+    if (showThemePicker) {
+        TerminalThemePicker(
+            themes = themes,
+            currentThemeName = currentThemeName,
+            onSelect = onApplyTheme,
+            onDismiss = { showThemePicker = false },
+        )
+    }
 
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
@@ -1372,6 +1395,19 @@ fun TtySessionContent(
                             },
                         ),
                 )
+                IconButton(
+                    onClick = { showThemePicker = true },
+                    modifier =
+                        Modifier.semantics {
+                            contentDescription = "Choose terminal theme"
+                        },
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Palette,
+                        contentDescription = null,
+                        tint = Color(TTY_TEXT_GREEN),
+                    )
+                }
             }
         }
 
