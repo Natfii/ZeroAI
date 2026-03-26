@@ -43,6 +43,8 @@ import com.zeroclaw.android.tailscale.PeerMessageRouter
 import com.zeroclaw.android.tailscale.PeerRouteEntry
 import com.zeroclaw.android.tailscale.isAgentKind
 import com.zeroclaw.android.tailscale.normalizeKind
+import com.zeroclaw.android.ui.screen.terminal.theme.TerminalTheme
+import com.zeroclaw.android.ui.screen.terminal.theme.TerminalThemeRepository
 import com.zeroclaw.android.util.ErrorSanitizer
 import com.zeroclaw.android.util.ImageProcessor
 import com.zeroclaw.ffi.FfiException
@@ -73,6 +75,7 @@ import com.zeroclaw.ffi.ttyGetOutputSnapshot
 import com.zeroclaw.ffi.ttyGetPendingHostKey
 import com.zeroclaw.ffi.ttyGetRenderFrame
 import com.zeroclaw.ffi.ttyResize
+import com.zeroclaw.ffi.ttySetPalette
 import com.zeroclaw.ffi.ttyStartSsh
 import com.zeroclaw.ffi.ttySubmitKey
 import com.zeroclaw.ffi.ttySubmitPassword
@@ -260,6 +263,13 @@ class TerminalViewModel(
      * coroutine started in [startTtyPolling].
      */
     val ttyRenderFrame: StateFlow<TtyRenderFrame?> = _ttyRenderFrame.asStateFlow()
+
+    private val themeRepository = TerminalThemeRepository(application)
+
+    private val _currentTheme = MutableStateFlow<TerminalTheme?>(null)
+
+    /** The currently active terminal color theme. */
+    val currentTheme: StateFlow<TerminalTheme?> = _currentTheme.asStateFlow()
 
     private val _ttyFontSize = MutableStateFlow(TTY_DEFAULT_FONT_SIZE)
 
@@ -767,6 +777,13 @@ class TerminalViewModel(
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun startTtyPolling() {
         ttyPollJob?.cancel()
+
+        // Apply the persisted theme to the new terminal session.
+        viewModelScope.launch(Dispatchers.IO) {
+            val name = themeRepository.selectedThemeName.first()
+            applyTheme(themeRepository.themeByName(name))
+        }
+
         ttyPollJob =
             viewModelScope.launch(Dispatchers.IO) {
                 while (true) {
@@ -821,6 +838,38 @@ class TerminalViewModel(
         ttyPollJob?.cancel()
         ttyPollJob = null
     }
+
+    /**
+     * Applies a [TerminalTheme] to the active terminal session via FFI.
+     *
+     * Updates the internal theme state, sends palette colors to the
+     * terminal backend, and persists the selection to DataStore.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun applyTheme(theme: TerminalTheme) {
+        _currentTheme.value = theme
+        try {
+            ttySetPalette(
+                theme.bgArgb,
+                theme.fgArgb,
+                theme.cursorArgb ?: theme.fgArgb,
+                theme.palette,
+            )
+        } catch (e: Exception) {
+            logRepository.append(
+                LogSeverity.WARN,
+                TAG,
+                "Failed to apply theme '${theme.name}': ${e.message}",
+            )
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            themeRepository.setSelectedTheme(theme.name)
+        }
+    }
+
+    /** Returns all available terminal themes for the theme picker. */
+    fun allThemes(): List<TerminalTheme> = themeRepository.allThemes()
 
     /** Updates the terminal font size from pinch-to-zoom. */
     fun setTtyFontSize(sizeSp: Float) {
