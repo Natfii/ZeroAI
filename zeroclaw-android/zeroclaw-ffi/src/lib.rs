@@ -3446,6 +3446,26 @@ pub fn tty_get_render_frame() -> Result<tty::types::TtyRenderFrame, FfiError> {
     })
 }
 
+/// Blocks until new terminal render data is available or timeout expires.
+///
+/// Returns `true` if render data became available, `false` on timeout.
+/// Designed to replace the 100ms polling loop with event-driven updates.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_wait_for_render_signal(timeout_ms: u64) -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        Ok(tty::session::wait_for_render_signal(timeout_ms))
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Initializes the SSH key store directory.
 ///
 /// Creates the directory and parents if absent. Idempotent with the
