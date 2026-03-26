@@ -3466,6 +3466,45 @@ pub fn tty_wait_for_render_signal(timeout_ms: u64) -> Result<bool, FfiError> {
     })
 }
 
+/// Applies a color theme to the active terminal session.
+///
+/// `bg`, `fg`, `cursor` are packed ARGB (`0xAARRGGBB`). `palette`
+/// must contain exactly 16 entries (ANSI colors 0-15).
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running,
+/// [`FfiError::InvalidArgument`] if palette length is wrong, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_set_palette(
+    bg: u32,
+    fg: u32,
+    cursor: u32,
+    palette: Vec<u32>,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if palette.len() != 16 {
+            return Err(FfiError::InvalidArgument {
+                detail: format!(
+                    "palette must have 16 entries, got {}",
+                    palette.len()
+                ),
+            });
+        }
+        if tty::ssh::has_session() {
+            tty::ssh::set_palette(bg, fg, cursor, &palette)
+        } else {
+            tty::session::set_palette(bg, fg, cursor, &palette)
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Initializes the SSH key store directory.
 ///
 /// Creates the directory and parents if absent. Idempotent with the

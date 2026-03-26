@@ -212,6 +212,9 @@ pub(crate) trait TerminalBackend: Send {
     fn take_pty_response(&self) -> Vec<u8> {
         Vec::new()
     }
+
+    /// Applies a color palette to the terminal. Default is a no-op.
+    fn apply_palette(&mut self, _bg: u32, _fg: u32, _cursor: u32, _palette: &[u32]) {}
 }
 
 // ── Stub implementation ──────────────────────────────────────────────

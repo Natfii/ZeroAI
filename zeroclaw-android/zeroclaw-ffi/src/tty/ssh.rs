@@ -1031,6 +1031,27 @@ fn map_russh_error(e: russh::Error) -> FfiError {
     }
 }
 
+/// Applies a color theme to the SSH terminal session.
+///
+/// Forwards the palette to the terminal backend via
+/// [`TerminalBackend::apply_palette`] and signals the render thread.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no SSH session is active.
+pub(crate) fn set_palette(bg: u32, fg: u32, cursor: u32, palette: &[u32]) -> Result<(), FfiError> {
+    let guard = lock_session();
+    let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "no SSH session is active".into(),
+    })?;
+
+    let mut backend = session.backend.lock().unwrap_or_else(|e| e.into_inner());
+    backend.apply_palette(bg, fg, cursor, palette);
+    drop(backend);
+    super::session::notify_render_dirty();
+    Ok(())
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]

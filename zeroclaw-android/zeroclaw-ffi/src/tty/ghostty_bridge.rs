@@ -171,6 +171,25 @@ impl Terminal {
     pub(crate) fn raw_handle(&self) -> GhosttyTerminal {
         self.handle
     }
+
+    /// Sets a terminal color via OSC escape sequences fed through the
+    /// VT parser. The OSC approach works because ghostty-vt processes
+    /// OSC 4/10/11/12 and updates its internal palette.
+    ///
+    /// - `index` 0-255: ANSI/extended palette (OSC 4)
+    /// - `index` 256: background (OSC 11)
+    /// - `index` 257: foreground (OSC 10)
+    /// - `index` 258: cursor (OSC 12)
+    pub(crate) fn set_palette_color(&mut self, index: u16, r: u8, g: u8, b: u8) {
+        let osc = match index {
+            0..=255 => format!("\x1b]4;{index};rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\"),
+            256 => format!("\x1b]11;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\"),
+            257 => format!("\x1b]10;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\"),
+            258 => format!("\x1b]12;rgb:{r:02x}/{g:02x}/{b:02x}\x1b\\"),
+            _ => return,
+        };
+        self.vt_write(osc.as_bytes());
+    }
 }
 
 impl Drop for Terminal {

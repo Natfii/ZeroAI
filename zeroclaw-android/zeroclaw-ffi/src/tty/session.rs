@@ -899,6 +899,27 @@ pub(crate) fn create_backend(cols: u16, rows: u16) -> Box<dyn TerminalBackend> {
     Box::new(super::backend::StubBackend)
 }
 
+/// Applies a color theme to the active local terminal session.
+///
+/// Forwards the palette to the terminal backend via
+/// [`TerminalBackend::apply_palette`] and signals the render thread.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running.
+pub(crate) fn set_palette(bg: u32, fg: u32, cursor: u32, palette: &[u32]) -> Result<(), FfiError> {
+    let guard = lock_session();
+    let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "no TTY session is running".into(),
+    })?;
+
+    let mut backend = session.backend.lock().unwrap_or_else(|e| e.into_inner());
+    backend.apply_palette(bg, fg, cursor, palette);
+    drop(backend);
+    notify_render_dirty();
+    Ok(())
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]

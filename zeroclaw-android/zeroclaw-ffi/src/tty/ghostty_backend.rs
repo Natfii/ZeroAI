@@ -154,6 +154,30 @@ impl TerminalBackend for GhosttyBackend {
     fn take_pty_response(&self) -> Vec<u8> {
         self.take_write_pty_response()
     }
+
+    fn apply_palette(&mut self, bg: u32, fg: u32, cursor: u32, palette: &[u32]) {
+        let unpack = |argb: u32| -> (u8, u8, u8) {
+            (
+                ((argb >> 16) & 0xFF) as u8,
+                ((argb >> 8) & 0xFF) as u8,
+                (argb & 0xFF) as u8,
+            )
+        };
+
+        // Set 16 ANSI palette colors (OSC 4).
+        for (i, &color) in palette.iter().enumerate().take(16) {
+            let (r, g, b) = unpack(color);
+            self.terminal.set_palette_color(i as u16, r, g, b);
+        }
+
+        // Set background (OSC 11), foreground (OSC 10), cursor (OSC 12).
+        let (r, g, b) = unpack(bg);
+        self.terminal.set_palette_color(256, r, g, b);
+        let (r, g, b) = unpack(fg);
+        self.terminal.set_palette_color(257, r, g, b);
+        let (r, g, b) = unpack(cursor);
+        self.terminal.set_palette_color(258, r, g, b);
+    }
 }
 
 impl Drop for GhosttyBackend {
