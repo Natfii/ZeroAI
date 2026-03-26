@@ -98,6 +98,7 @@ import com.zeroclaw.android.ui.component.VoiceFab
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import com.zeroclaw.android.util.LocalPowerSaveMode
 import com.zeroclaw.ffi.TtyRenderFrame
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** Horizontal padding inside the input bar. */
@@ -1142,6 +1143,9 @@ private const val TTY_TEXT_GREEN = 0xFF4AF626
 /** Terminal background color — near-black. */
 private const val TTY_BG_COLOR = 0xFF1A1A2E
 
+/** Cursor blink toggle interval matching xterm/ghostty-web convention. */
+private const val CURSOR_BLINK_INTERVAL_MS = 530L
+
 /**
  * Full-screen TTY session composable with output display and input.
  *
@@ -1247,6 +1251,19 @@ fun TtySessionContent(
             }
         }
 
+        var blinkPhase by remember { mutableStateOf(true) }
+        val cursorPosition = renderFrame?.cursor?.let { "${it.col}-${it.row}" }
+
+        LaunchedEffect(renderFrame?.cursor?.blinking, cursorPosition) {
+            blinkPhase = true
+            if (renderFrame?.cursor?.blinking == true) {
+                while (true) {
+                    delay(CURSOR_BLINK_INTERVAL_MS)
+                    blinkPhase = !blinkPhase
+                }
+            }
+        }
+
         if (renderFrame != null && renderFrame.rows.isNotEmpty()) {
             TtyCanvasView(
                 frame = renderFrame,
@@ -1254,6 +1271,7 @@ fun TtySessionContent(
                 onFontSizeChange = onFontSizeChange,
                 onTap = { focusRequester.requestFocus() },
                 onSizeChanged = onSizeChanged,
+                cursorVisible = blinkPhase,
                 modifier =
                     Modifier
                         .weight(1f)
