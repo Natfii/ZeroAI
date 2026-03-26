@@ -197,6 +197,13 @@ pub(crate) trait TerminalBackend: Send {
     /// context injection (UTF-8 text, truncated to `max_bytes`).
     fn snapshot_for_context(&self, max_bytes: usize) -> Vec<u8>;
 
+    /// Returns whether synchronized output mode (DEC 2026) is active.
+    ///
+    /// Default returns `false` for backends that don't support this query.
+    fn is_synchronized_output(&self) -> bool {
+        false
+    }
+
     /// Takes any pending write-PTY response bytes (terminal query
     /// responses that should be written back to the PTY/SSH channel).
     ///

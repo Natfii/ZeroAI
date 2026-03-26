@@ -145,6 +145,27 @@ impl Terminal {
         }
     }
 
+    /// Checks whether synchronized output mode (DEC 2026) is active.
+    ///
+    /// When active, the terminal is in the middle of a batched update
+    /// and the render state should not be refreshed.
+    pub(crate) fn is_synchronized_output(&self) -> bool {
+        let mut active = false;
+        // SAFETY: The handle is valid. The output pointer is valid stack
+        // memory for a bool.
+        unsafe {
+            let result = ghostty_terminal_mode_get(
+                self.handle,
+                GHOSTTY_MODE_SYNC_OUTPUT,
+                &mut active,
+            );
+            if result != GhosttyResult::Success {
+                return false;
+            }
+        }
+        active
+    }
+
     /// Returns the raw handle for passing to render state updates and
     /// key encoder sync. The caller must not free or store the handle.
     pub(crate) fn raw_handle(&self) -> GhosttyTerminal {

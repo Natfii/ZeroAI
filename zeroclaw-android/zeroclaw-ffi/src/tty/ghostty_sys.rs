@@ -75,6 +75,21 @@ pub type GhosttyKeyEvent = *mut c_void;
 /// Allocator pointer (always NULL to use default).
 pub type GhosttyAllocator = c_void;
 
+// ── Mode types ──────────────────────────────────────────────────────
+
+/// Packed 16-bit terminal mode identifier.
+///
+/// Encodes a mode value (bits 0–14) and an ANSI flag (bit 15) into a
+/// single 16-bit integer. Construct with `ghostty_mode_new` helpers or
+/// use the named constants such as [`GHOSTTY_MODE_SYNC_OUTPUT`].
+pub type GhosttyMode = u16;
+
+/// Synchronized output mode (DEC private mode 2026).
+///
+/// When this mode is active the terminal is mid-batch update and
+/// rendering should be deferred to avoid tearing.
+pub const GHOSTTY_MODE_SYNC_OUTPUT: GhosttyMode = 2026 & 0x7FFF; // DEC private: ansi bit = 0
+
 // ── Terminal options ────────────────────────────────────────────────
 
 /// Terminal initialization options.
@@ -331,6 +346,12 @@ unsafe extern "C" {
         terminal: GhosttyTerminal,
         data: GhosttyTerminalData,
         out: *mut c_void,
+    ) -> GhosttyResult;
+
+    pub fn ghostty_terminal_mode_get(
+        terminal: GhosttyTerminal,
+        mode: GhosttyMode,
+        out_value: *mut bool,
     ) -> GhosttyResult;
 
     // ── Render State ─────────────────────────────────────────────

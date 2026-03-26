@@ -36,6 +36,9 @@ pub(crate) struct GhosttyBackend {
     /// Buffer for write-PTY callback responses. Shared with the C
     /// callback via a raw pointer.
     write_pty_buf: Arc<Mutex<Vec<u8>>>,
+    /// Cached snapshot for synchronized output mode. When DEC 2026 is
+    /// active, we return this instead of updating the render state.
+    cached_snapshot: Option<TerminalRenderSnapshot>,
 }
 
 // SAFETY: All inner types implement Send. The write_pty_buf Arc is
@@ -69,6 +72,7 @@ impl GhosttyBackend {
             render_state,
             key_encoder,
             write_pty_buf,
+            cached_snapshot: None,
         })
     }
 
@@ -103,9 +107,24 @@ impl TerminalBackend for GhosttyBackend {
     }
 
     fn snapshot_for_render(&mut self) -> TerminalRenderSnapshot {
-        self.render_state
+        if self.terminal.is_synchronized_output() {
+            // App is mid-batch — return cached snapshot to prevent tearing.
+            return self
+                .cached_snapshot
+                .clone()
+                .unwrap_or_default();
+        }
+
+        let snapshot = self
+            .render_state
             .snapshot(&self.terminal)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        self.cached_snapshot = Some(snapshot.clone());
+        snapshot
+    }
+
+    fn is_synchronized_output(&self) -> bool {
+        self.terminal.is_synchronized_output()
     }
 
     fn snapshot_for_accessibility(&self, visible_rows: usize) -> Vec<String> {
