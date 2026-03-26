@@ -59,6 +59,7 @@ data class AgentTomlEntry(
  * - `[composio]` enabled, api_key, entity_id
  * - `[browser]` enabled, allowed_domains
  * - `[http_request]` enabled, allowed_domains
+ * - `[tty]` enabled, ssh_keepalive_secs, context_max_bytes
  *
  * @property provider Android provider ID (e.g. "openai", "ollama").
  * @property model Model name (e.g. "gpt-4o").
@@ -314,6 +315,12 @@ data class GlobalTomlConfig(
     val emailEnabled: Boolean = false,
     val hubAppContext: String? = null,
     val sharedFolderEnabled: Boolean = false,
+    /** @property ttyEnabled Whether the TTY terminal backend is active. */
+    val ttyEnabled: Boolean = false,
+    /** @property ttySshKeepaliveSecs Interval between SSH keepalive packets in seconds. */
+    val ttySshKeepaliveSecs: Int = DEFAULT_TTY_SSH_KEEPALIVE_SECS,
+    /** @property ttyContextMaxBytes Maximum context buffer size in bytes for TTY sessions. */
+    val ttyContextMaxBytes: Int = DEFAULT_TTY_CONTEXT_MAX_BYTES,
 ) {
     /** Constants for [GlobalTomlConfig]. */
     companion object {
@@ -440,6 +447,12 @@ data class GlobalTomlConfig(
 
         /** Maximum value for a Rust `u8` field (used for `warn_at_percent` clamping). */
         const val MAX_U8 = 255
+
+        /** Default SSH keepalive interval in seconds. */
+        const val DEFAULT_TTY_SSH_KEEPALIVE_SECS = 15
+
+        /** Default TTY context buffer size in bytes. */
+        const val DEFAULT_TTY_CONTEXT_MAX_BYTES = 65_536
 
         /** Valid upstream autonomy levels (from AutonomyLevel enum). */
         val VALID_AUTONOMY_LEVELS = setOf("readonly", "supervised", "full")
@@ -616,6 +629,7 @@ object ConfigTomlBuilder {
             appendSecurityEstopSection(config)
             appendMemoryQdrantSection(config)
             appendSkillsSection(config)
+            appendTtySection(config)
 
             if (config.emailEnabled && config.emailAddress.isNotBlank()) {
                 appendLine()
@@ -1302,6 +1316,23 @@ object ConfigTomlBuilder {
                 "prompt_injection_mode = ${tomlString(config.skillsPromptInjectionMode)}",
             )
         }
+    }
+
+    /**
+     * Appends the `[tty]` TOML section for the terminal backend.
+     *
+     * Emits `enabled`, `ssh_keepalive_secs`, and `context_max_bytes` fields.
+     * The section is always emitted so the Rust daemon can read the TTY
+     * configuration regardless of whether it is currently active.
+     *
+     * @param config Configuration to read TTY values from.
+     */
+    private fun StringBuilder.appendTtySection(config: GlobalTomlConfig) {
+        appendLine()
+        appendLine("[tty]")
+        appendLine("enabled = ${config.ttyEnabled}")
+        appendLine("ssh_keepalive_secs = ${config.ttySshKeepaliveSecs.coerceAtLeast(0)}")
+        appendLine("context_max_bytes = ${config.ttyContextMaxBytes.coerceAtLeast(0)}")
     }
 
     /**

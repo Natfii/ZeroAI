@@ -59,6 +59,15 @@ sealed interface CommandResult {
     data class NanoCommand(
         val intent: NanoIntent,
     ) : CommandResult
+
+    /**
+     * Signals a transition from REPL mode to TTY mode.
+     *
+     * Triggered by the `@tty` chat trigger. The [TerminalViewModel]
+     * switches the terminal into [TerminalMode.Tty] when it receives
+     * this result.
+     */
+    data object TtyOpen : CommandResult
 }
 
 /**
@@ -124,6 +133,9 @@ data class SlashCommand(
  * fall-through to plain chat messages.
  */
 object CommandRegistry {
+    /** Chat trigger that switches the terminal into TTY mode. */
+    private const val TTY_TRIGGER = "@tty"
+
     /** Command name for on-device Gemini Nano inference. */
     private const val NANO_COMMAND_NAME = "nano"
 
@@ -173,7 +185,9 @@ object CommandRegistry {
     /**
      * Parses a raw terminal input line and translates it into a [CommandResult].
      *
-     * The `/nano` command is intercepted first and produces a
+     * The `@tty` chat trigger is matched first (case-sensitive, exact match)
+     * and produces [CommandResult.TtyOpen] to switch into TTY mode.
+     * The `/nano` command is intercepted next and produces a
      * [CommandResult.NanoCommand] that bypasses the daemon entirely.
      * Other slash commands are dispatched to their registered
      * [SlashCommand.toExpression] lambda. Local commands (`/help`, `/clear`)
@@ -188,6 +202,10 @@ object CommandRegistry {
         val trimmed = input.trim()
         if (trimmed.isEmpty()) {
             return CommandResult.ChatMessage("")
+        }
+
+        if (trimmed.equals(TTY_TRIGGER, ignoreCase = true)) {
+            return CommandResult.TtyOpen
         }
 
         if (!trimmed.startsWith("/")) {
@@ -829,6 +847,11 @@ object CommandRegistry {
                 name = "notify",
                 description = "Send a notification",
                 usage = "<title> <body>",
+                toExpression = { null },
+            ),
+            SlashCommand(
+                name = "ssh-keys",
+                description = "Manage SSH keys for TTY connections",
                 toExpression = { null },
             ),
             SlashCommand(

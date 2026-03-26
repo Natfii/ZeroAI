@@ -49,8 +49,25 @@ base64 = "0.22"
 # Google Messages bridge — QR code generation
 qrcode = "0.14"
 
+# TTY — PTY management for local shell
+nix = { version = "0.29", features = ["fs", "process", "signal", "term", "ioctl"] }
+zeroize = { version = "1.8", features = ["derive"] }
+
+# SSH key management and client
+# default-features = false: disable russh's own rsa feature to avoid a
+# rand_core API conflict between internal-russh-forked-ssh-key and rsa 0.9.
+# RSA key generation goes through russh-keys + ssh-key directly instead.
+russh = { version = "0.56", default-features = false, features = ["ring"] }
+russh-keys = "0.49"
+ssh-key = { version = "0.6", features = ["rsa"] }
+rsa = "0.9"
+uuid = { version = "1", features = ["v4"] }
+rand_core = "0.6"
+
 [features]
+default = ["ghostty-vt"]
 scripting-wasm-component = ["zeroclaw/scripting-wasm-component"]
+ghostty-vt = []
 
 [dev-dependencies]
 tempfile = "3"

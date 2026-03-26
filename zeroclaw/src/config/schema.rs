@@ -129,6 +129,47 @@ pub struct SystemPromptConfig {
     pub hub_app_context: Option<String>,
 }
 
+/// Default SSH keep-alive interval in seconds.
+fn default_ssh_keepalive_secs() -> u64 {
+    15
+}
+
+/// Default maximum bytes for terminal context injection.
+fn default_context_max_bytes() -> u64 {
+    65536
+}
+
+/// SSH terminal client configuration (`[tty]` section in `config.toml`).
+///
+/// Controls the embedded SSH terminal that lets the Android app connect
+/// to remote hosts and inject terminal output into the agent's context.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct TtyConfig {
+    /// Whether the SSH terminal subsystem is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Interval (in seconds) between SSH keep-alive packets.
+    /// Default: 15.
+    #[serde(default = "default_ssh_keepalive_secs")]
+    pub ssh_keepalive_secs: u64,
+
+    /// Maximum bytes of terminal scrollback to include in LLM context.
+    /// Default: 65536 (64 KiB).
+    #[serde(default = "default_context_max_bytes")]
+    pub context_max_bytes: u64,
+}
+
+impl Default for TtyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ssh_keepalive_secs: default_ssh_keepalive_secs(),
+            context_max_bytes: default_context_max_bytes(),
+        }
+    }
+}
+
 /// Top-level ZeroClaw configuration, loaded from `config.toml`.
 ///
 /// Resolution order: `ZEROCLAW_WORKSPACE` env → `active_workspace.toml` marker → `~/.zeroclaw/config.toml`.
@@ -298,6 +339,10 @@ pub struct Config {
 
     #[serde(default)]
     pub system_prompt: SystemPromptConfig,
+
+    /// SSH terminal client configuration (`[tty]`).
+    #[serde(default)]
+    pub tty: TtyConfig,
 }
 
 /// Named provider profile definition compatible with Codex app-server style config.
@@ -3124,6 +3169,7 @@ impl Default for Config {
             transcription: TranscriptionConfig::default(),
             email: None,
             system_prompt: SystemPromptConfig::default(),
+            tty: TtyConfig::default(),
         }
     }
 }

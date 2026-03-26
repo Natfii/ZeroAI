@@ -43,6 +43,8 @@ mlkit-genai-image-description = "1.0.0-beta1"
 benchmark = "1.4.1"
 profileinstaller = "1.4.1"
 uiautomator = "2.3.0"
+tink = "1.21.0"
+encrypted-datastore = "1.1.1-beta03"
 
 [libraries]
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
@@ -105,6 +107,8 @@ mlkit-genai-image-description = { group = "com.google.mlkit", name = "genai-imag
 benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
 profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+tink-android = { group = "com.google.crypto.tink", name = "tink-android", version.ref = "tink" }
+encrypted-datastore-preferences = { group = "io.github.osipxd", name = "security-crypto-datastore-preferences", version.ref = "encrypted-datastore" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

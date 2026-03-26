@@ -249,6 +249,8 @@ dependencies {
     implementation(libs.mlkit.genai.proofreading)
     implementation(libs.mlkit.genai.rewriting)
     implementation(libs.mlkit.genai.image.description)
+    implementation(libs.tink.android)
+    implementation(libs.encrypted.datastore.preferences)
     ksp(libs.room.compiler)
 
     debugImplementation(libs.compose.ui.tooling)

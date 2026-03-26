@@ -68,6 +68,7 @@ import com.zeroclaw.android.ui.screen.settings.logs.LogViewerScreen
 import com.zeroclaw.android.ui.screen.settings.memory.MemoryBrowserScreen
 import com.zeroclaw.android.ui.screen.settings.providers.ProviderConnectionsScreen
 import com.zeroclaw.android.ui.screen.settings.skillpermissions.SkillPermissionsScreen
+import com.zeroclaw.android.ui.screen.settings.ssh.SshKeyScreen
 import com.zeroclaw.android.ui.screen.setup.SetupScreen
 import com.zeroclaw.android.ui.screen.tailscale.TailscaleConfigScreen
 import com.zeroclaw.android.ui.screen.terminal.TerminalScreen
@@ -276,6 +277,8 @@ fun ZeroAINavHost(
                             navController.navigate(WebDashboardRoute)
                         SettingsNavAction.SkillPermissions ->
                             navController.navigate(SkillPermissionsRoute)
+                        SettingsNavAction.SshKeys ->
+                            navController.navigate(SshKeysRoute)
                     }
                 },
                 onRerunWizard = {
@@ -582,6 +585,12 @@ fun ZeroAINavHost(
 
         composable<SkillPermissionsRoute> {
             SkillPermissionsScreen(edgeMargin = edgeMargin)
+        }
+
+        composable<SshKeysRoute> {
+            SshKeyScreen(
+                onBack = { navController.popBackStack() },
+            )
         }
     }
 }

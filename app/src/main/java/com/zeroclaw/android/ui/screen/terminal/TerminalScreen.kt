@@ -14,8 +14,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +40,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -65,11 +72,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -83,6 +97,7 @@ import com.zeroclaw.android.ui.component.MiniZeroMascotState
 import com.zeroclaw.android.ui.component.VoiceFab
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import com.zeroclaw.android.util.LocalPowerSaveMode
+import com.zeroclaw.ffi.TtyRenderFrame
 import kotlinx.coroutines.launch
 
 /** Horizontal padding inside the input bar. */
@@ -225,25 +240,62 @@ fun TerminalScreen(
 
     val isDaemonRunning by terminalViewModel.isDaemonRunning.collectAsStateWithLifecycle()
     val peerAliases by terminalViewModel.peerAliases.collectAsStateWithLifecycle()
+    val terminalMode by terminalViewModel.terminalMode.collectAsStateWithLifecycle()
+    val ttyOutputLines by terminalViewModel.ttyOutputLines.collectAsStateWithLifecycle()
+    val ttyRenderFrame by terminalViewModel.ttyRenderFrame.collectAsStateWithLifecycle()
+    val ttyFontSize by terminalViewModel.ttyFontSize.collectAsStateWithLifecycle()
+    val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
+    val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
+    val isPowerSave = LocalPowerSaveMode.current
 
-    TerminalContent(
-        state = state,
-        streamingState = streamingState,
-        isDaemonRunning = isDaemonRunning,
-        voiceState = voiceState,
-        speakRepliesEnabled = speakRepliesEnabled,
-        onSubmit = terminalViewModel::submitInput,
-        onAttachImages = terminalViewModel::attachImages,
-        onRemoveImage = terminalViewModel::removeImage,
-        onCancelAgent = terminalViewModel::cancelAgentTurn,
-        onVoiceTap = terminalViewModel::toggleVoice,
-        onVoiceLongPress = terminalViewModel::stopVoice,
-        onSpeakRepliesChanged = terminalViewModel::setSpeakRepliesEnabled,
-        onCanvasAction = terminalViewModel::handleCanvasAction,
-        peerAliases = peerAliases,
-        edgeMargin = edgeMargin,
+    Crossfade(
+        targetState = terminalMode,
         modifier = modifier,
-    )
+        animationSpec = if (isPowerSave) snap() else tween(),
+        label = "terminal-mode",
+    ) { mode ->
+        when (mode) {
+            is TerminalMode.Repl -> {
+                TerminalContent(
+                    state = state,
+                    streamingState = streamingState,
+                    isDaemonRunning = isDaemonRunning,
+                    voiceState = voiceState,
+                    speakRepliesEnabled = speakRepliesEnabled,
+                    onSubmit = terminalViewModel::submitInput,
+                    onAttachImages = terminalViewModel::attachImages,
+                    onRemoveImage = terminalViewModel::removeImage,
+                    onCancelAgent = terminalViewModel::cancelAgentTurn,
+                    onVoiceTap = terminalViewModel::toggleVoice,
+                    onVoiceLongPress = terminalViewModel::stopVoice,
+                    onSpeakRepliesChanged = terminalViewModel::setSpeakRepliesEnabled,
+                    onCanvasAction = terminalViewModel::handleCanvasAction,
+                    peerAliases = peerAliases,
+                    edgeMargin = edgeMargin,
+                )
+            }
+
+            is TerminalMode.Tty -> {
+                TtySessionContent(
+                    session = mode.session,
+                    outputLines = ttyOutputLines,
+                    renderFrame = ttyRenderFrame,
+                    fontSize = ttyFontSize,
+                    onFontSizeChange = terminalViewModel::setTtyFontSize,
+                    onSizeChanged = terminalViewModel::onTtyGridSizeChanged,
+                    ctrlActive = ttyCtrlActive,
+                    altActive = ttyAltActive,
+                    onClose = terminalViewModel::switchToRepl,
+                    onKeyPress = terminalViewModel::ttyHandleSpecialKey,
+                    onTextInput = terminalViewModel::ttyWriteText,
+                    onAnswerHostKey = terminalViewModel::sshAnswerHostKey,
+                    onSubmitPassword = terminalViewModel::sshSubmitPassword,
+                    onSubmitKey = terminalViewModel::sshSubmitKey,
+                    onDisconnect = terminalViewModel::sshDisconnect,
+                )
+            }
+        }
+    }
 
     if (showCamera) {
         CameraPreviewSheet(
@@ -1075,5 +1127,241 @@ private fun WelcomeHeader(
                 color = MaterialTheme.colorScheme.outline,
             )
         }
+    }
+}
+
+/** Vertical padding around the TTY input field. */
+private const val TTY_INPUT_V_PAD_DP = 4
+
+/** Horizontal padding around the TTY input field. */
+private const val TTY_INPUT_H_PAD_DP = 8
+
+/** Terminal text color — green on dark background. */
+private const val TTY_TEXT_GREEN = 0xFF4AF626
+
+/** Terminal background color — near-black. */
+private const val TTY_BG_COLOR = 0xFF1A1A2E
+
+/**
+ * Full-screen TTY session composable with output display and input.
+ *
+ * Renders the PTY output via [TtyCanvasView] using the GPU-accelerated cell
+ * grid renderer. A text input field handles keyboard entry and [TtyKeyRow]
+ * exposes special keys. SSH auth dialogs ([TtyHostKeyDialog],
+ * [TtyPasswordDialog]) are shown automatically based on the [session] state.
+ * [outputLines] is retained for accessibility and fallback purposes even
+ * though it is no longer the primary rendering path.
+ *
+ * @param session Current TTY session UI state for the status bar and auth dialogs.
+ * @param outputLines ANSI-stripped output lines retained for accessibility fallback.
+ * @param renderFrame Current [TtyRenderFrame] produced by the VT backend, or null
+ *   when nothing has been rendered yet.
+ * @param fontSize Font size in sp used by [TtyCanvasView] for the monospace cell grid.
+ * @param ctrlActive Whether the Ctrl modifier is toggled on.
+ * @param altActive Whether the Alt modifier is toggled on.
+ * @param onClose Callback to close the TTY session and return to REPL.
+ * @param onKeyPress Callback for special key presses from [TtyKeyRow].
+ * @param onTextInput Callback for text typed via the software keyboard.
+ * @param onFontSizeChange Invoked with the new font size after a pinch-to-zoom gesture.
+ * @param onSizeChanged Invoked with the new `(cols, rows)` grid dimensions when the
+ *   canvas size or cell metrics produce a different grid.
+ * @param onAnswerHostKey Callback invoked with `true` to accept or `false` to reject the host key.
+ * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
+ * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
+ * @param onDisconnect Callback to disconnect and dismiss the current SSH auth prompt.
+ */
+@Composable
+fun TtySessionContent(
+    session: TtySessionUiState,
+    outputLines: List<String>,
+    renderFrame: TtyRenderFrame?,
+    fontSize: Float,
+    ctrlActive: Boolean,
+    altActive: Boolean,
+    onClose: () -> Unit,
+    onKeyPress: (TtySpecialKey) -> Unit,
+    onTextInput: (String) -> Unit,
+    onFontSizeChange: (Float) -> Unit,
+    onSizeChanged: (cols: Int, rows: Int) -> Unit,
+    onAnswerHostKey: (Boolean) -> Unit = {},
+    onSubmitPassword: (CharArray) -> Unit = {},
+    @Suppress("UnusedParameter") onSubmitKey: (String) -> Unit = {},
+    onDisconnect: () -> Unit = {},
+) {
+    var inputText by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Column(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .imePadding(),
+    ) {
+        TtyStatusBar(
+            session = session,
+            onClose = onClose,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        // Show auth dialogs based on SSH state
+        when (session) {
+            is TtySessionUiState.HostKeyVerification -> {
+                TtyHostKeyDialog(
+                    host = session.host,
+                    port = session.port,
+                    algorithm = session.algorithm,
+                    fingerprint = session.fingerprintSha256,
+                    isChanged = session.isChanged,
+                    onAccept = { onAnswerHostKey(true) },
+                    onReject = { onAnswerHostKey(false) },
+                )
+            }
+            is TtySessionUiState.SshAuthRequired -> {
+                TtyPasswordDialog(
+                    onSubmit = { chars -> onSubmitPassword(chars) },
+                    onDismiss = { onDisconnect() },
+                )
+            }
+            else -> Unit
+        }
+
+        val listState = rememberLazyListState()
+
+        val isAtBottom by remember {
+            derivedStateOf {
+                val lastVisible =
+                    listState.layoutInfo.visibleItemsInfo
+                        .lastOrNull()
+                        ?.index ?: 0
+                lastVisible >= listState.layoutInfo.totalItemsCount - 2
+            }
+        }
+
+        LaunchedEffect(outputLines.size) {
+            if (isAtBottom && outputLines.isNotEmpty()) {
+                listState.scrollToItem(outputLines.size - 1)
+            }
+        }
+
+        if (renderFrame != null && renderFrame.rows.isNotEmpty()) {
+            TtyCanvasView(
+                frame = renderFrame,
+                fontSize = fontSize,
+                onFontSizeChange = onFontSizeChange,
+                onTap = { focusRequester.requestFocus() },
+                onSizeChanged = onSizeChanged,
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+            )
+        } else {
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.Bottom,
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .background(Color(TTY_BG_COLOR))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { focusRequester.requestFocus() },
+            ) {
+                items(
+                    count = outputLines.size,
+                    key = { index -> index },
+                ) { index ->
+                    Text(
+                        text = outputLines[index],
+                        color = Color(TTY_TEXT_GREEN),
+                        fontFamily = FontFamily.Monospace,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+            }
+        }
+
+        Surface(
+            color = Color(TTY_BG_COLOR),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier =
+                    Modifier.padding(
+                        horizontal = TTY_INPUT_H_PAD_DP.dp,
+                        vertical = TTY_INPUT_V_PAD_DP.dp,
+                    ),
+            ) {
+                Text(
+                    text =
+                        buildString {
+                            if (ctrlActive) append("[Ctrl] ")
+                            if (altActive) append("[Alt] ")
+                            append("\$ ")
+                        },
+                    color = Color(TTY_TEXT_GREEN),
+                    fontFamily = FontFamily.Monospace,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                BasicTextField(
+                    value = inputText,
+                    onValueChange = { newValue ->
+                        if (newValue.contains('\n')) {
+                            val text = newValue.replace("\n", "")
+                            if (text.isNotEmpty()) {
+                                onTextInput(text + "\r")
+                            }
+                            inputText = ""
+                        } else {
+                            inputText = newValue
+                        }
+                    },
+                    textStyle =
+                        MaterialTheme.typography.bodySmall.copy(
+                            color = Color(TTY_TEXT_GREEN),
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                    cursorBrush = SolidColor(Color(TTY_TEXT_GREEN)),
+                    maxLines = 1,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .focusRequester(focusRequester)
+                            .semantics {
+                                contentDescription = "Terminal input"
+                            },
+                    keyboardOptions =
+                        KeyboardOptions(
+                            imeAction = ImeAction.Send,
+                            autoCorrect = false,
+                            keyboardType = KeyboardType.Ascii,
+                        ),
+                    keyboardActions =
+                        KeyboardActions(
+                            onSend = {
+                                if (inputText.isNotEmpty()) {
+                                    onTextInput(inputText + "\r")
+                                    inputText = ""
+                                }
+                            },
+                        ),
+                )
+            }
+        }
+
+        TtyKeyRow(
+            onKeyPress = onKeyPress,
+            ctrlActive = ctrlActive,
+            altActive = altActive,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

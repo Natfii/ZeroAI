@@ -196,3 +196,7 @@ data object TailscaleConfigRoute
 /** Skill permissions (capability grants) management sub-screen. */
 @Serializable
 data object SkillPermissionsRoute
+
+/** SSH key management sub-screen. */
+@Serializable
+data object SshKeysRoute

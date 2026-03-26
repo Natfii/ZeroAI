@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -50,6 +51,11 @@ import com.zeroclaw.ffi.FfiScriptValidation
 import com.zeroclaw.ffi.FfiSessionListener
 import com.zeroclaw.ffi.FfiWorkspaceScript
 import com.zeroclaw.ffi.TailnetServiceKind
+import com.zeroclaw.ffi.TtyCursorState
+import com.zeroclaw.ffi.TtyCursorStyle
+import com.zeroclaw.ffi.TtyHostKeyDecision
+import com.zeroclaw.ffi.TtyRenderFrame
+import com.zeroclaw.ffi.TtyRenderRow
 import com.zeroclaw.ffi.evalScriptWithCapabilities
 import com.zeroclaw.ffi.getProviderSupportsVision
 import com.zeroclaw.ffi.listWorkspaceScripts
@@ -59,10 +65,24 @@ import com.zeroclaw.ffi.sessionCancel
 import com.zeroclaw.ffi.sessionDestroy
 import com.zeroclaw.ffi.sessionSend
 import com.zeroclaw.ffi.sessionStart
+import com.zeroclaw.ffi.ttyAnswerHostKey
+import com.zeroclaw.ffi.ttyCreate
+import com.zeroclaw.ffi.ttyDestroy
+import com.zeroclaw.ffi.ttyDisconnectSsh
+import com.zeroclaw.ffi.ttyGetOutputSnapshot
+import com.zeroclaw.ffi.ttyGetPendingHostKey
+import com.zeroclaw.ffi.ttyGetRenderFrame
+import com.zeroclaw.ffi.ttyResize
+import com.zeroclaw.ffi.ttyStartSsh
+import com.zeroclaw.ffi.ttySubmitKey
+import com.zeroclaw.ffi.ttySubmitPassword
+import com.zeroclaw.ffi.ttyWrite
 import com.zeroclaw.ffi.validateScript
 import com.zeroclaw.ffi.validateWorkspaceScript
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -87,14 +107,21 @@ import kotlinx.serialization.json.Json
  * [TerminalEntryRepository][com.zeroclaw.android.data.repository.TerminalEntryRepository]
  * so history survives navigation and app restarts.
  *
+ * Also manages TTY/SSH terminal sessions. When the user switches to TTY mode a
+ * local PTY is spawned (or an SSH connection is established), a polling
+ * coroutine keeps [ttyRenderFrame] up to date, and [ttyFontSize] / [ttySelection]
+ * expose pinch-to-zoom and text-selection state to the UI.
+ *
  * Supports image attachments via the photo picker, with vision requests
  * routed through the `send_vision` Rhai function.
  *
  * @param application Application context for accessing repositories and bridges.
+ * @param savedStateHandle Jetpack SavedState handle for surviving process death.
  */
 @Suppress("LargeClass", "TooManyFunctions")
 class TerminalViewModel(
     application: Application,
+    private val savedStateHandle: SavedStateHandle,
 ) : AndroidViewModel(application) {
     private val app = application as ZeroAIApplication
     private val repository = app.terminalEntryRepository
@@ -198,6 +225,77 @@ class TerminalViewModel(
 
     /** Whether continuous location updates are active. */
     private val _locationWatchActive = MutableStateFlow(false)
+
+    /**
+     * Current terminal presentation mode.
+     *
+     * Defaults to [TerminalMode.Repl]. Switches to [TerminalMode.Tty] when
+     * the `@tty` command opens a raw terminal session. Persisted across
+     * navigation via [SavedStateHandle] so tab switches do not reset the mode.
+     */
+    private val _terminalMode =
+        MutableStateFlow<TerminalMode>(
+            if (savedStateHandle.get<Boolean>(KEY_TTY_ACTIVE) == true) {
+                TerminalMode.Tty(session = TtySessionUiState.LocalShell)
+            } else {
+                TerminalMode.Repl
+            },
+        )
+
+    /**
+     * Lines of ANSI-stripped output from the active PTY session.
+     *
+     * Populated by a polling coroutine that calls [ttyGetOutputSnapshot]
+     * at [TTY_POLL_INTERVAL_MS] intervals while TTY mode is active.
+     */
+    private val _ttyOutputLines = MutableStateFlow<List<String>>(emptyList())
+
+    private val _ttyRenderFrame = MutableStateFlow<TtyRenderFrame?>(null)
+
+    /**
+     * The most recent [TtyRenderFrame] produced by the VT backend, or `null`
+     * before the first frame has been received. Updated by the polling
+     * coroutine started in [startTtyPolling].
+     */
+    val ttyRenderFrame: StateFlow<TtyRenderFrame?> = _ttyRenderFrame.asStateFlow()
+
+    private val _ttyFontSize = MutableStateFlow(TTY_DEFAULT_FONT_SIZE)
+
+    /**
+     * Current terminal font size in sp, adjusted by pinch-to-zoom gestures
+     * in the [TtyCanvasView] and clamped to the range [8, 32].
+     */
+    val ttyFontSize: StateFlow<Float> = _ttyFontSize.asStateFlow()
+
+    private val _ttySelection = MutableStateFlow<TtySelectionState?>(null)
+
+    /**
+     * Current text selection in grid coordinates, or `null` when no selection
+     * is active. Updated by [setTtySelection] in response to drag gestures.
+     */
+    val ttySelection: StateFlow<TtySelectionState?> = _ttySelection.asStateFlow()
+
+    /**
+     * Whether the Ctrl modifier key is currently toggled on.
+     *
+     * When active, the next character key press is combined with Ctrl
+     * (e.g. 'c' becomes `0x03`) and the modifier resets to `false`.
+     */
+    private val _ttyCtrlActive = MutableStateFlow(false)
+
+    /**
+     * Whether the Alt modifier key is currently toggled on.
+     *
+     * When active, the next character key press is prefixed with ESC
+     * (`0x1B`) to form an Alt sequence and the modifier resets to `false`.
+     */
+    private val _ttyAltActive = MutableStateFlow(false)
+
+    /** Coroutine job for polling PTY output while TTY mode is active. */
+    private var ttyPollJob: Job? = null
+
+    /** Coroutine job for polling SSH host key prompts during the handshake. */
+    private var sshPollJob: Job? = null
 
     /**
      * Signals the UI layer to launch the screen capture consent dialog.
@@ -348,6 +446,28 @@ class TerminalViewModel(
      */
     val requestLocationPermission: StateFlow<Boolean> = _requestLocationPermission.asStateFlow()
 
+    /**
+     * Current terminal presentation mode.
+     *
+     * The UI layer observes this to switch between the interactive REPL
+     * composable and the raw TTY surface. Defaults to [TerminalMode.Repl].
+     */
+    val terminalMode: StateFlow<TerminalMode> = _terminalMode.asStateFlow()
+
+    /**
+     * ANSI-stripped output lines from the active PTY session.
+     *
+     * Empty when no TTY session is running. The UI renders these in a
+     * monospace [LazyColumn][androidx.compose.foundation.lazy.LazyColumn].
+     */
+    val ttyOutputLines: StateFlow<List<String>> = _ttyOutputLines.asStateFlow()
+
+    /** Whether the Ctrl modifier is toggled on for the next key press. */
+    val ttyCtrlActive: StateFlow<Boolean> = _ttyCtrlActive.asStateFlow()
+
+    /** Whether the Alt modifier is toggled on for the next key press. */
+    val ttyAltActive: StateFlow<Boolean> = _ttyAltActive.asStateFlow()
+
     /** Whether the daemon foreground service is currently running. */
     val isDaemonRunning: StateFlow<Boolean> =
         app.daemonBridge.serviceState
@@ -457,11 +577,23 @@ class TerminalViewModel(
     }
 
     /**
-     * Tears down the agent session when the ViewModel is destroyed.
+     * Tears down the agent session and PTY when the ViewModel is destroyed.
      */
     @Suppress("TooGenericExceptionCaught")
     override fun onCleared() {
         super.onCleared()
+        sshPollJob?.cancel()
+        try {
+            ttyDisconnectSsh()
+        } catch (e: Exception) {
+            logRepository.append(LogSeverity.WARN, TAG, "SSH disconnect failed: ${e.message}")
+        }
+        stopTtyPolling()
+        try {
+            ttyDestroy()
+        } catch (e: Exception) {
+            logRepository.append(LogSeverity.WARN, TAG, "TTY destroy failed: ${e.message}")
+        }
         try {
             sessionDestroy()
         } catch (e: Exception) {
@@ -476,6 +608,524 @@ class TerminalViewModel(
             locationBridge.stopLocationUpdates()
         }
         screenCaptureBridge.release()
+    }
+
+    /**
+     * Switches the terminal into raw TTY mode with a local shell session.
+     *
+     * Creates a PTY via [ttyCreate], starts an output polling coroutine,
+     * and updates [terminalMode] so the UI renders the TTY surface.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun switchToTty() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyCreate(TTY_DEFAULT_COLS.toUInt(), TTY_DEFAULT_ROWS.toUInt())
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session = TtySessionUiState.LocalShell,
+                    )
+                savedStateHandle[KEY_TTY_ACTIVE] = true
+                startTtyPolling()
+            } catch (e: Exception) {
+                logRepository.append(
+                    LogSeverity.ERROR,
+                    TAG,
+                    "TTY create failed: ${e.message}",
+                )
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session =
+                            TtySessionUiState.Error(
+                                e.message ?: "Failed to create PTY session",
+                            ),
+                    )
+            }
+        }
+    }
+
+    /**
+     * Returns the terminal to interactive REPL mode.
+     *
+     * Destroys the PTY session via [ttyDestroy], stops output polling,
+     * clears modifier state, and restores the REPL composable.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun switchToRepl() {
+        stopTtyPolling()
+        _ttyOutputLines.value = emptyList()
+        _ttyRenderFrame.value = null
+        _ttySelection.value = null
+        _ttyCtrlActive.value = false
+        _ttyAltActive.value = false
+        _terminalMode.value = TerminalMode.Repl
+        savedStateHandle[KEY_TTY_ACTIVE] = false
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyDestroy()
+            } catch (e: Exception) {
+                logRepository.append(
+                    LogSeverity.WARN,
+                    TAG,
+                    "TTY destroy failed: ${e.message}",
+                )
+            }
+        }
+        viewModelScope.launch {
+            repository.append(
+                content = "TTY session ended.",
+                entryType = ENTRY_TYPE_SYSTEM,
+            )
+        }
+    }
+
+    /**
+     * Sends raw bytes to the active PTY session.
+     *
+     * @param bytes Raw byte data to write to the PTY input.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun ttyWriteBytes(bytes: ByteArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyWrite(bytes)
+            } catch (e: Exception) {
+                logRepository.append(
+                    LogSeverity.WARN,
+                    TAG,
+                    "TTY write failed: ${e.message}",
+                )
+            }
+        }
+    }
+
+    /**
+     * Sends a text string to the active PTY session as UTF-8 bytes.
+     *
+     * Intercepts `/ssh user@host [-p port]` before forwarding to the PTY,
+     * routing such input to [sshConnect] instead. All other input is forwarded
+     * as raw UTF-8 bytes via [ttyWriteBytes].
+     *
+     * @param text Text to write (typically a single character or line).
+     */
+    @Suppress("MagicNumber")
+    fun ttyWriteText(text: String) {
+        val match = SSH_COMMAND_PATTERN.matchEntire(text.trimEnd('\n'))
+        if (match != null) {
+            val user = match.groupValues[1]
+            val host = match.groupValues[2]
+            val port = match.groupValues[3].toIntOrNull() ?: SSH_DEFAULT_PORT
+            if (!SSH_USER_PATTERN.matches(user) || !SSH_HOST_PATTERN.matches(host) || port > SSH_MAX_PORT) {
+                viewModelScope.launch {
+                    repository.append(content = "Invalid SSH target.", entryType = ENTRY_TYPE_ERROR)
+                }
+                return
+            }
+            sshConnect(user, host, port)
+            return
+        }
+        ttyWriteBytes(text.toByteArray(Charsets.UTF_8))
+    }
+
+    /**
+     * Handles a special key press from the [TtyKeyRow].
+     *
+     * Modifier keys (Ctrl, Alt) toggle their respective state flags.
+     * All other keys are encoded and sent to the PTY, with modifier
+     * prefixes applied if active.
+     *
+     * @param key The special key that was pressed.
+     */
+    fun ttyHandleSpecialKey(key: TtySpecialKey) {
+        when (key) {
+            TtySpecialKey.CTRL -> {
+                _ttyCtrlActive.update { !it }
+                return
+            }
+            TtySpecialKey.ALT -> {
+                _ttyAltActive.update { !it }
+                return
+            }
+            else -> Unit
+        }
+        val bytes = encodeTtyKey(key, _ttyCtrlActive.value, _ttyAltActive.value)
+        _ttyCtrlActive.value = false
+        _ttyAltActive.value = false
+        ttyWriteBytes(bytes)
+    }
+
+    /**
+     * Starts the coroutine that polls [ttyGetOutputSnapshot] at regular
+     * intervals and updates [_ttyOutputLines].
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun startTtyPolling() {
+        ttyPollJob?.cancel()
+        ttyPollJob =
+            viewModelScope.launch(Dispatchers.IO) {
+                while (true) {
+                    val textLines =
+                        try {
+                            val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
+                            _ttyOutputLines.value = lines
+                            lines
+                        } catch (e: Exception) {
+                            _ttyOutputLines.value
+                        }
+                    val nextFrame =
+                        try {
+                            val frame = ttyGetRenderFrame()
+                            if (frame.rows.isNotEmpty()) {
+                                frame
+                            } else {
+                                buildFallbackFrame(textLines)
+                            }
+                        } catch (e: Exception) {
+                            buildFallbackFrame(textLines)
+                        }
+                    _ttyRenderFrame.value = nextFrame
+                    delay(TTY_POLL_INTERVAL_MS)
+                }
+            }
+    }
+
+    /** Cancels the PTY output polling coroutine. */
+    private fun stopTtyPolling() {
+        ttyPollJob?.cancel()
+        ttyPollJob = null
+    }
+
+    /** Updates the terminal font size from pinch-to-zoom. */
+    fun setTtyFontSize(sizeSp: Float) {
+        _ttyFontSize.value = sizeSp.coerceIn(TTY_MIN_FONT_SIZE, TTY_MAX_FONT_SIZE)
+    }
+
+    /** Updates the terminal text selection state. */
+    fun setTtySelection(selection: TtySelectionState?) {
+        _ttySelection.value = selection
+    }
+
+    /** Resizes the PTY when the Canvas grid dimensions change. */
+    @Suppress("TooGenericExceptionCaught")
+    fun onTtyGridSizeChanged(
+        cols: Int,
+        rows: Int,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyResize(
+                    cols.coerceAtLeast(1).toUInt(),
+                    rows.coerceAtLeast(1).toUInt(),
+                    0u,
+                    0u,
+                )
+            } catch (e: Exception) {
+                logRepository.append(LogSeverity.WARN, TAG, "TTY resize failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Builds a [TtyRenderFrame] from plain text lines when the VT backend
+     * is unavailable (stub backend). Provides basic terminal output with
+     * default green-on-dark styling.
+     */
+    private fun buildFallbackFrame(lines: List<String>): TtyRenderFrame {
+        val rows =
+            lines.map { line ->
+                TtyRenderRow(
+                    text = line,
+                    spans = emptyList(),
+                    dirty = true,
+                )
+            }
+        return TtyRenderFrame(
+            rows = rows,
+            cols = TTY_DEFAULT_COLS.toUShort(),
+            numRows = rows.size.toUShort(),
+            cursor =
+                TtyCursorState(
+                    col = 0u.toUShort(),
+                    row =
+                        rows.size
+                            .coerceAtLeast(1)
+                            .toUShort()
+                            .dec(),
+                    visible = true,
+                    style = TtyCursorStyle.BLOCK,
+                    blinking = true,
+                ),
+            defaultBgArgb = 0xFF1A1A2Eu,
+            defaultFgArgb = 0xFF4AF626u,
+            hasChanges = true,
+        )
+    }
+
+    /**
+     * Initiates an SSH connection to a remote host.
+     *
+     * Destroys any active local shell, transitions to connecting state,
+     * and begins polling for host key prompts.
+     *
+     * @param user SSH username.
+     * @param host Remote hostname or IP address.
+     * @param port Remote SSH port.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun sshConnect(
+        user: String,
+        host: String,
+        port: Int,
+    ) {
+        stopTtyPolling()
+        _terminalMode.value =
+            TerminalMode.Tty(
+                session = TtySessionUiState.SshConnecting(host, port, user),
+            )
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyStartSsh(host, port.toUInt(), user)
+                startHostKeyPolling()
+            } catch (e: Exception) {
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session =
+                            TtySessionUiState.Error(
+                                "SSH connection failed: ${e.message}",
+                            ),
+                    )
+            }
+        }
+    }
+
+    /**
+     * Polls for a pending host key prompt from the SSH handshake.
+     *
+     * Runs every [SSH_HOST_KEY_POLL_MS] until a prompt arrives or
+     * [SSH_HANDSHAKE_TIMEOUT_MS] elapses.
+     */
+    @Suppress("CognitiveComplexMethod", "LongMethod")
+    private fun startHostKeyPolling() {
+        sshPollJob?.cancel()
+        sshPollJob =
+            viewModelScope.launch(Dispatchers.IO) {
+                val deadline = System.currentTimeMillis() + SSH_HANDSHAKE_TIMEOUT_MS
+                while (System.currentTimeMillis() < deadline) {
+                    try {
+                        // Check SSH state machine transitions.
+                        val state = com.zeroclaw.ffi.ttyGetSshState()
+
+                        if (state == com.zeroclaw.ffi.SshState.DISCONNECTED) {
+                            val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
+                            val errorMsg =
+                                lines.lastOrNull { it.startsWith("SSH error:") }
+                                    ?: "SSH connection failed"
+                            _terminalMode.value =
+                                TerminalMode.Tty(
+                                    session = TtySessionUiState.Error(errorMsg),
+                                )
+                            return@launch
+                        }
+
+                        // SSH connected without user interaction (host
+                        // already trusted + key auth auto-succeeded).
+                        if (state == com.zeroclaw.ffi.SshState.CONNECTED) {
+                            _terminalMode.value =
+                                TerminalMode.Tty(
+                                    session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
+                                )
+                            startTtyPolling()
+                            return@launch
+                        }
+
+                        // Awaiting host key — show trust dialog.
+                        if (state == com.zeroclaw.ffi.SshState.AWAITING_HOST_KEY) {
+                            val prompt = ttyGetPendingHostKey()
+                            if (prompt != null) {
+                                _terminalMode.value =
+                                    TerminalMode.Tty(
+                                        session =
+                                            TtySessionUiState.HostKeyVerification(
+                                                host = prompt.host,
+                                                port = prompt.port.toInt(),
+                                                algorithm = prompt.algorithm,
+                                                fingerprintSha256 = prompt.fingerprintSha256,
+                                                isChanged = prompt.isChanged,
+                                            ),
+                                    )
+                                return@launch
+                            }
+                        }
+
+                        // Authenticating — show auth dialog.
+                        if (state == com.zeroclaw.ffi.SshState.AUTHENTICATING) {
+                            _terminalMode.value =
+                                TerminalMode.Tty(
+                                    session =
+                                        TtySessionUiState.SshAuthRequired(
+                                            methods = listOf("password", "publickey"),
+                                        ),
+                                )
+                            return@launch
+                        }
+                    } catch (_: Exception) {
+                        break
+                    }
+                    delay(SSH_HOST_KEY_POLL_MS)
+                }
+                // Timeout — show error
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session = TtySessionUiState.Error("SSH connection timed out"),
+                    )
+            }
+    }
+
+    /**
+     * Responds to a host key verification prompt.
+     *
+     * @param accept Whether to trust the presented host key.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun sshAnswerHostKey(accept: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val decision =
+                    if (accept) {
+                        TtyHostKeyDecision.ACCEPT
+                    } else {
+                        TtyHostKeyDecision.REJECT
+                    }
+                ttyAnswerHostKey(decision)
+                if (accept) {
+                    _terminalMode.value =
+                        TerminalMode.Tty(
+                            session =
+                                TtySessionUiState.SshAuthRequired(
+                                    methods = listOf("password", "publickey"),
+                                ),
+                        )
+                } else {
+                    sshDisconnect()
+                }
+            } catch (e: Exception) {
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session =
+                            TtySessionUiState.Error(
+                                "Host key error: ${e.message}",
+                            ),
+                    )
+            }
+        }
+    }
+
+    /**
+     * Submits a password for SSH authentication.
+     *
+     * Both the [CharArray] and intermediate [ByteArray] are zeroed
+     * on all exit paths.
+     *
+     * @param chars Password as a character array.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun sshSubmitPassword(chars: CharArray) {
+        viewModelScope.launch(Dispatchers.IO) {
+            var bytes: ByteArray? = null
+            try {
+                val encoder = Charsets.UTF_8.newEncoder()
+                val buf = encoder.encode(java.nio.CharBuffer.wrap(chars))
+                bytes = ByteArray(buf.remaining()).also { buf.get(it) }
+                val success = ttySubmitPassword(bytes)
+                if (success) {
+                    _terminalMode.value =
+                        TerminalMode.Tty(
+                            session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
+                        )
+                    startTtyPolling()
+                } else {
+                    _terminalMode.value =
+                        TerminalMode.Tty(
+                            session =
+                                TtySessionUiState.SshAuthRequired(
+                                    methods = listOf("password", "publickey"),
+                                ),
+                        )
+                }
+            } catch (e: Exception) {
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session =
+                            TtySessionUiState.Error(
+                                "Auth failed: ${e.message}",
+                            ),
+                    )
+            } finally {
+                chars.fill('\u0000')
+                bytes?.fill(0)
+            }
+        }
+    }
+
+    /**
+     * Submits an SSH key for authentication.
+     *
+     * @param keyId UUID of the key in the Rust key store.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun sshSubmitKey(keyId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val success = ttySubmitKey(keyId)
+                if (success) {
+                    _terminalMode.value =
+                        TerminalMode.Tty(
+                            session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
+                        )
+                    startTtyPolling()
+                } else {
+                    _terminalMode.value =
+                        TerminalMode.Tty(
+                            session =
+                                TtySessionUiState.SshAuthRequired(
+                                    methods = listOf("password", "publickey"),
+                                ),
+                        )
+                }
+            } catch (e: Exception) {
+                _terminalMode.value =
+                    TerminalMode.Tty(
+                        session =
+                            TtySessionUiState.Error(
+                                "Key auth failed: ${e.message}",
+                            ),
+                    )
+            }
+        }
+    }
+
+    /**
+     * Disconnects the active SSH session and returns to REPL mode.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun sshDisconnect() {
+        sshPollJob?.cancel()
+        sshPollJob = null
+        stopTtyPolling()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                ttyDisconnectSsh()
+            } catch (_: Exception) {
+                // idempotent
+            }
+        }
+        _terminalMode.value = TerminalMode.Repl
+        viewModelScope.launch {
+            repository.append(
+                content = "SSH session ended.",
+                entryType = ENTRY_TYPE_SYSTEM,
+            )
+        }
     }
 
     /**
@@ -517,6 +1167,7 @@ class TerminalViewModel(
             is CommandResult.LocalAction -> handleLocalAction(result.action)
             is CommandResult.ChatMessage -> executeChatMessage(trimmed, result.text)
             is CommandResult.NanoCommand -> executeNanoIntent(trimmed, result.intent)
+            is CommandResult.TtyOpen -> switchToTty()
         }
     }
 
@@ -1497,6 +2148,13 @@ class TerminalViewModel(
             "location" -> handleLocation()
             "location-watch" -> handleLocationWatch()
             "notify" -> handleNotify()
+            "ssh-keys" ->
+                viewModelScope.launch {
+                    repository.append(
+                        content = "Open Settings \u2192 SSH Keys to manage your keys.",
+                        entryType = ENTRY_TYPE_SYSTEM,
+                    )
+                }
         }
     }
 
@@ -2615,6 +3273,30 @@ class TerminalViewModel(
     companion object {
         private const val TAG = "Terminal"
 
+        /** [SavedStateHandle] key for persisting TTY mode across tab switches. */
+        private const val KEY_TTY_ACTIVE = "tty_active"
+
+        /** Default PTY column count. */
+        private const val TTY_DEFAULT_COLS = 80
+
+        /** Default PTY row count. */
+        private const val TTY_DEFAULT_ROWS = 24
+
+        /** Interval in milliseconds between PTY output polls. */
+        private const val TTY_POLL_INTERVAL_MS = 100L
+
+        /** Maximum number of lines to retrieve per output snapshot. */
+        private const val TTY_SNAPSHOT_MAX_LINES = 500
+
+        /** Default terminal font size in sp. */
+        private const val TTY_DEFAULT_FONT_SIZE = 14f
+
+        /** Minimum terminal font size in sp, enforced by pinch-to-zoom. */
+        private const val TTY_MIN_FONT_SIZE = 8f
+
+        /** Maximum terminal font size in sp, enforced by pinch-to-zoom. */
+        private const val TTY_MAX_FONT_SIZE = 32f
+
         /** Timeout in milliseconds before upstream Flow collection stops. */
         private const val STOP_TIMEOUT_MS = 5_000L
 
@@ -2638,6 +3320,27 @@ class TerminalViewModel(
 
         /** Subscription timeout for [peerAliases] flow collection. */
         private const val PEER_ALIAS_TIMEOUT = 5_000L
+
+        /** Pattern matching valid SSH usernames (RFC 952 / common practice). */
+        private val SSH_USER_PATTERN = Regex("""^[a-zA-Z0-9._-]{1,64}$""")
+
+        /** Pattern matching valid SSH hostnames or IP addresses. */
+        private val SSH_HOST_PATTERN = Regex("""^[a-zA-Z0-9._:-]{1,253}$""")
+
+        /** Pattern matching the `/ssh user@host [-p port]` terminal command. */
+        private val SSH_COMMAND_PATTERN = Regex("""^/ssh\s+(\S+)@(\S+)(?:\s+-p\s+(\d+))?\s*$""")
+
+        /** Default SSH port when `-p` is not specified. */
+        private const val SSH_DEFAULT_PORT = 22
+
+        /** Polling interval in milliseconds for host key prompts during handshake. */
+        private const val SSH_HOST_KEY_POLL_MS = 200L
+
+        /** Maximum time in milliseconds to wait for an SSH handshake host key prompt. */
+        private const val SSH_HANDSHAKE_TIMEOUT_MS = 30_000L
+
+        /** Maximum valid TCP port number. */
+        private const val SSH_MAX_PORT = 65535
 
         /** Runtime identifier for the currently executable embedded script engine. */
         private const val SCRIPT_RUNTIME_RHAI = "rhai"
@@ -2798,6 +3501,49 @@ class TerminalViewModel(
          * @return Response with tool-call blocks removed and whitespace trimmed.
          */
         fun stripToolCallTags(text: String): String = text.replace(TOOL_CALL_TAG_REGEX, "").trim()
+
+        /**
+         * Encodes a [TtySpecialKey] into the raw bytes expected by a VT100
+         * terminal, applying Ctrl and Alt modifiers when active.
+         *
+         * @param key The special key to encode.
+         * @param ctrl Whether the Ctrl modifier is active.
+         * @param alt Whether the Alt modifier is active.
+         * @return Byte array to write to the PTY.
+         */
+        @Suppress("MagicNumber", "CyclomaticComplexMethod")
+        fun encodeTtyKey(
+            key: TtySpecialKey,
+            ctrl: Boolean = false,
+            alt: Boolean = false,
+        ): ByteArray {
+            val raw =
+                when (key) {
+                    TtySpecialKey.TAB -> byteArrayOf(0x09)
+                    TtySpecialKey.ESC -> byteArrayOf(0x1B)
+                    TtySpecialKey.UP -> byteArrayOf(0x1B, 0x5B, 0x41)
+                    TtySpecialKey.DOWN -> byteArrayOf(0x1B, 0x5B, 0x42)
+                    TtySpecialKey.RIGHT -> byteArrayOf(0x1B, 0x5B, 0x43)
+                    TtySpecialKey.LEFT -> byteArrayOf(0x1B, 0x5B, 0x44)
+                    TtySpecialKey.HOME -> byteArrayOf(0x1b, 0x5b, 0x48) // ESC [ H
+                    TtySpecialKey.END -> byteArrayOf(0x1b, 0x5b, 0x46) // ESC [ F
+                    TtySpecialKey.PAGE_UP -> byteArrayOf(0x1b, 0x5b, 0x35, 0x7e) // ESC [ 5 ~
+                    TtySpecialKey.PAGE_DOWN -> byteArrayOf(0x1b, 0x5b, 0x36, 0x7e) // ESC [ 6 ~
+                    TtySpecialKey.PIPE -> "|".toByteArray(Charsets.UTF_8)
+                    TtySpecialKey.SLASH -> "/".toByteArray(Charsets.UTF_8)
+                    TtySpecialKey.TILDE -> "~".toByteArray(Charsets.UTF_8)
+                    TtySpecialKey.DASH -> "-".toByteArray(Charsets.UTF_8)
+                    TtySpecialKey.ENTER -> byteArrayOf(0x0D) // CR
+                    TtySpecialKey.CTRL, TtySpecialKey.ALT -> return byteArrayOf()
+                }
+            if (ctrl && raw.size == 1 && raw[0] in 0x40..0x7E) {
+                return byteArrayOf((raw[0].toInt() and 0x1F).toByte())
+            }
+            if (alt && raw.size == 1) {
+                return byteArrayOf(0x1B, raw[0])
+            }
+            return raw
+        }
 
         /**
          * Maps a persisted [TerminalEntry] to a display [TerminalBlock].

@@ -67,6 +67,18 @@ style:
       - "TODO"
       - "FIXME"
       - "STOPSHIP"
+
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - reason: 'Use Timber or logRepository instead of android.util.Log'
+        value: 'android.util.Log.v'
+      - reason: 'Use Timber or logRepository instead of android.util.Log'
+        value: 'android.util.Log.d'
+      - reason: 'Use Timber or logRepository instead of android.util.Log'
+        value: 'android.util.Log.e'
+      - reason: 'Use Timber or logRepository instead of android.util.Log'
+        value: 'android.util.Log.w'
   MagicNumber:
     active: true
     ignoreNumbers:

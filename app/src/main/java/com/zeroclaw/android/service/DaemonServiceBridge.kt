@@ -959,4 +959,8 @@ private fun FfiException.errorDetail(): String =
         is FfiException.EstopEngaged -> detail
         is FfiException.InvalidArgument -> detail
         is FfiException.NetworkException -> detail
+        is FfiException.SshHostKeyException -> detail
+        is FfiException.SshAuthFailed -> detail
+        is FfiException.SshDisconnected -> detail
+        is FfiException.IoException -> detail
     }

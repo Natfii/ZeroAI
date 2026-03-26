@@ -186,6 +186,12 @@ internal fun SettingsContent(
                 subtitle = "Raw provider token store (advanced)",
                 onClick = { onNavigate(SettingsNavAction.AuthProfiles) },
             )
+            SettingsListItem(
+                icon = Icons.Outlined.Key,
+                title = "SSH Keys",
+                subtitle = "Manage SSH private keys",
+                onClick = { onNavigate(SettingsNavAction.SshKeys) },
+            )
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 

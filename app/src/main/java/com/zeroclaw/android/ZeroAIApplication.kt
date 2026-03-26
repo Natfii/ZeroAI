@@ -53,7 +53,9 @@ import com.zeroclaw.android.data.repository.RoomPluginRepository
 import com.zeroclaw.android.data.repository.RoomTerminalEntryRepository
 import com.zeroclaw.android.data.repository.SettingsRepository
 import com.zeroclaw.android.data.repository.TerminalEntryRepository
+import com.zeroclaw.android.data.ssh.SshDataStore
 import com.zeroclaw.android.model.CachedTailscalePeer
+import com.zeroclaw.android.model.LogSeverity
 import com.zeroclaw.android.model.RefreshCommand
 import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.service.CapabilityApprovalNotifier
@@ -162,6 +164,10 @@ class ZeroAIApplication :
     lateinit var terminalEntryRepository: TerminalEntryRepository
         private set
 
+    /** Encrypted DataStore for SSH key metadata. */
+    lateinit var sshDataStore: SshDataStore
+        private set
+
     /** Emergency stop state repository. */
     lateinit var estopRepository: EstopRepository
         private set
@@ -252,9 +258,11 @@ class ZeroAIApplication :
             .build()
     }
 
+    @Suppress("LongMethod", "TooGenericExceptionCaught")
     override fun onCreate() {
         super.onCreate()
         System.loadLibrary("sqlcipher")
+        System.loadLibrary("ghostty_vt")
         System.loadLibrary("zeroclaw")
         com.zeroclaw.ffi.initLogging()
         verifyCrateVersion()
@@ -276,6 +284,29 @@ class ZeroAIApplication :
         emailConfigRepository = createEmailConfigRepository()
         terminalEntryRepository =
             RoomTerminalEntryRepository(database.terminalEntryDao(), ioScope)
+        sshDataStore = SshDataStore(this)
+        try {
+            com.zeroclaw.ffi.sshKeyStoreInit(
+                filesDir.resolve("ssh/keys").absolutePath,
+            )
+        } catch (e: Exception) {
+            logRepository.append(
+                LogSeverity.ERROR,
+                TAG,
+                "SSH key store init failed: ${e.message}",
+            )
+        }
+        ioScope.launch {
+            try {
+                sshDataStore.pruneStaleKeys()
+            } catch (e: Exception) {
+                logRepository.append(
+                    LogSeverity.WARN,
+                    TAG,
+                    "SSH key prune failed: ${e.message}",
+                )
+            }
+        }
         estopRepository = EstopRepository(scope = ioScope)
         healthBridge = HealthBridge()
         costBridge = CostBridge()

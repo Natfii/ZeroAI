@@ -21,3 +21,9 @@
 
 # ML Kit GenAI: keep Prompt API classes used via reflection.
 -keep class com.google.mlkit.genai.** { *; }
+
+# Strip verbose and debug log calls in release builds.
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+}

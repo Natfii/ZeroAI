@@ -82,4 +82,32 @@ pub enum FfiError {
         /// Description of the network failure.
         detail: String,
     },
+
+    /// SSH host key rejected by the user or mismatched against known hosts.
+    #[error("ssh host key error: {detail}")]
+    SshHostKeyError {
+        /// Description of the host key problem.
+        detail: String,
+    },
+
+    /// SSH authentication failed (wrong password, key rejected, etc.).
+    #[error("ssh auth failed: {detail}")]
+    SshAuthFailed {
+        /// Description of the authentication failure.
+        detail: String,
+    },
+
+    /// SSH connection lost or closed unexpectedly.
+    #[error("ssh disconnected: {detail}")]
+    SshDisconnected {
+        /// Description of the disconnection.
+        detail: String,
+    },
+
+    /// Local filesystem I/O failure (directory creation, file read/write).
+    #[error("io error: {detail}")]
+    IoError {
+        /// Description of the I/O failure.
+        detail: String,
+    },
 }

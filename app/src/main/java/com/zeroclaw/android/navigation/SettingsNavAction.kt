@@ -69,4 +69,7 @@ sealed interface SettingsNavAction {
 
     /** Navigate to the skill permissions (capability grants) screen. */
     data object SkillPermissions : SettingsNavAction
+
+    /** Navigate to the SSH key management screen. */
+    data object SshKeys : SettingsNavAction
 }

@@ -157,6 +157,7 @@ pub async fn run_wizard(force: bool) -> Result<Config> {
         transcription: crate::config::TranscriptionConfig::default(),
         email: None,
         system_prompt: crate::config::SystemPromptConfig::default(),
+        tty: crate::config::schema::TtyConfig::default(),
     };
 
     println!(
@@ -504,6 +505,7 @@ async fn run_quick_setup_with_home(
         transcription: crate::config::TranscriptionConfig::default(),
         email: None,
         system_prompt: crate::config::SystemPromptConfig::default(),
+        tty: crate::config::schema::TtyConfig::default(),
     };
 
     config.save().await?;

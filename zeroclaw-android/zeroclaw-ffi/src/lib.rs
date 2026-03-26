@@ -51,6 +51,7 @@ mod email_cron;
 mod messages_bridge;
 mod messages_bridge_page;
 mod tailnet;
+mod tty;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
@@ -3269,6 +3270,535 @@ pub fn revoke_capability_grant(
             detail: panic_detail(&e),
         })
     })
+}
+
+// ── TTY (local shell) ────────────────────────────────────────────────
+
+/// Creates a new local PTY shell session.
+///
+/// Opens a PTY pair, forks `/system/bin/sh`, and starts async
+/// read/write loops. Only one session can be active at a time.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if a session is already running,
+/// [`FfiError::SpawnError`] if PTY creation or fork fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_create(cols: u32, rows: u32) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::session::create(cols as u16, rows as u16)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Destroys the running local shell PTY session.
+///
+/// Sends `SIGHUP` then `SIGKILL` to the child process and closes
+/// the master fd. Idempotent — returns `Ok` if no session is running.
+///
+/// # Errors
+///
+/// Returns [`FfiError::SpawnError`] if signal delivery fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_destroy() -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| tty::session::destroy())).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Writes raw bytes to the PTY input (non-blocking).
+///
+/// Sends `bytes` through the mpsc channel to the write loop. If the
+/// channel is full (backpressure), returns an error.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running,
+/// [`FfiError::SpawnError`] if the write channel is full/closed, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_write(bytes: Vec<u8>) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::is_connected() {
+            tty::ssh::write_bytes(bytes)
+        } else {
+            tty::session::write_bytes(bytes)
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Resizes the PTY to the given dimensions.
+///
+/// Uses the `TIOCSWINSZ` ioctl. `width_px` and `height_px` are
+/// reserved for future pixel-dimension support and currently unused.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running,
+/// [`FfiError::SpawnError`] if the ioctl fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_resize(cols: u32, rows: u32, width_px: u32, height_px: u32) -> Result<(), FfiError> {
+    let _ = (width_px, height_px);
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::is_connected() {
+            tty::ssh::resize(cols as u16, rows as u16)
+        } else {
+            tty::session::resize(cols as u16, rows as u16)
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns the last `max_lines` output lines from the PTY session.
+///
+/// Lines are returned oldest-first with ANSI escape sequences stripped.
+/// If fewer than `max_lines` are available, all lines are returned.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_get_output_snapshot(max_lines: u32) -> Result<Vec<String>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            tty::ssh::get_output_lines(max_lines)
+        } else {
+            tty::session::get_output_lines(max_lines)
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns recent PTY output as a single scrubbed string for LLM
+/// context injection.
+///
+/// Credentials are redacted and the result is capped at `max_bytes`
+/// (defaults to 64 KiB when `None`). Oldest lines are truncated
+/// first to fit the budget.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_get_context(max_bytes: Option<u32>) -> Result<String, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let limit = max_bytes.unwrap_or(65_536) as usize;
+        tty::session::get_context(limit)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns a complete render frame from the terminal backend.
+///
+/// Captures the current screen grid from the local shell session,
+/// converts it to a [`tty::types::TtyRenderFrame`] that is ready for
+/// Kotlin Canvas drawing, and returns it across the FFI boundary.
+///
+/// Colors are packed ARGB (`0xAARRGGBB`). A value of `0x00000000` for
+/// a span's foreground or background means "use the terminal default"
+/// and must not be interpreted as opaque black.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_get_render_frame() -> Result<tty::types::TtyRenderFrame, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            tty::ssh::get_render_frame()
+        } else {
+            tty::session::get_render_frame()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Initializes the SSH key store directory.
+///
+/// Creates the directory and parents if absent. Idempotent with the
+/// same path; returns [`FfiError::StateError`] if called with a
+/// different path.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if directory creation fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_key_store_init(keys_dir: String) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let keys_path = std::path::PathBuf::from(&keys_dir);
+        tty::key_store::init(keys_path.clone())?;
+        let hosts_path = keys_path
+            .parent()
+            .unwrap_or(&keys_path)
+            .join("known_hosts.json");
+        tty::known_hosts::init(hosts_path)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Generates a new SSH keypair and stores the private key on disk.
+///
+/// Returns metadata including the `key_id` needed for future
+/// operations. The private key never crosses the FFI boundary.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if key generation or file write
+/// fails, or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_generate_key(
+    algorithm: tty::types::SshKeyAlgorithm,
+    label: String,
+) -> Result<tty::types::SshKeyMetadata, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::generate(algorithm, &label)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Imports a private key from a file on disk.
+///
+/// The source file is **unconditionally deleted** on both success
+/// and error paths. Passphrase is zeroed after use.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if the file cannot be read or
+/// parsed, or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_import_key(
+    file_path: String,
+    passphrase: Option<Vec<u8>>,
+    label: String,
+) -> Result<tty::types::SshKeyMetadata, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::import_file(
+            std::path::Path::new(&file_path),
+            passphrase,
+            &label,
+        )
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Deletes an SSH key from disk. Idempotent.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if file deletion fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_delete_key(key_id: String) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::delete(&key_id)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns the public key in OpenSSH format for the given key ID.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] if the key is not found,
+/// or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_export_public_key(key_id: String) -> Result<String, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::export_public(&key_id)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Checks whether a key file exists on disk for the given ID.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the key store is not
+/// initialized, or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_key_exists(key_id: String) -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::key_exists(&key_id)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Lists all key IDs in the key store directory.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if the directory cannot be read,
+/// or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn ssh_list_key_ids() -> Result<Vec<String>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::key_store::list_key_ids()
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Starts an SSH connection to the given host.
+///
+/// Initiates the SSH handshake and authentication flow. Use
+/// [`tty_submit_password`] or [`tty_submit_key`] to supply credentials
+/// after this call returns, and [`tty_get_pending_host_key`] to handle
+/// unknown-host prompts.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if the connection fails, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_start_ssh(host: String, port: u32, user: String) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::ssh::start_ssh(&host, port as u16, &user)
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Submits a password for the pending SSH authentication challenge.
+///
+/// Returns `true` if authentication succeeded, `false` if it failed.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if there is no pending auth challenge,
+/// or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_submit_password(password: Vec<u8>) -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::ssh::submit_password(password)
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Submits a stored SSH key for the pending authentication challenge.
+///
+/// Returns `true` if authentication succeeded, `false` if it failed.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if there is no pending auth challenge or
+/// the key ID is not found, or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_submit_key(key_id: String) -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::ssh::submit_key(&key_id)
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Disconnects the active SSH session.
+///
+/// Closes the SSH channel and underlying TCP connection. No-op if no
+/// SSH session is currently active.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_disconnect_ssh() -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::ssh::disconnect()
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Returns the pending host-key verification prompt, if any.
+///
+/// Returns `Some` when the SSH handshake has produced an unknown or
+/// changed host key that the user must accept or reject before
+/// authentication can continue. Call [`tty_answer_host_key`] to respond.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_get_pending_host_key() -> Result<Option<tty::types::TtyHostKeyPrompt>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        Ok(tty::ssh::get_pending_host_key())
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Accepts or rejects the pending SSH host-key verification prompt.
+///
+/// Pass [`TtyHostKeyDecision::Accept`] to trust the key and continue,
+/// or [`TtyHostKeyDecision::Reject`] to abort the connection.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if there is no pending host-key prompt,
+/// or [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_answer_host_key(decision: tty::types::TtyHostKeyDecision) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        tty::ssh::answer_host_key(decision == tty::types::TtyHostKeyDecision::Accept)
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Returns the current SSH connection state.
+///
+/// Returns [`SshState::Disconnected`] when no SSH session exists.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_get_ssh_state() -> Result<tty::types::SshState, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        Ok(tty::ssh::get_state())
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Encodes a special key into terminal escape bytes.
+///
+/// Used by `TtyKeyRow` for keys that cannot be expressed as UTF-8
+/// text (arrows, Tab, Escape, function keys, Ctrl combinations).
+///
+/// Supported key names: `tab`, `escape`, `enter`, `backspace`,
+/// `delete`, `up`, `down`, `left`, `right`, `home`, `end`,
+/// `page_up`, `page_down`, `f1`-`f12`.
+///
+/// Modifier flags: bit 0 = Ctrl, bit 1 = Alt, bit 2 = Shift.
+///
+/// Returns the encoded escape sequence bytes, or an empty vec for
+/// unrecognised keys.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn tty_encode_special_key(key_name: String, modifier_flags: u32) -> Result<Vec<u8>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        Ok(encode_special_key(&key_name, modifier_flags))
+    }))
+    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Maps a key name + modifier flags to terminal escape bytes.
+///
+/// Uses standard xterm/VT escape sequences. Ctrl combos are
+/// handled by converting to the corresponding control character.
+fn encode_special_key(key_name: &str, modifier_flags: u32) -> Vec<u8> {
+    let ctrl = modifier_flags & 0x01 != 0;
+    let alt = modifier_flags & 0x02 != 0;
+
+    // Ctrl+letter → control character (e.g. Ctrl+C → 0x03).
+    if ctrl && key_name.len() == 1 {
+        let ch = key_name.as_bytes()[0];
+        if ch.is_ascii_alphabetic() {
+            let ctrl_char = (ch.to_ascii_uppercase() - b'A') + 1;
+            return if alt {
+                vec![0x1b, ctrl_char]
+            } else {
+                vec![ctrl_char]
+            };
+        }
+    }
+
+    let base: &[u8] = match key_name {
+        "tab" => b"\x09",
+        "escape" | "esc" => b"\x1b",
+        "enter" | "return" => b"\r",
+        "backspace" => b"\x7f",
+        "delete" => b"\x1b[3~",
+        "up" => b"\x1b[A",
+        "down" => b"\x1b[B",
+        "right" => b"\x1b[C",
+        "left" => b"\x1b[D",
+        "home" => b"\x1b[H",
+        "end" => b"\x1b[F",
+        "page_up" => b"\x1b[5~",
+        "page_down" => b"\x1b[6~",
+        "insert" => b"\x1b[2~",
+        "f1" => b"\x1bOP",
+        "f2" => b"\x1bOQ",
+        "f3" => b"\x1bOR",
+        "f4" => b"\x1bOS",
+        "f5" => b"\x1b[15~",
+        "f6" => b"\x1b[17~",
+        "f7" => b"\x1b[18~",
+        "f8" => b"\x1b[19~",
+        "f9" => b"\x1b[20~",
+        "f10" => b"\x1b[21~",
+        "f11" => b"\x1b[23~",
+        "f12" => b"\x1b[24~",
+        _ => return Vec::new(),
+    };
+
+    if alt {
+        // Alt prefix: ESC before the sequence.
+        let mut result = vec![0x1b];
+        result.extend_from_slice(base);
+        result
+    } else {
+        base.to_vec()
+    }
 }
 
 #[cfg(test)]
