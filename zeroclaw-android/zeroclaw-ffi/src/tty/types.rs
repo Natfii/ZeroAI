@@ -136,33 +136,16 @@ pub struct TtyCursorState {
     pub blinking: bool,
 }
 
-/// A contiguous run of columns on a single row that share the same
-/// foreground colour, background colour, and text attributes.
-///
-/// Column indices follow the half-open interval convention:
-/// `start_col` is **inclusive** and `end_col` is **exclusive**, so a
-/// span covering columns 2, 3, 4 is represented as `start_col = 2`,
-/// `end_col = 5`.
-///
-/// Colors are packed ARGB (`0xAARRGGBB`). A value of `0x00000000`
-/// means "use the terminal's current default colour" and must not be
-/// interpreted as opaque black.
-#[derive(Debug, Clone, uniffi::Record)]
-pub struct TtyColorSpan {
-    /// First column covered by this span (inclusive, zero-based).
-    pub start_col: u16,
-    /// First column *not* covered by this span (exclusive, zero-based).
-    pub end_col: u16,
-    /// Foreground colour in packed ARGB format; `0x00000000` = terminal default.
-    pub fg_argb: u32,
-    /// Background colour in packed ARGB format; `0x00000000` = terminal default.
-    pub bg_argb: u32,
-    /// Whether the text in this span is rendered bold.
-    pub bold: bool,
-    /// Whether the text in this span is rendered in italics.
-    pub italic: bool,
-    /// Whether the text in this span has an underline decoration.
-    pub underline: bool,
+/// Global dirty state for the terminal viewport, indicating how much
+/// of the display changed since the last rendered frame.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum TtyDirtyState {
+    /// Nothing changed — the Kotlin side can skip drawing entirely.
+    Clean,
+    /// Some rows changed — check per-row `dirty` flags.
+    Partial,
+    /// Everything changed (resize, screen switch, palette) — full redraw.
+    Full,
 }
 
 /// A single visible row of the terminal, ready to be painted by the
@@ -170,16 +153,27 @@ pub struct TtyColorSpan {
 ///
 /// `text` holds the UTF-8 content of every cell concatenated into one
 /// string (wide characters occupy two consecutive logical columns).
-/// `spans` lists colour and attribute runs that cover `text` by column
-/// index and may be applied in order without sorting.
+/// `styles` holds one packed `i64` per column encoding foreground color,
+/// background color, and text attribute flags.
+///
+/// # Packed style layout (bits of `i64`)
+///
+/// | Bits  | Content |
+/// |-------|---------|
+/// | 0-7   | Effect flags (bold=0, italic=1, underline=2, strikethrough=3, dim=4, inverse=5, invisible=6, blink=7) |
+/// | 8-31  | Background color (24-bit RGB, 0 = terminal default) |
+/// | 32-55 | Foreground color (24-bit RGB, 0 = terminal default) |
+/// | 56-63 | Reserved |
+///
+/// On the Kotlin side, `i64` arrives as `Long`. All bit extraction
+/// must use `ushr` (unsigned right shift), never `shr`.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct TtyRenderRow {
     /// Concatenated UTF-8 text for every cell in this row.
     pub text: String,
-    /// Colour and attribute spans covering this row's columns.
-    pub spans: Vec<TtyColorSpan>,
-    /// `true` when this row's content has changed since the last frame
-    /// and must be redrawn; `false` when the previous bitmap is still valid.
+    /// Packed style per column — one `i64` per grid column.
+    pub styles: Vec<i64>,
+    /// `true` when this row's content has changed since the last frame.
     pub dirty: bool,
 }
 
@@ -203,7 +197,6 @@ pub struct TtyRenderFrame {
     pub default_bg_argb: u32,
     /// Default foreground colour in packed ARGB; `0x00000000` = terminal default.
     pub default_fg_argb: u32,
-    /// `true` when at least one row is dirty and the frame must be
-    /// composited; `false` when the display is unchanged.
-    pub has_changes: bool,
+    /// How much of the viewport changed since the last frame.
+    pub dirty_state: TtyDirtyState,
 }

@@ -414,33 +414,30 @@ pub(crate) fn get_render_frame() -> Result<super::types::TtyRenderFrame, FfiErro
     Ok(snapshot_to_frame(snapshot))
 }
 
-/// Converts an internal [`super::backend::TerminalRenderSnapshot`] to a
-/// [`super::types::TtyRenderFrame`] suitable for crossing the FFI boundary.
-///
-/// Each [`super::backend::RenderRow`] is converted to a
-/// [`super::types::TtyRenderRow`]: the text is built by concatenating
-/// each cell's codepoints (defaulting to a space for empty codepoints),
-/// and colour/attribute spans are emitted for every cell that carries
-/// non-default styling.
+/// Converts an internal [`TerminalRenderSnapshot`] into the UniFFI-facing
+/// [`TtyRenderFrame`] with packed `i64` styles and [`TtyDirtyState`].
 ///
 /// Colors are packed as opaque ARGB via [`pack_argb`].
 pub(crate) fn snapshot_to_frame(
     snapshot: super::backend::TerminalRenderSnapshot,
 ) -> super::types::TtyRenderFrame {
     use super::backend::{CursorStyle, DirtyState};
-    use super::types::{TtyColorSpan, TtyCursorState, TtyCursorStyle, TtyRenderFrame, TtyRenderRow};
+    use super::types::{TtyCursorState, TtyCursorStyle, TtyDirtyState, TtyRenderFrame, TtyRenderRow};
 
-    let has_changes = snapshot.dirty != DirtyState::Clean;
+    let dirty_state = match snapshot.dirty {
+        DirtyState::Clean => TtyDirtyState::Clean,
+        DirtyState::Partial => TtyDirtyState::Partial,
+        DirtyState::Full => TtyDirtyState::Full,
+    };
 
     let rows: Vec<TtyRenderRow> = snapshot
         .rows
         .into_iter()
         .map(|row| {
             let mut text = String::with_capacity(row.cells.len());
-            let mut spans: Vec<TtyColorSpan> = Vec::new();
+            let mut styles: Vec<i64> = Vec::with_capacity(row.cells.len());
 
-            for (col, cell) in row.cells.iter().enumerate() {
-                // Build the text content: decode codepoints or emit space.
+            for cell in &row.cells {
                 if cell.codepoints.is_empty() {
                     text.push(' ');
                 } else {
@@ -453,42 +450,12 @@ pub(crate) fn snapshot_to_frame(
                     }
                 }
 
-                // Emit a span if the cell has any non-default styling.
-                let has_fg = cell.fg.is_some();
-                let has_bg = cell.bg.is_some();
-                let flags = &cell.flags;
-                let has_flags = flags.bold
-                    || flags.italic
-                    || flags.underline
-                    || flags.strikethrough
-                    || flags.inverse;
-
-                if has_fg || has_bg || has_flags {
-                    let fg_argb = cell
-                        .fg
-                        .map(|c| pack_argb(c.r, c.g, c.b))
-                        .unwrap_or(0x0000_0000);
-                    let bg_argb = cell
-                        .bg
-                        .map(|c| pack_argb(c.r, c.g, c.b))
-                        .unwrap_or(0x0000_0000);
-
-                    let col_u16 = col as u16;
-                    spans.push(TtyColorSpan {
-                        start_col: col_u16,
-                        end_col: col_u16 + cell.width.max(1) as u16,
-                        fg_argb,
-                        bg_argb,
-                        bold: flags.bold,
-                        italic: flags.italic,
-                        underline: flags.underline,
-                    });
-                }
+                styles.push(pack_cell_style(cell.fg, cell.bg, &cell.flags));
             }
 
             TtyRenderRow {
                 text,
-                spans,
+                styles,
                 dirty: row.dirty,
             }
         })
@@ -527,7 +494,7 @@ pub(crate) fn snapshot_to_frame(
         cursor,
         default_bg_argb,
         default_fg_argb,
-        has_changes,
+        dirty_state,
     }
 }
 
@@ -539,6 +506,120 @@ pub(crate) fn snapshot_to_frame(
 #[inline]
 fn pack_argb(r: u8, g: u8, b: u8) -> u32 {
     0xFF00_0000 | ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+/// Packs a cell's visual attributes into a single `i64` for FFI transfer.
+///
+/// # Bit layout
+///
+/// | Bits  | Content |
+/// |-------|---------|
+/// | 0-7   | Effect flags |
+/// | 8-31  | Background RGB (24-bit, 0 = default) |
+/// | 32-55 | Foreground RGB (24-bit, 0 = default) |
+/// | 56-63 | Reserved (zero) |
+///
+/// The return type is `i64` (not `u64`) because UniFFI maps `u64` to
+/// Kotlin `ULong`, which erases to signed `Long` in generics. Using
+/// `i64` avoids the sign confusion. Kotlin must use `ushr` for all
+/// bit extraction.
+#[inline]
+fn pack_cell_style(
+    fg: Option<super::backend::RenderColor>,
+    bg: Option<super::backend::RenderColor>,
+    flags: &super::backend::CellStyleFlags,
+) -> i64 {
+    let mut bits: u64 = 0;
+
+    // Bits 0-7: effect flags
+    if flags.bold         { bits |= 1 << 0; }
+    if flags.italic       { bits |= 1 << 1; }
+    if flags.underline    { bits |= 1 << 2; }
+    if flags.strikethrough { bits |= 1 << 3; }
+    if flags.inverse      { bits |= 1 << 5; }
+
+    // Bits 8-31: background color (24-bit RGB)
+    if let Some(c) = bg {
+        bits |= ((c.r as u64) << 24) | ((c.g as u64) << 16) | ((c.b as u64) << 8);
+    }
+
+    // Bits 32-55: foreground color (24-bit RGB)
+    if let Some(c) = fg {
+        bits |= ((c.r as u64) << 48) | ((c.g as u64) << 40) | ((c.b as u64) << 32);
+    }
+
+    bits as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::backend::{CellStyleFlags, RenderColor};
+
+    #[test]
+    fn pack_default_style_is_zero() {
+        let style = pack_cell_style(None, None, &CellStyleFlags::default());
+        assert_eq!(style, 0i64);
+    }
+
+    #[test]
+    fn pack_fg_only() {
+        let fg = Some(RenderColor { r: 0xFF, g: 0x80, b: 0x40 });
+        let style = pack_cell_style(fg, None, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_eq!((bits >> 48) & 0xFF, 0xFF);
+        assert_eq!((bits >> 40) & 0xFF, 0x80);
+        assert_eq!((bits >> 32) & 0xFF, 0x40);
+        assert_eq!(bits & 0xFFFF_FF00, 0);
+        assert_eq!(bits & 0xFF, 0);
+    }
+
+    #[test]
+    fn pack_bg_only() {
+        let bg = Some(RenderColor { r: 0x10, g: 0x20, b: 0x30 });
+        let style = pack_cell_style(None, bg, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_eq!((bits >> 24) & 0xFF, 0x10);
+        assert_eq!((bits >> 16) & 0xFF, 0x20);
+        assert_eq!((bits >> 8) & 0xFF, 0x30);
+    }
+
+    #[test]
+    fn pack_bold_italic_underline() {
+        let flags = CellStyleFlags {
+            bold: true,
+            italic: true,
+            underline: true,
+            strikethrough: false,
+            inverse: false,
+        };
+        let style = pack_cell_style(None, None, &flags);
+        let bits = style as u64;
+        assert_eq!(bits & 0xFF, 0b0000_0111);
+    }
+
+    #[test]
+    fn pack_full_style_roundtrip() {
+        let fg = Some(RenderColor { r: 0xAA, g: 0xBB, b: 0xCC });
+        let bg = Some(RenderColor { r: 0x11, g: 0x22, b: 0x33 });
+        let flags = CellStyleFlags {
+            bold: true,
+            italic: false,
+            underline: true,
+            strikethrough: true,
+            inverse: true,
+        };
+        let style = pack_cell_style(fg, bg, &flags);
+        let bits = style as u64;
+
+        assert_eq!(bits & 0xFF, 1 | 4 | 8 | 32);
+        assert_eq!((bits >> 24) & 0xFF, 0x11);
+        assert_eq!((bits >> 16) & 0xFF, 0x22);
+        assert_eq!((bits >> 8) & 0xFF, 0x33);
+        assert_eq!((bits >> 48) & 0xFF, 0xAA);
+        assert_eq!((bits >> 40) & 0xFF, 0xBB);
+        assert_eq!((bits >> 32) & 0xFF, 0xCC);
+    }
 }
 
 // ── Internal implementation ─────────────────────────────────────────
