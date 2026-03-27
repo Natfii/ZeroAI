@@ -77,11 +77,13 @@ import com.zeroclaw.ffi.ttyGetOutputSnapshot
 import com.zeroclaw.ffi.ttyGetPendingHostKey
 import com.zeroclaw.ffi.ttyGetRenderFrame
 import com.zeroclaw.ffi.ttyIsBracketedPasteActive
+import com.zeroclaw.ffi.ttyIsMouseTrackingActive
 import com.zeroclaw.ffi.ttyIsPasteSafe
 import com.zeroclaw.ffi.ttyResize
 import com.zeroclaw.ffi.ttySetPalette
 import com.zeroclaw.ffi.ttyStartSsh
 import com.zeroclaw.ffi.ttySubmitKey
+import com.zeroclaw.ffi.ttySubmitMouseEvent
 import com.zeroclaw.ffi.ttySubmitPassword
 import com.zeroclaw.ffi.ttyWaitForRenderSignal
 import com.zeroclaw.ffi.ttyWrite
@@ -996,6 +998,55 @@ class TerminalViewModel(
         _ttySelection.value = null
         _showPasteBar.value = null
         _pendingPaste.value = null
+    }
+
+    /**
+     * Polls whether mouse tracking is currently active.
+     *
+     * Synchronous FFI call, called once per gesture at touch-down.
+     * Mode changes mid-gesture are not handled (Spec 2d may add
+     * callbacks). Safe to call from UI thread — single mutex
+     * acquisition is sub-millisecond.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    fun isMouseTrackingActive(): Boolean =
+        try {
+            ttyIsMouseTrackingActive()
+        } catch (e: Exception) {
+            false
+        }
+
+    /**
+     * Encodes a mouse event and writes the escape sequence to the PTY.
+     *
+     * Fire-and-forget: FFI errors are logged but not surfaced to the
+     * caller. Coordinates are raw surface pixels; the Rust encoder
+     * handles cell conversion.
+     *
+     * @param action 0=Press, 1=Release, 2=Motion
+     * @param button 0=Unknown, 1=Left, 2=Right, 3=Middle,
+     *               4=ScrollUp, 5=ScrollDown
+     * @param pixelX horizontal position in surface pixels
+     * @param pixelY vertical position in surface pixels
+     * @param mods modifier bitmask (shift=1, ctrl=2, alt=4, super=8)
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun submitMouseEvent(
+        action: UByte,
+        button: UByte,
+        pixelX: Float,
+        pixelY: Float,
+        mods: UInt,
+    ) {
+        try {
+            ttySubmitMouseEvent(action, button, pixelX, pixelY, mods)
+        } catch (e: Exception) {
+            logRepository.append(
+                LogSeverity.WARN,
+                TAG,
+                "Mouse event failed: ${e.message}",
+            )
+        }
     }
 
     /**
