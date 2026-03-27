@@ -90,6 +90,12 @@ pub type GhosttyMode = u16;
 /// rendering should be deferred to avoid tearing.
 pub const GHOSTTY_MODE_SYNC_OUTPUT: GhosttyMode = 2026 & 0x7FFF; // DEC private: ansi bit = 0
 
+/// Bracketed paste mode (DEC private mode 2004).
+///
+/// When active, paste content must be wrapped in
+/// `\x1b[200~` ... `\x1b[201~`.
+pub const GHOSTTY_MODE_BRACKETED_PASTE: GhosttyMode = 2004 & 0x7FFF;
+
 // ── Terminal options ────────────────────────────────────────────────
 
 /// Terminal initialization options.
@@ -258,6 +264,156 @@ pub enum GhosttyStyleColorTag {
     Rgb = 2,
 }
 
+/// Union payload for a style color value.
+///
+/// Which field is active depends on the accompanying [`GhosttyStyleColorTag`].
+/// The `_padding` field ensures a stable 8-byte size across platforms.
+#[repr(C)]
+pub union GhosttyStyleColorValue {
+    /// Palette index when tag is [`GhosttyStyleColorTag::Palette`].
+    pub palette: u8,
+    /// RGB triplet when tag is [`GhosttyStyleColorTag::Rgb`].
+    pub rgb: GhosttyColorRgb,
+    /// Padding to guarantee 8-byte size regardless of active variant.
+    pub _padding: u64,
+}
+
+impl Default for GhosttyStyleColorValue {
+    fn default() -> Self {
+        // SAFETY: All-zero bytes are a valid representation for every
+        // variant — palette=0, rgb={0,0,0}, _padding=0.
+        Self { _padding: 0 }
+    }
+}
+
+/// A tagged color value used in cell style information.
+///
+/// The `tag` field identifies which variant of `value` is active.
+#[repr(C)]
+#[derive(Default)]
+pub struct GhosttyStyleColor {
+    /// Discriminant identifying which `value` variant is active.
+    pub tag: GhosttyStyleColorTag,
+    /// The color payload; interpret according to `tag`.
+    pub value: GhosttyStyleColorValue,
+}
+
+impl Default for GhosttyStyleColorTag {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
+/// SGR underline style variants.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttySgrUnderline {
+    /// No underline.
+    None = 0,
+    /// Single underline (SGR 4).
+    Single = 1,
+    /// Double underline (SGR 21).
+    Double = 2,
+    /// Curly/wavy underline (SGR 4:3).
+    Curly = 3,
+    /// Dotted underline (SGR 4:4).
+    Dotted = 4,
+    /// Dashed underline (SGR 4:5).
+    Dashed = 5,
+}
+
+/// Sized cell style struct (sized-struct ABI pattern).
+///
+/// `size` must be set to `size_of::<GhosttyStyle>()` before passing to
+/// `ghostty_render_state_row_cells_get` with the `Style` data tag.
+/// Use [`GhosttyStyle::sized()`] to construct a correctly sized instance.
+#[repr(C)]
+pub struct GhosttyStyle {
+    /// Must equal `size_of::<GhosttyStyle>()`.
+    pub size: usize,
+    /// Foreground color.
+    pub fg_color: GhosttyStyleColor,
+    /// Background color.
+    pub bg_color: GhosttyStyleColor,
+    /// Underline color.
+    pub underline_color: GhosttyStyleColor,
+    /// SGR 1 bold.
+    pub bold: bool,
+    /// SGR 3 italic.
+    pub italic: bool,
+    /// SGR 2 faint/dim.
+    pub faint: bool,
+    /// SGR 5/6 blink.
+    pub blink: bool,
+    /// SGR 7 inverse video.
+    pub inverse: bool,
+    /// SGR 8 invisible/concealed.
+    pub invisible: bool,
+    /// SGR 9 strikethrough.
+    pub strikethrough: bool,
+    /// SGR 53 overline.
+    pub overline: bool,
+    /// SGR 4 underline style; maps to [`GhosttySgrUnderline`] variants.
+    pub underline: i32,
+}
+
+impl Default for GhosttyStyle {
+    fn default() -> Self {
+        // SAFETY: All-zero bytes are a valid initialisation for this
+        // `#[repr(C)]` struct: numeric fields zero, bool fields false,
+        // tag fields map to `GhosttyStyleColorTag::None` (= 0).
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+impl GhosttyStyle {
+    /// Returns a zero-initialised style with `size` pre-filled.
+    ///
+    /// Use this before passing to `ghostty_render_state_row_cells_get`
+    /// so the C library can detect the struct version at runtime.
+    pub fn sized() -> Self {
+        let mut s = Self::default();
+        s.size = core::mem::size_of::<Self>();
+        s
+    }
+}
+
+/// Wide/narrow cell classification from the terminal grid.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyCellWide {
+    /// Normal single-column cell.
+    Narrow = 0,
+    /// First column of a two-column wide character.
+    Wide = 1,
+    /// Spacer occupying the second column of a wide character (tail).
+    SpacerTail = 2,
+    /// Spacer used as a placeholder before a wide character (head).
+    SpacerHead = 3,
+}
+
+/// Cell data tags for `ghostty_cell_get`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyCellData {
+    /// Invalid / unrecognised tag.
+    Invalid = 0,
+    /// Raw codepoint value.
+    Codepoint = 1,
+    /// Content tag discriminant.
+    ContentTag = 2,
+    /// Wide/narrow classification.
+    Wide = 3,
+    /// Whether the cell has a text codepoint.
+    HasText = 4,
+    /// Whether the cell carries explicit styling.
+    HasStyling = 5,
+    /// Style identifier.
+    StyleId = 6,
+    /// Whether the cell has a hyperlink.
+    HasHyperlink = 7,
+}
+
 // ── Key encoding types ──────────────────────────────────────────────
 
 /// Key action.
@@ -305,6 +461,109 @@ pub enum GhosttyKey {
     // Function keys
     Escape = 86, // offset to match C enum after all numpad entries
     F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+}
+
+// ── Mouse Types ────────────────────────────────────────────────────
+
+/// Opaque handle to a mouse encoder instance.
+pub type GhosttyMouseEncoder = *mut c_void;
+
+/// Opaque handle to a mouse event instance.
+pub type GhosttyMouseEvent = *mut c_void;
+
+/// Mouse button action (press, release, or motion).
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyMouseAction {
+    Press = 0,
+    Release = 1,
+    Motion = 2,
+}
+
+/// Mouse button identifier.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyMouseButton {
+    Unknown = 0,
+    Left = 1,
+    Right = 2,
+    Middle = 3,
+    Four = 4,
+    Five = 5,
+    Six = 6,
+    Seven = 7,
+    Eight = 8,
+    Nine = 9,
+    Ten = 10,
+    Eleven = 11,
+}
+
+/// Mouse tracking mode set by the terminal application via DECSET.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyMouseTrackingMode {
+    None = 0,
+    X10 = 1,
+    Normal = 2,
+    Button = 3,
+    Any = 4,
+}
+
+/// Mouse encoding format set by the terminal application via DECSET.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyMouseFormat {
+    X10 = 0,
+    Utf8 = 1,
+    Sgr = 2,
+    Urxvt = 3,
+    SgrPixels = 4,
+}
+
+/// Configuration option tags for `ghostty_mouse_encoder_setopt`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyMouseEncoderOption {
+    Event = 0,
+    Format = 1,
+    Size = 2,
+    AnyButtonPressed = 3,
+    TrackLastCell = 4,
+}
+
+/// Surface-space pixel position for mouse events.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GhosttyMousePosition {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// Screen and cell geometry for the mouse encoder.
+///
+/// `size` must be set to `std::mem::size_of::<Self>()` before passing
+/// to the C library (struct versioning).
+#[repr(C)]
+#[derive(Debug, Clone, Default)]
+pub struct GhosttyMouseEncoderSize {
+    pub size: usize,
+    pub screen_width: u32,
+    pub screen_height: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
+    pub padding_top: u32,
+    pub padding_bottom: u32,
+    pub padding_right: u32,
+    pub padding_left: u32,
+}
+
+impl GhosttyMouseEncoderSize {
+    /// Returns a zero-initialised size struct with `size` pre-filled.
+    pub fn sized() -> Self {
+        let mut s = Self::default();
+        s.size = core::mem::size_of::<Self>();
+        s
+    }
 }
 
 // ── Extern C functions ──────────────────────────────────────────────
@@ -438,6 +697,23 @@ unsafe extern "C" {
         cells: GhosttyRenderStateRowCells,
     );
 
+    /// Queries a single cell field by tag, writing the result into `out`.
+    ///
+    /// `cell` is the raw 64-bit cell value obtained via
+    /// `GhosttyRenderStateRowCellsData::Raw`. `out` must point to
+    /// memory of the appropriate type for the requested `data` tag.
+    pub fn ghostty_cell_get(
+        cell: u64,
+        data: GhosttyCellData,
+        out: *mut c_void,
+    ) -> GhosttyResult;
+
+    /// Writes a default (zeroed) [`GhosttyStyle`] into `style`.
+    ///
+    /// Provided as a helper for initialising sized style structs
+    /// without knowing their exact field layout.
+    pub fn ghostty_style_default(style: *mut GhosttyStyle);
+
     // ── Key Encoder ──────────────────────────────────────────────
 
     pub fn ghostty_key_encoder_new(
@@ -489,4 +765,74 @@ unsafe extern "C" {
         utf8: *const u8,
         len: usize,
     );
+
+    /// Returns `true` if the paste data is safe (no embedded newlines
+    /// or bracketed-paste-end sequences).
+    ///
+    /// `data` must be non-null and valid for `len` bytes.
+    pub fn ghostty_paste_is_safe(
+        data: *const u8,
+        len: usize,
+    ) -> bool;
+
+    // ── Mouse Event ────────────────────────────────────────────────
+
+    pub fn ghostty_mouse_event_new(
+        allocator: *const GhosttyAllocator,
+        event: *mut GhosttyMouseEvent,
+    ) -> GhosttyResult;
+
+    pub fn ghostty_mouse_event_free(event: GhosttyMouseEvent);
+
+    pub fn ghostty_mouse_event_set_action(
+        event: GhosttyMouseEvent,
+        action: GhosttyMouseAction,
+    );
+
+    pub fn ghostty_mouse_event_set_button(
+        event: GhosttyMouseEvent,
+        button: GhosttyMouseButton,
+    );
+
+    pub fn ghostty_mouse_event_clear_button(event: GhosttyMouseEvent);
+
+    pub fn ghostty_mouse_event_set_mods(
+        event: GhosttyMouseEvent,
+        mods: GhosttyMods,
+    );
+
+    pub fn ghostty_mouse_event_set_position(
+        event: GhosttyMouseEvent,
+        position: GhosttyMousePosition,
+    );
+
+    // ── Mouse Encoder ──────────────────────────────────────────────
+
+    pub fn ghostty_mouse_encoder_new(
+        allocator: *const GhosttyAllocator,
+        encoder: *mut GhosttyMouseEncoder,
+    ) -> GhosttyResult;
+
+    pub fn ghostty_mouse_encoder_free(encoder: GhosttyMouseEncoder);
+
+    pub fn ghostty_mouse_encoder_setopt(
+        encoder: GhosttyMouseEncoder,
+        option: GhosttyMouseEncoderOption,
+        value: *const c_void,
+    );
+
+    pub fn ghostty_mouse_encoder_setopt_from_terminal(
+        encoder: GhosttyMouseEncoder,
+        terminal: GhosttyTerminal,
+    );
+
+    pub fn ghostty_mouse_encoder_reset(encoder: GhosttyMouseEncoder);
+
+    pub fn ghostty_mouse_encoder_encode(
+        encoder: GhosttyMouseEncoder,
+        event: GhosttyMouseEvent,
+        out_buf: *mut u8,
+        out_buf_size: usize,
+        out_len: *mut usize,
+    ) -> GhosttyResult;
 }
