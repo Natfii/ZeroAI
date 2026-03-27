@@ -93,16 +93,33 @@ pub struct RenderCursor {
 /// Style flags for a single terminal cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CellStyleFlags {
-    /// Bold text.
+    /// Bold text (SGR 1).
     pub bold: bool,
-    /// Italic text.
+    /// Italic text (SGR 3).
     pub italic: bool,
-    /// Underlined text.
-    pub underline: bool,
-    /// Strikethrough text.
+    /// Strikethrough text (SGR 9).
     pub strikethrough: bool,
-    /// Reversed foreground/background.
+    /// Reversed foreground/background (SGR 7).
     pub inverse: bool,
+    /// Faint/dim text (SGR 2).
+    pub dim: bool,
+    /// Invisible/concealed text (SGR 8).
+    pub invisible: bool,
+    /// Blinking text (SGR 5/6).
+    pub blink: bool,
+    /// Overlined text (SGR 53).
+    pub overline: bool,
+    /// Underline style: 0 = none, 1 = single, 2 = double, 3 = curly,
+    /// 4 = dotted, 5 = dashed.
+    pub underline_style: u8,
+}
+
+impl CellStyleFlags {
+    /// Returns `true` if any underline style is active.
+    #[inline]
+    pub fn has_underline(&self) -> bool {
+        self.underline_style > 0
+    }
 }
 
 /// A single rendered terminal cell.
@@ -204,6 +221,13 @@ pub(crate) trait TerminalBackend: Send {
         false
     }
 
+    /// Returns whether bracketed paste mode (DEC 2004) is active.
+    ///
+    /// Default returns `false` for backends that don't support this query.
+    fn is_bracketed_paste_active(&self) -> bool {
+        false
+    }
+
     /// Takes any pending write-PTY response bytes (terminal query
     /// responses that should be written back to the PTY/SSH channel).
     ///
@@ -215,6 +239,37 @@ pub(crate) trait TerminalBackend: Send {
 
     /// Applies a color palette to the terminal. Default is a no-op.
     fn apply_palette(&mut self, _bg: u32, _fg: u32, _cursor: u32, _palette: &[u32]) {}
+
+    /// Returns whether the terminal has an active mouse tracking mode
+    /// (DEC modes 9, 1000, 1002, or 1003).
+    fn is_mouse_tracking_active(&self) -> bool {
+        false
+    }
+
+    /// Encodes a mouse event into terminal escape sequence bytes.
+    /// Returns empty bytes if tracking is inactive or encoding fails.
+    fn encode_mouse_event(
+        &mut self,
+        action: u8,
+        button: u8,
+        x: f32,
+        y: f32,
+        mods: u32,
+    ) -> Vec<u8> {
+        let _ = (action, button, x, y, mods);
+        Vec::new()
+    }
+
+    /// Updates the screen/cell geometry for the mouse encoder.
+    fn set_mouse_geometry(
+        &mut self,
+        cell_w: u32,
+        cell_h: u32,
+        screen_w: u32,
+        screen_h: u32,
+    ) {
+        let _ = (cell_w, cell_h, screen_w, screen_h);
+    }
 }
 
 // ── Stub implementation ──────────────────────────────────────────────

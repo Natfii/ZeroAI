@@ -14,7 +14,7 @@
 use std::sync::{Arc, Mutex};
 
 use super::backend::{TerminalBackend, TerminalRenderSnapshot, TtyBackendError};
-use super::ghostty_bridge::{KeyEncoder, RenderState, Terminal};
+use super::ghostty_bridge::{KeyEncoder, MouseEncoder, RenderState, Terminal};
 
 /// Default scrollback line count.
 const DEFAULT_SCROLLBACK: usize = 10_000;
@@ -33,6 +33,8 @@ pub(crate) struct GhosttyBackend {
     render_state: RenderState,
     /// Key encoder for converting key events to escape sequences.
     key_encoder: KeyEncoder,
+    /// Mouse encoder for converting touch events to escape sequences.
+    mouse_encoder: MouseEncoder,
     /// Buffer for write-PTY callback responses. Shared with the C
     /// callback via a raw pointer.
     write_pty_buf: Arc<Mutex<Vec<u8>>>,
@@ -51,6 +53,7 @@ impl GhosttyBackend {
         let mut terminal = Terminal::new(cols, rows, DEFAULT_SCROLLBACK)?;
         let render_state = RenderState::new()?;
         let key_encoder = KeyEncoder::new()?;
+        let mouse_encoder = MouseEncoder::new()?;
         let write_pty_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Register the write-PTY callback so terminal query responses
@@ -71,6 +74,7 @@ impl GhosttyBackend {
             terminal,
             render_state,
             key_encoder,
+            mouse_encoder,
             write_pty_buf,
             cached_snapshot: None,
         })
@@ -93,11 +97,18 @@ impl GhosttyBackend {
     pub(crate) fn sync_key_encoder(&mut self) {
         self.key_encoder.sync_from_terminal(&self.terminal);
     }
+
+    /// Syncs the mouse encoder with the terminal's current mouse
+    /// tracking mode and format state.
+    pub(crate) fn sync_mouse_encoder(&mut self) {
+        self.mouse_encoder.sync_from_terminal(&self.terminal);
+    }
 }
 
 impl TerminalBackend for GhosttyBackend {
     fn feed_input(&mut self, bytes: &[u8]) -> Result<(), TtyBackendError> {
         self.terminal.vt_write(bytes);
+        self.mouse_encoder.sync_from_terminal(&self.terminal);
         Ok(())
     }
 
@@ -128,6 +139,35 @@ impl TerminalBackend for GhosttyBackend {
 
     fn is_synchronized_output(&self) -> bool {
         self.terminal.is_synchronized_output()
+    }
+
+    fn is_bracketed_paste_active(&self) -> bool {
+        self.terminal.is_bracketed_paste_active()
+    }
+
+    fn is_mouse_tracking_active(&self) -> bool {
+        MouseEncoder::is_tracking_active(&self.terminal)
+    }
+
+    fn encode_mouse_event(
+        &mut self,
+        action: u8,
+        button: u8,
+        x: f32,
+        y: f32,
+        mods: u32,
+    ) -> Vec<u8> {
+        self.mouse_encoder.encode(action, button, x, y, mods)
+    }
+
+    fn set_mouse_geometry(
+        &mut self,
+        cell_w: u32,
+        cell_h: u32,
+        screen_w: u32,
+        screen_h: u32,
+    ) {
+        self.mouse_encoder.set_geometry(cell_w, cell_h, screen_w, screen_h);
     }
 
     fn snapshot_for_accessibility(&self, visible_rows: usize) -> Vec<String> {
