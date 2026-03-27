@@ -453,7 +453,13 @@ impl RenderState {
                 );
             }
 
-            let cells = self.extract_cells(cols)?;
+            // Only extract cell data for dirty rows. Clean rows get
+            // an empty sentinel — the Kotlin side reuses cached data.
+            let cells = if row_dirty {
+                self.extract_cells(cols)?
+            } else {
+                Vec::new()
+            };
 
             // Clear per-row dirty flag after reading.
             // SAFETY: The iterator is positioned on a valid row.

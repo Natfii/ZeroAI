@@ -118,7 +118,10 @@ impl TerminalBackend for GhosttyBackend {
         let snapshot = self
             .render_state
             .snapshot(&self.terminal)
-            .unwrap_or_default();
+            .unwrap_or_else(|e| {
+                tracing::error!(target: "tty::backend", "render snapshot failed: {e}");
+                TerminalRenderSnapshot::default()
+            });
         self.cached_snapshot = Some(snapshot.clone());
         snapshot
     }
