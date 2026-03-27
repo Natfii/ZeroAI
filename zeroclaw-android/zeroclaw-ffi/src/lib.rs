@@ -3352,12 +3352,19 @@ pub fn tty_write(bytes: Vec<u8>) -> Result<(), FfiError> {
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_resize(cols: u32, rows: u32, width_px: u32, height_px: u32) -> Result<(), FfiError> {
-    let _ = (width_px, height_px);
     catch_unwind(AssertUnwindSafe(|| {
         if tty::ssh::is_connected() {
             tty::ssh::resize(cols as u16, rows as u16)
         } else {
-            tty::session::resize(cols as u16, rows as u16)
+            let result = tty::session::resize(cols as u16, rows as u16);
+            // Update mouse encoder geometry (best-effort, ignore errors).
+            let _ = tty::session::set_mouse_geometry(
+                cols as u16,
+                rows as u16,
+                width_px,
+                height_px,
+            );
+            result
         }
     }))
     .unwrap_or_else(|e| {
@@ -3797,6 +3804,142 @@ pub fn tty_encode_special_key(key_name: String, modifier_flags: u32) -> Result<V
         Ok(encode_special_key(&key_name, modifier_flags))
     }))
     .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+}
+
+/// Returns whether the given text is safe to paste without user confirmation.
+///
+/// Delegates to `ghostty_paste_is_safe` from the vendored C library.
+/// Returns `Ok(false)` (treat as unsafe) if the C call panics.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_is_paste_safe(text: String) -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        #[cfg(feature = "ghostty-vt")]
+        {
+            let bytes = text.as_bytes();
+            // SAFETY: `text` is a valid UTF-8 String. `as_bytes()` returns
+            // a pointer to the string's backing buffer with correct length.
+            // The string is not moved or dropped during the call.
+            // ghostty_paste_is_safe does not retain the pointer.
+            let safe = unsafe {
+                tty::ghostty_sys::ghostty_paste_is_safe(bytes.as_ptr(), bytes.len())
+            };
+            Ok(safe)
+        }
+        #[cfg(not(feature = "ghostty-vt"))]
+        {
+            // Without the ghostty-vt C library, perform a conservative
+            // pure-Rust check: treat text as unsafe if it contains a
+            // newline or the bracketed-paste-end sequence.
+            let safe = !text.contains('\n')
+                && !text.contains('\r')
+                && !text.contains("\x1b[201~");
+            Ok(safe)
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns whether bracketed paste mode (DEC 2004) is active in the
+/// current terminal session.
+///
+/// When active, paste content must be wrapped in `\x1b[200~` …
+/// `\x1b[201~` before being sent to the PTY. Returns `Ok(false)` when
+/// no session is running (safe default — paste without brackets is always
+/// accepted by the shell).
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_is_bracketed_paste_active() -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            // SSH backend: delegate to SSH session's bracketed paste state.
+            tty::ssh::is_bracketed_paste_active()
+        } else {
+            tty::session::is_bracketed_paste_active()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns whether mouse tracking is currently active in the
+/// terminal session.
+///
+/// Returns `Ok(false)` when no session exists (safe default:
+/// selection gestures remain active).
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_is_mouse_tracking_active() -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            Ok(false)
+        } else {
+            tty::session::is_mouse_tracking_active()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Encodes a mouse event and writes the escape sequence to the PTY.
+///
+/// Fire-and-forget: errors are logged at appropriate levels but not
+/// surfaced to the Kotlin UI.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_submit_mouse_event(
+    action: u8,
+    button: u8,
+    pixel_x: f32,
+    pixel_y: f32,
+    mods: u32,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        let result = if tty::ssh::is_connected() {
+            Ok(())
+        } else {
+            tty::session::submit_mouse_event(action, button, pixel_x, pixel_y, mods)
+        };
+
+        match &result {
+            Err(FfiError::StateError { .. }) => {
+                tracing::debug!(target: "tty", "mouse event ignored: no session");
+            }
+            Err(FfiError::SpawnError { detail }) => {
+                tracing::warn!(target: "tty", "mouse event channel pressure: {detail}");
+            }
+            _ => {}
+        }
+        result
+    }))
+    .unwrap_or_else(|e| {
+        tracing::error!(target: "tty", "panic in tty_submit_mouse_event");
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Maps a key name + modifier flags to terminal escape bytes.

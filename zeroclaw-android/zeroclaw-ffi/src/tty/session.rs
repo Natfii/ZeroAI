@@ -436,26 +436,46 @@ pub(crate) fn snapshot_to_frame(
         .map(|row| {
             let mut text = String::with_capacity(row.cells.len());
             let mut styles: Vec<i64> = Vec::with_capacity(row.cells.len());
+            let mut char_offsets: Vec<u32> = Vec::with_capacity(row.cells.len());
+            // `text_pos` tracks UTF-16 code-unit position in `text`.
+            let mut text_pos: u32 = 0;
+            // `last_style` is used to fill spacer cells with the
+            // preceding wide character's style.
+            let mut last_style: i64 = 0;
 
             for cell in &row.cells {
-                if cell.codepoints.is_empty() {
-                    text.push(' ');
+                if cell.width == 0 {
+                    // Spacer column (tail of a wide char): record the
+                    // same text offset as the wide cell and inherit its
+                    // style so renderers can merge them into one run.
+                    char_offsets.push(text_pos);
+                    styles.push(last_style);
+                    // No characters are appended — the wide char was
+                    // already pushed by the preceding non-spacer cell.
                 } else {
-                    for &cp in &cell.codepoints {
-                        if let Some(ch) = char::from_u32(cp) {
+                    // Normal or wide-char first column.
+                    char_offsets.push(text_pos);
+                    let packed = pack_cell_style(cell.fg, cell.bg, &cell.flags);
+                    styles.push(packed);
+                    last_style = packed;
+
+                    if cell.codepoints.is_empty() {
+                        text.push(' ');
+                        text_pos += 1; // space is 1 UTF-16 code unit
+                    } else {
+                        for &cp in &cell.codepoints {
+                            let ch = char::from_u32(cp).unwrap_or('\u{FFFD}');
                             text.push(ch);
-                        } else {
-                            text.push('\u{FFFD}');
+                            text_pos += ch.len_utf16() as u32;
                         }
                     }
                 }
-
-                styles.push(pack_cell_style(cell.fg, cell.bg, &cell.flags));
             }
 
             TtyRenderRow {
                 text,
                 styles,
+                char_offsets,
                 dirty: row.dirty,
             }
         })
@@ -514,10 +534,19 @@ fn pack_argb(r: u8, g: u8, b: u8) -> u32 {
 ///
 /// | Bits  | Content |
 /// |-------|---------|
-/// | 0-7   | Effect flags |
+/// | 0     | bold |
+/// | 1     | italic |
+/// | 2     | has_underline (`underline_style > 0`) |
+/// | 3     | strikethrough |
+/// | 4     | dim |
+/// | 5     | inverse |
+/// | 6     | invisible |
+/// | 7     | blink |
 /// | 8-31  | Background RGB (24-bit, 0 = default) |
 /// | 32-55 | Foreground RGB (24-bit, 0 = default) |
-/// | 56-63 | Reserved (zero) |
+/// | 56-58 | underline_style (3 bits, 0–5) |
+/// | 59    | overline |
+/// | 60-63 | Reserved (zero) |
 ///
 /// The return type is `i64` (not `u64`) because UniFFI maps `u64` to
 /// Kotlin `ULong`, which erases to signed `Long` in generics. Using
@@ -532,11 +561,14 @@ fn pack_cell_style(
     let mut bits: u64 = 0;
 
     // Bits 0-7: effect flags
-    if flags.bold         { bits |= 1 << 0; }
-    if flags.italic       { bits |= 1 << 1; }
-    if flags.underline    { bits |= 1 << 2; }
-    if flags.strikethrough { bits |= 1 << 3; }
-    if flags.inverse      { bits |= 1 << 5; }
+    if flags.bold              { bits |= 1 << 0; }
+    if flags.italic            { bits |= 1 << 1; }
+    if flags.has_underline()   { bits |= 1 << 2; }
+    if flags.strikethrough     { bits |= 1 << 3; }
+    if flags.dim               { bits |= 1 << 4; }
+    if flags.inverse           { bits |= 1 << 5; }
+    if flags.invisible         { bits |= 1 << 6; }
+    if flags.blink             { bits |= 1 << 7; }
 
     // Bits 8-31: background color (24-bit RGB)
     if let Some(c) = bg {
@@ -548,13 +580,24 @@ fn pack_cell_style(
         bits |= ((c.r as u64) << 48) | ((c.g as u64) << 40) | ((c.b as u64) << 32);
     }
 
+    // Bits 56-58: underline_style (3-bit value, 0–5)
+    bits |= (flags.underline_style as u64 & 0x7) << 56;
+
+    // Bit 59: overline
+    if flags.overline { bits |= 1 << 59; }
+
     bits as i64
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use super::super::backend::{CellStyleFlags, RenderColor};
+    use super::super::backend::{
+        CellStyleFlags, RenderCell, RenderColor, RenderRow,
+    };
+
+    // ── pack_cell_style tests ────────────────────────────────────────
 
     #[test]
     fn pack_default_style_is_zero() {
@@ -567,10 +610,12 @@ mod tests {
         let fg = Some(RenderColor { r: 0xFF, g: 0x80, b: 0x40 });
         let style = pack_cell_style(fg, None, &CellStyleFlags::default());
         let bits = style as u64;
+        // Foreground at bits 32-55
         assert_eq!((bits >> 48) & 0xFF, 0xFF);
         assert_eq!((bits >> 40) & 0xFF, 0x80);
         assert_eq!((bits >> 32) & 0xFF, 0x40);
-        assert_eq!(bits & 0xFFFF_FF00, 0);
+        // Background and flags should be zero
+        assert_eq!(bits & 0x0000_00FF_FFFF_FFFF & !0xFFFF_FF00_0000_0000, 0);
         assert_eq!(bits & 0xFF, 0);
     }
 
@@ -579,23 +624,73 @@ mod tests {
         let bg = Some(RenderColor { r: 0x10, g: 0x20, b: 0x30 });
         let style = pack_cell_style(None, bg, &CellStyleFlags::default());
         let bits = style as u64;
+        // Background at bits 8-31
         assert_eq!((bits >> 24) & 0xFF, 0x10);
         assert_eq!((bits >> 16) & 0xFF, 0x20);
         assert_eq!((bits >> 8) & 0xFF, 0x30);
+        // Foreground and flags should be zero
+        assert_eq!(bits & 0xFF, 0);
+        assert_eq!((bits >> 32) & 0x00FF_FFFF, 0);
     }
 
     #[test]
-    fn pack_bold_italic_underline() {
+    fn pack_all_original_flags() {
+        // bold=bit0, italic=bit1, underline→has_underline=bit2 (style=1),
+        // strikethrough=bit3, inverse=bit5
         let flags = CellStyleFlags {
             bold: true,
             italic: true,
-            underline: true,
-            strikethrough: false,
-            inverse: false,
+            underline_style: 1,
+            strikethrough: true,
+            inverse: true,
+            ..CellStyleFlags::default()
         };
         let style = pack_cell_style(None, None, &flags);
         let bits = style as u64;
-        assert_eq!(bits & 0xFF, 0b0000_0111);
+        assert_ne!(bits & (1 << 0), 0, "bold");
+        assert_ne!(bits & (1 << 1), 0, "italic");
+        assert_ne!(bits & (1 << 2), 0, "has_underline");
+        assert_ne!(bits & (1 << 3), 0, "strikethrough");
+        assert_ne!(bits & (1 << 5), 0, "inverse");
+        // Underline style 1 in bits 56-58
+        assert_eq!((bits >> 56) & 0x7, 1);
+    }
+
+    #[test]
+    fn pack_new_flags() {
+        let flags = CellStyleFlags {
+            dim: true,
+            invisible: true,
+            blink: true,
+            overline: true,
+            ..CellStyleFlags::default()
+        };
+        let style = pack_cell_style(None, None, &flags);
+        let bits = style as u64;
+        assert_ne!(bits & (1 << 4), 0, "dim");
+        assert_ne!(bits & (1 << 6), 0, "invisible");
+        assert_ne!(bits & (1 << 7), 0, "blink");
+        assert_ne!(bits & (1 << 59), 0, "overline");
+    }
+
+    #[test]
+    fn pack_underline_style_roundtrip() {
+        for style_val in 0u8..=5 {
+            let flags = CellStyleFlags {
+                underline_style: style_val,
+                ..CellStyleFlags::default()
+            };
+            let packed = pack_cell_style(None, None, &flags);
+            let bits = packed as u64;
+            let extracted = (bits >> 56) & 0x7;
+            assert_eq!(extracted, style_val as u64, "underline_style={style_val}");
+            // has_underline bit should match style > 0
+            if style_val > 0 {
+                assert_ne!(bits & (1 << 2), 0, "has_underline should be set for style={style_val}");
+            } else {
+                assert_eq!(bits & (1 << 2), 0, "has_underline should be clear for style=0");
+            }
+        }
     }
 
     #[test]
@@ -605,20 +700,212 @@ mod tests {
         let flags = CellStyleFlags {
             bold: true,
             italic: false,
-            underline: true,
+            underline_style: 1,
             strikethrough: true,
             inverse: true,
+            dim: true,
+            invisible: false,
+            blink: false,
+            overline: true,
         };
         let style = pack_cell_style(fg, bg, &flags);
         let bits = style as u64;
 
-        assert_eq!(bits & 0xFF, 1 | 4 | 8 | 32);
+        // Flag bits: bold=1, italic=0, has_underline=1, strikethrough=1,
+        // dim=1, inverse=1, invisible=0, blink=0
+        assert_ne!(bits & (1 << 0), 0, "bold");
+        assert_eq!(bits & (1 << 1), 0, "italic");
+        assert_ne!(bits & (1 << 2), 0, "has_underline");
+        assert_ne!(bits & (1 << 3), 0, "strikethrough");
+        assert_ne!(bits & (1 << 4), 0, "dim");
+        assert_ne!(bits & (1 << 5), 0, "inverse");
+        assert_eq!(bits & (1 << 6), 0, "invisible");
+        assert_eq!(bits & (1 << 7), 0, "blink");
+
+        // Background colors
         assert_eq!((bits >> 24) & 0xFF, 0x11);
         assert_eq!((bits >> 16) & 0xFF, 0x22);
         assert_eq!((bits >> 8) & 0xFF, 0x33);
+
+        // Foreground colors
         assert_eq!((bits >> 48) & 0xFF, 0xAA);
         assert_eq!((bits >> 40) & 0xFF, 0xBB);
         assert_eq!((bits >> 32) & 0xFF, 0xCC);
+
+        // Underline style
+        assert_eq!((bits >> 56) & 0x7, 1);
+
+        // Overline
+        assert_ne!(bits & (1 << 59), 0, "overline");
+    }
+
+    #[test]
+    fn pack_overline_standalone() {
+        let flags = CellStyleFlags {
+            overline: true,
+            ..CellStyleFlags::default()
+        };
+        let packed = pack_cell_style(None, None, &flags) as u64;
+        // Only bit 59 should be set — no other flags or colors.
+        assert_ne!(packed & (1 << 59), 0, "overline bit");
+        assert_eq!(packed & 0xFF, 0, "low flags should be clear");
+        assert_eq!((packed >> 8) & 0x00FF_FFFF, 0, "bg should be clear");
+        assert_eq!((packed >> 32) & 0x00FF_FFFF, 0, "fg should be clear");
+    }
+
+    // ── char_offsets tests ───────────────────────────────────────────
+
+    /// Helper: build a RenderRow from a slice of (codepoints, width) pairs.
+    fn make_row(cells: &[(&[u32], u8)]) -> RenderRow {
+        RenderRow {
+            cells: cells
+                .iter()
+                .map(|(cps, w)| RenderCell {
+                    codepoints: cps.to_vec(),
+                    fg: None,
+                    bg: None,
+                    flags: CellStyleFlags::default(),
+                    width: *w,
+                })
+                .collect(),
+            dirty: true,
+        }
+    }
+
+    #[test]
+    fn char_offsets_combining_chars() {
+        // A (U+0041) = 1 UTF-16 unit
+        // é (e U+0065 + combining accent U+0301) = 2 codepoints but 2 UTF-16 units
+        // B (U+0042) = 1 UTF-16 unit
+        // Expected offsets: [0, 1, 3]
+        let row = make_row(&[
+            (&[0x0041], 1),         // 'A' → offset 0, advances 1
+            (&[0x0065, 0x0301], 1), // 'e' + combining → offset 1, advances 2
+            (&[0x0042], 1),         // 'B' → offset 3
+        ]);
+
+        let snapshot = super::super::backend::TerminalRenderSnapshot {
+            dirty: super::super::backend::DirtyState::Full,
+            rows: vec![row],
+            cols: 3,
+            num_rows: 1,
+            cursor: super::super::backend::RenderCursor::default(),
+            default_bg: RenderColor::default(),
+            default_fg: RenderColor::default(),
+            palette: Vec::new(),
+        };
+
+        let frame = snapshot_to_frame(snapshot);
+        assert_eq!(frame.rows[0].char_offsets, vec![0u32, 1, 3]);
+    }
+
+    #[test]
+    fn char_offsets_wide_char() {
+        // Wide CJK char '中' (U+4E2D) at col 0 (width=2), spacer at col 1 (width=0), 'A' at col 2
+        // '中' is U+4E2D: 1 UTF-16 unit (BMP), so after wide cell text_pos = 1
+        // spacer: same offset as wide (text_pos stays 1)
+        // 'A': offset = 1
+        // Expected offsets: [0, 1, 1]  (spacer inherits text_pos after wide char was written)
+        let row = make_row(&[
+            (&[0x4E2D], 2), // wide '中' → offset 0, advances 1 UTF-16 unit
+            (&[], 0),       // spacer → inherits text_pos=1
+            (&[0x0041], 1), // 'A' → offset 1
+        ]);
+
+        let snapshot = super::super::backend::TerminalRenderSnapshot {
+            dirty: super::super::backend::DirtyState::Full,
+            rows: vec![row],
+            cols: 3,
+            num_rows: 1,
+            cursor: super::super::backend::RenderCursor::default(),
+            default_bg: RenderColor::default(),
+            default_fg: RenderColor::default(),
+            palette: Vec::new(),
+        };
+
+        let frame = snapshot_to_frame(snapshot);
+        let offsets = &frame.rows[0].char_offsets;
+        // Wide char at [0]=0; spacer at [1] must record text_pos *after* wide was pushed=1
+        assert_eq!(offsets[0], 0, "wide char offset");
+        assert_eq!(offsets[1], 1, "spacer offset (text_pos after wide char)");
+        assert_eq!(offsets[2], 1, "'A' offset");
+    }
+
+    // ── Session state tests ──────────────────────────────────────────
+
+    #[test]
+    fn lock_session_returns_none_initially() {
+        let guard = lock_session();
+        // Global state may have a session from another test, but the
+        // lock itself should not panic.
+        drop(guard);
+    }
+
+    #[test]
+    fn ring_buffer_evicts_oldest_when_full() {
+        let buf = Arc::new(Mutex::new(LineRingBuffer::new(3)));
+
+        // Push 3 lines via raw bytes (newline-delimited).
+        buf.lock().unwrap().push_bytes(b"line 0\nline 1\nline 2\n");
+        assert_eq!(buf.lock().unwrap().get_lines(10).len(), 3);
+
+        // One more should evict the oldest.
+        buf.lock().unwrap().push_bytes(b"overflow\n");
+        let lines = buf.lock().unwrap().get_lines(10);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], "line 1");
+        assert_eq!(lines[2], "overflow");
+    }
+
+    #[test]
+    fn get_output_lines_returns_empty_when_no_session() {
+        // Ensure no session is running.
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = get_output_lines(10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn write_bytes_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = write_bytes(vec![0x41]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn destroy_is_idempotent_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        // Should succeed (no-op) when no session exists.
+        assert!(destroy().is_ok());
+    }
+
+    #[test]
+    fn resize_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = resize(80, 24);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_context_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = get_context(4096);
+        assert!(result.is_err());
     }
 }
 
@@ -1001,85 +1288,137 @@ pub(crate) fn set_palette(bg: u32, fg: u32, cursor: u32, palette: &[u32]) -> Res
     Ok(())
 }
 
-// ── Tests ───────────────────────────────────────────────────────────
+/// Returns whether bracketed paste mode (DEC 2004) is active in the
+/// local shell session's terminal backend.
+///
+/// Returns `Ok(false)` when no session is running, which is the safe
+/// default (paste without brackets is always accepted).
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the backend mutex is poisoned
+/// and cannot be recovered.
+pub(crate) fn is_bracketed_paste_active() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lock_session_returns_none_initially() {
-        let guard = lock_session();
-        // Global state may have a session from another test, but the
-        // lock itself should not panic.
-        drop(guard);
-    }
-
-    #[test]
-    fn ring_buffer_evicts_oldest_when_full() {
-        let buf = Arc::new(Mutex::new(LineRingBuffer::new(3)));
-
-        // Push 3 lines via raw bytes (newline-delimited).
-        buf.lock().unwrap().push_bytes(b"line 0\nline 1\nline 2\n");
-        assert_eq!(buf.lock().unwrap().get_lines(10).len(), 3);
-
-        // One more should evict the oldest.
-        buf.lock().unwrap().push_bytes(b"overflow\n");
-        let lines = buf.lock().unwrap().get_lines(10);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], "line 1");
-        assert_eq!(lines[2], "overflow");
-    }
-
-    #[test]
-    fn get_output_lines_returns_empty_when_no_session() {
-        // Ensure no session is running.
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = get_output_lines(10);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn write_bytes_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = write_bytes(vec![0x41]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn destroy_is_idempotent_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        // Should succeed (no-op) when no session exists.
-        assert!(destroy().is_ok());
-    }
-
-    #[test]
-    fn resize_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = resize(80, 24);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_context_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = get_context(4096);
-        assert!(result.is_err());
-    }
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::session",
+            "backend mutex poisoned while querying bracketed paste; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.is_bracketed_paste_active())
 }
+
+/// Returns whether mouse tracking is currently active in the local
+/// shell session's terminal backend.
+///
+/// Returns `Ok(false)` when no session is running, which is the safe
+/// default (selection gestures remain active).
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the backend mutex is poisoned
+/// and cannot be recovered.
+pub(crate) fn is_mouse_tracking_active() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
+
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::session",
+            "backend mutex poisoned while querying mouse tracking; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.is_mouse_tracking_active())
+}
+
+/// Encodes a mouse event and writes the escape sequence to the PTY.
+///
+/// Fire-and-forget: callers should log errors but not surface them
+/// to the UI. Mouse events are best-effort.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running.
+/// Returns [`FfiError::SpawnError`] if the write channel is full.
+pub(crate) fn submit_mouse_event(
+    action: u8,
+    button: u8,
+    pixel_x: f32,
+    pixel_y: f32,
+    mods: u32,
+) -> Result<(), FfiError> {
+    let guard = lock_session();
+    let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "no local shell session is running".into(),
+    })?;
+
+    let encoded = {
+        let mut backend = session.backend.lock().unwrap_or_else(|e| {
+            tracing::warn!(
+                target: "tty::session",
+                "backend mutex poisoned while encoding mouse event; recovering"
+            );
+            e.into_inner()
+        });
+        backend.encode_mouse_event(action, button, pixel_x, pixel_y, mods)
+    };
+
+    if encoded.is_empty() {
+        return Ok(());
+    }
+
+    session
+        .write_tx
+        .try_send(encoded)
+        .map_err(|e| FfiError::SpawnError {
+            detail: format!("write channel error: {e}"),
+        })
+}
+
+/// Updates the mouse encoder's screen and cell geometry.
+///
+/// Called when the terminal canvas is resized. The geometry is needed
+/// for pixel-to-cell coordinate conversion in the ghostty mouse
+/// encoder.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if no session is running.
+pub(crate) fn set_mouse_geometry(
+    cols: u16,
+    rows: u16,
+    width_px: u32,
+    height_px: u32,
+) -> Result<(), FfiError> {
+    if cols == 0 || rows == 0 || width_px == 0 || height_px == 0 {
+        return Ok(());
+    }
+
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(());
+    };
+
+    let cell_w = width_px / cols as u32;
+    let cell_h = height_px / rows as u32;
+
+    let mut backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::session",
+            "backend mutex poisoned while setting mouse geometry; recovering"
+        );
+        e.into_inner()
+    });
+    backend.set_mouse_geometry(cell_w, cell_h, width_px, height_px);
+    Ok(())
+}
+
