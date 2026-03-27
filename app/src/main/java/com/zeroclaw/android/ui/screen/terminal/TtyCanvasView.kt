@@ -126,7 +126,7 @@ fun TtyCanvasView(
     }
 }
 
-@Suppress("LongParameterList", "CognitiveComplexMethod")
+@Suppress("LongParameterList", "CognitiveComplexMethod", "MagicNumber")
 private fun DrawScope.drawRow(
     row: TtyRenderRow,
     rowIdx: Int,
@@ -137,15 +137,16 @@ private fun DrawScope.drawRow(
 ) {
     val y = rowIdx * metrics.cellHeightPx
 
-    for (span in row.spans) {
-        if (span.bgArgb == 0u) continue
-        val x = span.startCol.toInt() * metrics.cellWidthPx
-        val spanWidth = (span.endCol.toInt() - span.startCol.toInt()) * metrics.cellWidthPx
-        drawRect(
-            color = span.bgArgb.toComposeColor(),
-            topLeft = Offset(x, y),
-            size = Size(spanWidth, metrics.cellHeightPx),
-        )
+    row.styles.forEachIndexed { colIdx, packedStyle ->
+        val bgArgb = packedStyle.packedBgArgb()
+        if (bgArgb != 0) {
+            val x = colIdx * metrics.cellWidthPx
+            drawRect(
+                color = Color(bgArgb),
+                topLeft = Offset(x, y),
+                size = Size(metrics.cellWidthPx, metrics.cellHeightPx),
+            )
+        }
     }
 
     val textLen = row.text.length
@@ -154,27 +155,29 @@ private fun DrawScope.drawRow(
             withStyle(SpanStyle(color = defaultFg)) {
                 append(row.text)
             }
-            for (span in row.spans) {
-                val start = span.startCol.toInt().coerceAtMost(textLen)
-                val end = span.endCol.toInt().coerceAtMost(textLen)
-                if (start >= end) continue
-
-                val fgColor = if (span.fgArgb != 0u) span.fgArgb.toComposeColor() else null
-                val fontWeight = if (span.bold) FontWeight.Bold else null
-                val fontStyle = if (span.italic) FontStyle.Italic else null
-                val textDecoration = if (span.underline) TextDecoration.Underline else null
-
-                addStyle(
-                    style =
-                        SpanStyle(
-                            color = fgColor ?: Color.Unspecified,
-                            fontWeight = fontWeight,
-                            fontStyle = fontStyle,
-                            textDecoration = textDecoration,
-                        ),
-                    start = start,
-                    end = end,
-                )
+            row.styles.forEachIndexed { colIdx, packedStyle ->
+                val start = colIdx.coerceAtMost(textLen)
+                val end = (colIdx + 1).coerceAtMost(textLen)
+                if (start >= end) return@forEachIndexed
+                val fgArgb = packedStyle.packedFgArgb()
+                val fgColor = if (fgArgb != 0) Color(fgArgb) else null
+                val fontWeight = if (packedStyle.packedIsBold()) FontWeight.Bold else null
+                val fontStyle = if (packedStyle.packedIsItalic()) FontStyle.Italic else null
+                val textDecoration = if (packedStyle.packedIsUnderline()) TextDecoration.Underline else null
+                val hasStyle = fgColor != null || fontWeight != null || fontStyle != null || textDecoration != null
+                if (hasStyle) {
+                    addStyle(
+                        style =
+                            SpanStyle(
+                                color = fgColor ?: Color.Unspecified,
+                                fontWeight = fontWeight,
+                                fontStyle = fontStyle,
+                                textDecoration = textDecoration,
+                            ),
+                        start = start,
+                        end = end,
+                    )
+                }
             }
         }
 

@@ -55,6 +55,7 @@ import com.zeroclaw.ffi.FfiWorkspaceScript
 import com.zeroclaw.ffi.TailnetServiceKind
 import com.zeroclaw.ffi.TtyCursorState
 import com.zeroclaw.ffi.TtyCursorStyle
+import com.zeroclaw.ffi.TtyDirtyState
 import com.zeroclaw.ffi.TtyHostKeyDecision
 import com.zeroclaw.ffi.TtyRenderFrame
 import com.zeroclaw.ffi.TtyRenderRow
@@ -911,7 +912,7 @@ class TerminalViewModel(
             lines.map { line ->
                 TtyRenderRow(
                     text = line,
-                    spans = emptyList(),
+                    styles = emptyList(),
                     dirty = true,
                 )
             }
@@ -933,7 +934,7 @@ class TerminalViewModel(
                 ),
             defaultBgArgb = 0xFF1A1A2Eu,
             defaultFgArgb = 0xFF4AF626u,
-            hasChanges = true,
+            dirtyState = TtyDirtyState.FULL,
         )
     }
 
