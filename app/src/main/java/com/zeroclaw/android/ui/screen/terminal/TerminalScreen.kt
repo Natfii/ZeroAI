@@ -29,10 +29,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Hearing
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.FilterChip
@@ -63,6 +66,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -77,6 +81,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -87,6 +92,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -153,8 +159,14 @@ private const val DISMISS_ICON_DP = 12
 /** Loading indicator size in the pending strip. */
 private const val PROCESSING_INDICATOR_DP = 16
 
-/** Maximum number of visible characters preserved around a redacted secret. */
-private const val REDACTION_VISIBLE_CHARS = 4
+/** Maximum characters of paste text shown in the safety confirmation dialog. */
+private const val MAX_PASTE_PREVIEW_LENGTH = 120
+
+/** Maximum lines of paste text shown in the safety confirmation dialog. */
+private const val MAX_PASTE_PREVIEW_LINES = 4
+
+/** Alpha for selection highlight overlay drawn over the canvas cells. */
+private const val SELECTION_HIGHLIGHT_ALPHA = 0.4f
 
 /**
  * Terminal REPL screen for interacting with the ZeroAI daemon.
@@ -258,6 +270,12 @@ fun TerminalScreen(
     val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
     val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
     val currentTheme by terminalViewModel.currentTheme.collectAsStateWithLifecycle()
+    val ttyCursorBlinking by terminalViewModel.ttyCursorBlinking.collectAsStateWithLifecycle()
+    val ttyCursorPosition by terminalViewModel.ttyCursorPosition.collectAsStateWithLifecycle()
+    val ttyGridCols by terminalViewModel.ttyGridCols.collectAsStateWithLifecycle()
+    val ttySelection by terminalViewModel.ttySelection.collectAsStateWithLifecycle()
+    val showPasteBar by terminalViewModel.showPasteBar.collectAsStateWithLifecycle()
+    val pendingPaste by terminalViewModel.pendingPaste.collectAsStateWithLifecycle()
     val isPowerSave = LocalPowerSaveMode.current
 
     Crossfade(
@@ -308,6 +326,28 @@ fun TerminalScreen(
                     themes = terminalViewModel.allThemes(),
                     currentThemeName = currentTheme?.name,
                     onApplyTheme = terminalViewModel::applyTheme,
+                    cursorBlinking = ttyCursorBlinking,
+                    cursorPosition = ttyCursorPosition,
+                    gridCols = ttyGridCols,
+                    selection = ttySelection,
+                    showPasteBar = showPasteBar,
+                    pendingPaste = pendingPaste,
+                    onCopy = {
+                        val sel = ttySelection ?: return@TtySessionContent
+                        val frame =
+                            terminalViewModel.ttyRenderFrame.value
+                                ?: return@TtySessionContent
+                        val text = extractSelectedText(sel, frame.rows)
+                        copyToClipboard(context, text, "Terminal")
+                        terminalViewModel.clearSelection()
+                    },
+                    onPaste = { terminalViewModel.pasteFromClipboard(context) },
+                    onPasteText = terminalViewModel::pasteText,
+                    onConfirmPaste = terminalViewModel::confirmPaste,
+                    onCancelPaste = terminalViewModel::cancelPaste,
+                    onSelectionStart = terminalViewModel::startWordSelection,
+                    onSelectionUpdate = terminalViewModel::updateSelectionEnd,
+                    onSelectionClear = terminalViewModel::clearSelection,
                 )
             }
         }
@@ -1047,46 +1087,6 @@ private enum class ClipboardCopyResult {
     Redacted,
 }
 
-private val CLIPBOARD_SECRET_PATTERNS: List<Regex> =
-    listOf(
-        Regex("""(?i)(authorization:\s*bearer\s+)([A-Za-z0-9._\-+/=]{12,})"""),
-        Regex("""(?i)(refresh[_ -]?token["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
-        Regex("""(?i)(access[_ -]?token["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
-        Regex("""(?i)(api[_ -]?key["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
-        Regex("""\bsk-[A-Za-z0-9_-]{12,}\b"""),
-        Regex("""\bAIza[0-9A-Za-z\-_]{20,}\b"""),
-        Regex("""\bya29\.[0-9A-Za-z._\-]+\b"""),
-        Regex("""(?i)\b(cookie|set-cookie):\s*([^\r\n]+)"""),
-    )
-
-private fun redactClipboardSecrets(text: String): String {
-    var redacted = text
-    CLIPBOARD_SECRET_PATTERNS.forEach { pattern ->
-        redacted =
-            pattern.replace(redacted) { match ->
-                if (match.groupValues.size >= 3) {
-                    match.groupValues[1] + preserveTokenShape(match.groupValues[2])
-                } else {
-                    preserveTokenShape(match.value)
-                }
-            }
-    }
-    return redacted
-}
-
-private fun preserveTokenShape(token: String): String {
-    val trimmed = token.trim()
-    if (trimmed.length <= REDACTION_VISIBLE_CHARS * 2) {
-        return "[REDACTED]"
-    }
-    return buildString {
-        append(trimmed.take(REDACTION_VISIBLE_CHARS))
-        append("…")
-        append(trimmed.takeLast(REDACTION_VISIBLE_CHARS))
-        append(" [REDACTED]")
-    }
-}
-
 /** Mascot size in the welcome header. */
 private const val WELCOME_MASCOT_DP = 48
 
@@ -1187,8 +1187,8 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onKeyPress Callback for special key presses from [TtyKeyRow].
  * @param onTextInput Callback for text typed via the software keyboard.
  * @param onFontSizeChange Invoked with the new font size after a pinch-to-zoom gesture.
- * @param onSizeChanged Invoked with the new `(cols, rows)` grid dimensions when the
- *   canvas size or font metrics change.
+ * @param onSizeChanged Invoked with the new `(cols, rows, widthPx, heightPx)` grid dimensions
+ *   and canvas pixel size when the canvas size or font metrics change.
  * @param onAnswerHostKey Callback invoked with `true` to accept or `false` to reject the host key.
  * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
  * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
@@ -1196,6 +1196,21 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param themes All available terminal color themes shown in the [TerminalThemePicker] dialog.
  * @param currentThemeName Name of the currently active theme, or null if none is set.
  * @param onApplyTheme Callback invoked with the chosen [TerminalTheme] when the user selects one.
+ * @param cursorBlinking Whether the cursor is in blinking mode; drives the blink [LaunchedEffect].
+ * @param cursorPosition Stable `"col-row"` string key; resets the blink phase when the cursor moves.
+ * @param gridCols Current grid column count from the latest render frame, or the default.
+ * @param selection Current text selection state, or `null` when no selection is active.
+ * @param showPasteBar Grid cell position for a paste-only action bar when no text is selected.
+ * @param pendingPaste Text awaiting paste confirmation, or `null` when no confirmation is needed.
+ * @param onCopy Callback invoked when the user taps Copy in the selection action bar.
+ * @param onPaste Callback invoked when the user taps Paste in the action bar.
+ * @param onPasteText Callback invoked with intercepted text from [BasicTextField] that contains
+ *   control characters and should be routed through the paste safety flow.
+ * @param onConfirmPaste Callback to confirm and send a pending unsafe paste.
+ * @param onCancelPaste Callback to cancel a pending paste and clear selection state.
+ * @param onSelectionStart Callback invoked at the start of a long-press selection gesture.
+ * @param onSelectionUpdate Callback invoked as the selection drag updates.
+ * @param onSelectionClear Callback invoked when the selection is dismissed.
  */
 @Suppress("LongParameterList")
 @Composable
@@ -1211,7 +1226,7 @@ fun TtySessionContent(
     onKeyPress: (TtySpecialKey) -> Unit,
     onTextInput: (String) -> Unit,
     onFontSizeChange: (Float) -> Unit,
-    onSizeChanged: (cols: Int, rows: Int) -> Unit,
+    onSizeChanged: (cols: Int, rows: Int, widthPx: Int, heightPx: Int) -> Unit,
     onAnswerHostKey: (Boolean) -> Unit = {},
     onSubmitPassword: (CharArray) -> Unit = {},
     @Suppress("UnusedParameter") onSubmitKey: (String) -> Unit = {},
@@ -1219,10 +1234,25 @@ fun TtySessionContent(
     themes: List<TerminalTheme> = emptyList(),
     currentThemeName: String? = null,
     onApplyTheme: (TerminalTheme) -> Unit = {},
+    cursorBlinking: Boolean = false,
+    cursorPosition: String = "",
+    gridCols: Int = TTY_DEFAULT_GRID_COLS,
+    selection: TtySelectionState? = null,
+    showPasteBar: Pair<Int, Int>? = null,
+    pendingPaste: String? = null,
+    onCopy: () -> Unit = {},
+    onPaste: () -> Unit = {},
+    onPasteText: (String) -> Unit = {},
+    onConfirmPaste: () -> Unit = {},
+    onCancelPaste: () -> Unit = {},
+    onSelectionStart: (col: Int, row: Int) -> Unit = { _, _ -> },
+    onSelectionUpdate: (col: Int, row: Int) -> Unit = { _, _ -> },
+    onSelectionClear: () -> Unit = {},
 ) {
     var inputText by remember { mutableStateOf("") }
     var showThemePicker by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val isPowerSave = LocalPowerSaveMode.current
 
     if (showThemePicker) {
         TerminalThemePicker(
@@ -1271,6 +1301,38 @@ fun TtySessionContent(
             else -> Unit
         }
 
+        // Paste safety dialog
+        if (pendingPaste != null) {
+            AlertDialog(
+                onDismissRequest = onCancelPaste,
+                title = { Text("Confirm Paste") },
+                text = {
+                    Column {
+                        Text(
+                            "This text contains newlines or control characters that may execute commands.",
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = pendingPaste.take(MAX_PASTE_PREVIEW_LENGTH),
+                            style =
+                                MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = FontFamily.Monospace,
+                                ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = MAX_PASTE_PREVIEW_LINES,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmPaste) { Text("Paste Anyway") }
+                },
+                dismissButton = {
+                    TextButton(onClick = onCancelPaste) { Text("Cancel") }
+                },
+            )
+        }
+
         val listState = rememberLazyListState()
 
         val isAtBottom by remember {
@@ -1290,20 +1352,16 @@ fun TtySessionContent(
         }
 
         var blinkPhase by remember { mutableStateOf(true) }
-        val cursorSnapshot = frameProvider()?.cursor
-        val cursorPosition = cursorSnapshot?.let { "${it.col}-${it.row}" }
 
-        LaunchedEffect(cursorSnapshot?.blinking, cursorPosition) {
+        LaunchedEffect(cursorBlinking, cursorPosition) {
             blinkPhase = true
-            if (cursorSnapshot?.blinking == true) {
+            if (cursorBlinking && !isPowerSave) {
                 while (true) {
                     delay(CURSOR_BLINK_INTERVAL_MS)
                     blinkPhase = !blinkPhase
                 }
             }
         }
-
-        val gridCols = (frameProvider()?.cols?.toInt()) ?: TTY_DEFAULT_GRID_COLS
         var canvasSize by remember { mutableStateOf(IntSize.Zero) }
         val density = LocalDensity.current
 
@@ -1319,24 +1377,54 @@ fun TtySessionContent(
                 val cellHeight = paint.fontSpacing
                 val cols = (canvasSize.width / cellWidth).toInt().coerceAtLeast(1)
                 val rows = (canvasSize.height / cellHeight).toInt().coerceAtLeast(1)
-                onSizeChanged(cols, rows)
+                onSizeChanged(cols, rows, canvasSize.width, canvasSize.height)
             }
         }
 
         if (hasFrame) {
-            TtyCanvasView(
-                frameProvider = frameProvider,
-                fontSize = fontSize,
-                gridCols = gridCols,
-                onFontSizeChange = onFontSizeChange,
-                onTap = { focusRequester.requestFocus() },
-                cursorVisible = blinkPhase,
+            Box(
                 modifier =
                     Modifier
                         .weight(1f)
-                        .fillMaxWidth()
-                        .onSizeChanged { canvasSize = it },
-            )
+                        .fillMaxWidth(),
+            ) {
+                val selectionHighlightColor =
+                    MaterialTheme.colorScheme.primary
+                        .copy(alpha = SELECTION_HIGHLIGHT_ALPHA)
+                        .toArgb()
+
+                TtyCanvasView(
+                    frameProvider = frameProvider,
+                    fontSize = fontSize,
+                    gridCols = gridCols,
+                    onFontSizeChange = onFontSizeChange,
+                    onTap = { focusRequester.requestFocus() },
+                    cursorVisible = blinkPhase,
+                    selectionProvider = { selection },
+                    selectionHighlightArgb = selectionHighlightColor,
+                    onSelectionStart = onSelectionStart,
+                    onSelectionUpdate = onSelectionUpdate,
+                    onSelectionClear = onSelectionClear,
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .onSizeChanged { canvasSize = it },
+                )
+
+                // Floating action bar for selection/paste
+                if (selection != null || showPasteBar != null) {
+                    TtySelectionActionBar(
+                        hasSelection = selection != null,
+                        hasClipboard = true,
+                        onCopy = onCopy,
+                        onPaste = onPaste,
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 8.dp),
+                    )
+                }
+            }
         } else {
             LazyColumn(
                 state = listState,
@@ -1392,7 +1480,23 @@ fun TtySessionContent(
                 BasicTextField(
                     value = inputText,
                     onValueChange = { newValue ->
-                        if (newValue.contains('\n')) {
+                        val inserted = newValue.length - inputText.length
+                        val hasControlChars =
+                            newValue.any {
+                                it == '\r' || it == '\n' || it == '\u001b'
+                            }
+
+                        if (hasControlChars && inserted > 1) {
+                            // Paste-like input with control chars — route through safety
+                            val pastedText =
+                                if (newValue.startsWith(inputText)) {
+                                    newValue.removePrefix(inputText)
+                                } else {
+                                    newValue
+                                }
+                            onPasteText(pastedText)
+                            inputText = ""
+                        } else if (newValue.contains('\n')) {
                             val text = newValue.replace("\n", "")
                             if (text.isNotEmpty()) {
                                 onTextInput(text + "\r")
@@ -1454,5 +1558,63 @@ fun TtySessionContent(
             altActive = altActive,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/**
+ * Floating action bar for terminal text selection and paste.
+ *
+ * Shows Copy and Paste buttons when text is selected, or only Paste
+ * when triggered from a long-press on empty space.
+ *
+ * @param hasSelection Whether text is currently selected.
+ * @param hasClipboard Whether the clipboard contains pasteable content.
+ * @param onCopy Callback invoked when the Copy button is tapped.
+ * @param onPaste Callback invoked when the Paste button is tapped.
+ * @param modifier [Modifier] applied to the action bar surface.
+ */
+@Composable
+private fun TtySelectionActionBar(
+    hasSelection: Boolean,
+    hasClipboard: Boolean,
+    onCopy: () -> Unit,
+    onPaste: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 2.dp,
+        modifier = modifier,
+    ) {
+        Row(modifier = Modifier.padding(horizontal = 4.dp)) {
+            if (hasSelection) {
+                TextButton(
+                    onClick = onCopy,
+                    modifier =
+                        Modifier
+                            .sizeIn(minHeight = 48.dp)
+                            .semantics { contentDescription = "Copy selected text" },
+                ) {
+                    Text(
+                        text = "Copy",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+            }
+            TextButton(
+                onClick = onPaste,
+                enabled = hasClipboard,
+                modifier =
+                    Modifier
+                        .sizeIn(minHeight = 48.dp)
+                        .semantics { contentDescription = "Paste from clipboard" },
+            ) {
+                Text(
+                    text = "Paste",
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
     }
 }

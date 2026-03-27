@@ -5,7 +5,10 @@
 package com.zeroclaw.android.ui.screen.terminal
 
 import android.graphics.Canvas
+import android.graphics.DashPathEffect
 import android.graphics.Paint
+import android.graphics.Path
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +22,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import com.zeroclaw.ffi.TtyCursorStyle
@@ -37,10 +42,12 @@ import com.zeroclaw.ffi.TtyRenderRow
  *
  * @property text Concatenated UTF-8 cell text for the row.
  * @property styles Packed style longs, one per column.
+ * @property charOffsets Byte offset of each column's first char in [text].
  */
 private class CachedRow(
     var text: String = "",
-    var styles: List<Long> = emptyList(),
+    var styles: LongArray = LongArray(0),
+    var charOffsets: IntArray = IntArray(0),
 )
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -69,6 +76,51 @@ private const val DIM_MULTIPLIER_DEN = 3
 /** Opaque alpha mask for ARGB construction. */
 private const val ALPHA_OPAQUE = 0xFF000000.toInt()
 
+/** Stroke width (px) for decorative underline variants (double, curly, dotted, dashed). */
+private const val UNDERLINE_STROKE_WIDTH = 1.5f
+
+/** Pixel offset from cell bottom edge to the underline Y baseline. */
+private const val UNDERLINE_BOTTOM_OFFSET = 2f
+
+/** Vertical amplitude (px) of the curly underline wave. */
+private const val CURLY_WAVE_AMPLITUDE = 3f
+
+/** Dash length (px) for dotted underline pattern. */
+private const val DOTTED_DASH_ON = 3f
+
+/** Gap length (px) for dotted underline pattern. */
+private const val DOTTED_DASH_OFF = 3f
+
+/** Dash length (px) for dashed underline pattern. */
+private const val DASHED_DASH_ON = 6f
+
+/** Gap length (px) for dashed underline pattern. */
+private const val DASHED_DASH_OFF = 3f
+
+/** Height (px) of the overline rect drawn at the top of the cell. */
+private const val OVERLINE_HEIGHT = 2f
+
+/** Divisor for the quarter-wave control-point x-offset in the curly underline. */
+private const val CURLY_WAVE_QUARTER_DIV = 4f
+
+/** Divisor for the half-wave control-point x-offset in the curly underline. */
+private const val CURLY_WAVE_HALF_DIV = 2f
+
+/** Multiplier for the three-quarter-wave control-point x-offset in the curly underline. */
+private const val CURLY_WAVE_THREE_QUARTER_MUL = 3f
+
+/** Minimum number of regex group values required for a match with a capture group. */
+private const val UNDERLINE_STYLE_DOUBLE = 2
+
+/** Underline style code for curly underline. */
+private const val UNDERLINE_STYLE_CURLY = 3
+
+/** Underline style code for dotted underline. */
+private const val UNDERLINE_STYLE_DOTTED = 4
+
+/** Underline style code for dashed underline. */
+private const val UNDERLINE_STYLE_DASHED = 5
+
 /**
  * Canvas-based terminal renderer using native [Canvas.drawTextRun].
  *
@@ -89,9 +141,20 @@ private const val ALPHA_OPAQUE = 0xFF000000.toInt()
  * @param fontSize Font size in sp for the monospace cell grid.
  * @param onFontSizeChange Invoked with the new font size (sp as raw
  *   [Float]) after a pinch-to-zoom gesture.
- * @param onTap Invoked on a single tap for soft-keyboard focus.
+ * @param onTap Invoked on a single tap for soft-keyboard focus, or to
+ *   dismiss an active selection.
  * @param cursorVisible External blink-phase signal controlling cursor
  *   visibility.
+ * @param selectionProvider Lambda returning the current [TtySelectionState],
+ *   or `null` when no selection is active. Evaluated during the draw phase.
+ * @param selectionHighlightArgb ARGB color used to fill selection highlight
+ *   rectangles. Defaults to a semi-transparent white overlay.
+ * @param onSelectionStart Invoked with grid (col, row) when a double-tap or
+ *   long-press begins a new selection.
+ * @param onSelectionUpdate Invoked with grid (col, row) as a drag gesture
+ *   extends the selection after a long-press.
+ * @param onSelectionClear Invoked when a tap should dismiss the active
+ *   selection without requesting IME focus.
  * @param modifier [Modifier] applied to the drawing surface.
  */
 @Suppress("LongMethod", "CyclomaticComplexMethod", "LongParameterList")
@@ -103,6 +166,11 @@ fun TtyCanvasView(
     onFontSizeChange: (Float) -> Unit,
     onTap: () -> Unit,
     cursorVisible: Boolean = true,
+    selectionProvider: () -> TtySelectionState? = { null },
+    selectionHighlightArgb: Int = 0x66FFFFFF,
+    onSelectionStart: (col: Int, row: Int) -> Unit = { _, _ -> },
+    onSelectionUpdate: (col: Int, row: Int) -> Unit = { _, _ -> },
+    onSelectionClear: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val fontState = rememberFontState(fontSize.sp, gridCols)
@@ -116,8 +184,58 @@ fun TtyCanvasView(
         modifier =
             modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(onTap = { onTap() })
+                .semantics {
+                    onLongClick(label = "Select word") { true }
+                }.pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { _ ->
+                            if (selectionProvider() != null) {
+                                onSelectionClear()
+                            } else {
+                                onTap()
+                            }
+                        },
+                        onDoubleTap = { offset ->
+                            val col =
+                                (offset.x / fontState.cellWidthPx)
+                                    .toInt()
+                                    .coerceIn(0, gridCols - 1)
+                            val row =
+                                (offset.y / fontState.cellHeightPx)
+                                    .toInt()
+                                    .coerceAtLeast(0)
+                            onSelectionStart(col, row)
+                        },
+                        onLongPress = { offset ->
+                            val col =
+                                (offset.x / fontState.cellWidthPx)
+                                    .toInt()
+                                    .coerceIn(0, gridCols - 1)
+                            val row =
+                                (offset.y / fontState.cellHeightPx)
+                                    .toInt()
+                                    .coerceAtLeast(0)
+                            onSelectionStart(col, row)
+                        },
+                    )
+                }.pointerInput(Unit) {
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = { /* handled by onLongPress above */ },
+                        onDrag = { change, _ ->
+                            change.consume()
+                            val col =
+                                (change.position.x / fontState.cellWidthPx)
+                                    .toInt()
+                                    .coerceIn(0, gridCols - 1)
+                            val row =
+                                (change.position.y / fontState.cellHeightPx)
+                                    .toInt()
+                                    .coerceAtLeast(0)
+                            onSelectionUpdate(col, row)
+                        },
+                        onDragEnd = { },
+                        onDragCancel = { },
+                    )
                 }.pointerInput(Unit) {
                     detectTransformGestures { _, _, zoom, _ ->
                         val newSize =
@@ -177,28 +295,26 @@ fun TtyCanvasView(
                                     drawFreshRow(
                                         nativeCanvas,
                                         row,
+                                        cached,
                                         i,
                                         gridColsComputed,
                                         fontState,
                                         defaultBgArgb,
                                         defaultFgArgb,
                                     )
-                                    cached.text = row.text
-                                    cached.styles = row.styles.toList()
                                 }
                                 TtyDirtyState.PARTIAL -> {
                                     if (row.dirty) {
                                         drawFreshRow(
                                             nativeCanvas,
                                             row,
+                                            cached,
                                             i,
                                             gridColsComputed,
                                             fontState,
                                             defaultBgArgb,
                                             defaultFgArgb,
                                         )
-                                        cached.text = row.text
-                                        cached.styles = row.styles.toList()
                                     } else {
                                         drawCachedRow(
                                             nativeCanvas,
@@ -212,6 +328,38 @@ fun TtyCanvasView(
                                     }
                                 }
                             }
+                        }
+
+                        // Selection highlight.
+                        val selection = selectionProvider()?.normalised()
+                        if (selection != null) {
+                            cursorPaint.color = selectionHighlightArgb
+                            cursorPaint.style = Paint.Style.FILL
+
+                            for (i in 0 until visibleRows) {
+                                val absRow = startRow + i
+                                if (absRow < selection.startRow || absRow > selection.endRow) continue
+
+                                val selColStart =
+                                    when (absRow) {
+                                        selection.startRow -> selection.startCol
+                                        else -> 0
+                                    }
+                                val selColEnd =
+                                    when (absRow) {
+                                        selection.endRow -> selection.endCol + 1
+                                        else -> gridColsComputed
+                                    }
+
+                                val x1 = selColStart * fontState.cellWidthPx
+                                val x2 = selColEnd * fontState.cellWidthPx
+                                val y1 = i * fontState.cellHeightPx
+                                val y2 = y1 + fontState.cellHeightPx
+                                nativeCanvas.drawRect(x1, y1, x2, y2, cursorPaint)
+                            }
+
+                            // Reset paint state after selection drawing.
+                            cursorPaint.style = Paint.Style.FILL
                         }
 
                         // Cursor.
@@ -243,27 +391,46 @@ fun TtyCanvasView(
 /**
  * Draws a row directly from [TtyRenderRow] data, using run batching
  * to group consecutive same-styled cells into single drawTextRun calls.
+ *
+ * Converts FFI [List] types to primitive arrays, draws the row via
+ * [drawRowImpl], then stores the result in [cache] for future CLEAN/PARTIAL frames.
+ *
+ * @param canvas The native [Canvas] to draw into.
+ * @param row The [TtyRenderRow] from the current [TtyRenderFrame].
+ * @param cache The [CachedRow] slot to update with the drawn content.
+ * @param rowIdx Zero-based screen row index for Y-coordinate calculation.
+ * @param cols Visible column count for clipping.
+ * @param fontState Metrics and paint for the current font size.
+ * @param defaultBgArgb Terminal default background color.
+ * @param defaultFgArgb Terminal default foreground color.
  */
 @Suppress("LongParameterList")
 private fun drawFreshRow(
     canvas: Canvas,
     row: TtyRenderRow,
+    cache: CachedRow,
     rowIdx: Int,
     cols: Int,
     fontState: TtyFontState,
     defaultBgArgb: Int,
     defaultFgArgb: Int,
 ) {
+    val stylesArray = row.styles.toLongArray()
+    val offsetsArray = row.charOffsets.map { it.toInt() }.toIntArray()
     drawRowImpl(
         canvas,
         row.text,
-        row.styles,
+        stylesArray,
+        offsetsArray,
         rowIdx,
         cols,
         fontState,
         defaultBgArgb,
         defaultFgArgb,
     )
+    cache.text = row.text
+    cache.styles = stylesArray
+    cache.charOffsets = offsetsArray
 }
 
 // ── Row drawing (from CachedRow) ───────────────────────────────────────
@@ -286,6 +453,7 @@ private fun drawCachedRow(
         canvas,
         cached.text,
         cached.styles,
+        cached.charOffsets,
         rowIdx,
         cols,
         fontState,
@@ -299,12 +467,17 @@ private fun drawCachedRow(
 /**
  * Core row rendering: iterates columns, compares packed style values,
  * and flushes a run of same-styled cells in a single drawTextRun call.
+ *
+ * Uses [charOffsets] for accurate char→column mapping, correctly handling
+ * combining characters (multiple codepoints in one cell) and wide characters
+ * (one glyph spanning two visual columns).
  */
-@Suppress("LongParameterList", "CyclomaticComplexMethod", "LongMethod")
+@Suppress("LongParameterList", "CyclomaticComplexMethod", "LongMethod", "CognitiveComplexMethod")
 private fun drawRowImpl(
     canvas: Canvas,
     text: String,
-    styles: List<Long>,
+    styles: LongArray,
+    charOffsets: IntArray,
     rowIdx: Int,
     cols: Int,
     fontState: TtyFontState,
@@ -322,7 +495,8 @@ private fun drawRowImpl(
     val numStyles = styles.size
     val visCols = minOf(cols, numStyles)
 
-    // Ensure the char buffer is large enough.
+    if (visCols == 0) return
+
     val charBuf =
         if (fontState.charBuffer.size >= textLen) {
             fontState.charBuffer
@@ -332,26 +506,36 @@ private fun drawRowImpl(
     text.toCharArray(charBuf, 0, 0, textLen)
 
     var runStartCol = 0
-    var runStyle = if (visCols > 0) styles[0] else 0L
+    var runStyle = styles[0]
 
     for (col in 0..visCols) {
         val currentStyle = if (col < visCols) styles[col] else -1L
         if (col < visCols && currentStyle == runStyle) continue
 
         // Flush the run from runStartCol..<col
-        val runEndCol = col
-        val charStart = runStartCol.coerceAtMost(textLen)
-        val charEnd = runEndCol.coerceAtMost(textLen)
-        val charCount = charEnd - charStart
+        val charStart =
+            if (runStartCol < charOffsets.size) {
+                charOffsets[runStartCol]
+            } else {
+                textLen
+            }
+        val charEnd =
+            if (col < charOffsets.size) {
+                charOffsets[col]
+            } else {
+                textLen
+            }
+
+        val runCols = col - runStartCol
 
         flushRun(
             canvas,
             paint,
             charBuf,
             charStart,
-            charCount,
+            charEnd - charStart,
             runStartCol,
-            runEndCol,
+            runStartCol + runCols,
             yTop,
             yBaseline,
             cellW,
@@ -374,7 +558,7 @@ private fun drawRowImpl(
  * Draws a single run of same-styled cells: background rect, then text
  * via [Canvas.drawTextRun], then resets paint properties.
  */
-@Suppress("LongParameterList", "CyclomaticComplexMethod")
+@Suppress("LongParameterList", "CyclomaticComplexMethod", "LongMethod", "CognitiveComplexMethod")
 private fun flushRun(
     canvas: Canvas,
     paint: Paint,
@@ -405,6 +589,9 @@ private fun flushRun(
     // Skip text drawing if there are no characters in this run.
     if (charCount <= 0) return
 
+    // Invisible: draw background but skip text entirely.
+    if (style.packedIsInvisible()) return
+
     // Foreground color.
     var fgArgb = style.packedFgArgb()
     if (fgArgb == 0) fgArgb = defaultFgArgb
@@ -414,13 +601,19 @@ private fun flushRun(
         fgArgb = dimColor(fgArgb)
     }
 
+    // Blink: render as dim (static fallback — no timer-driven flicker).
+    if (style.packedIsBlink()) {
+        fgArgb = dimColor(fgArgb)
+    }
+
     paint.color = fgArgb
     paint.style = Paint.Style.FILL
 
     // Text attributes.
     paint.isFakeBoldText = style.packedIsBold()
     paint.textSkewX = if (style.packedIsItalic()) ITALIC_SKEW else 0f
-    paint.isUnderlineText = style.packedIsUnderline()
+    val underlineStyle = style.packedUnderlineStyle()
+    paint.isUnderlineText = underlineStyle == 1 // Only Paint's built-in for single
     paint.isStrikeThruText = style.packedIsStrikethrough()
 
     // Draw the text run.
@@ -435,6 +628,72 @@ private fun flushRun(
         false,
         paint,
     )
+
+    // Custom underline variants (double, curly, dotted, dashed).
+    if (underlineStyle >= UNDERLINE_STYLE_DOUBLE) {
+        paint.color = fgArgb
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = UNDERLINE_STROKE_WIDTH
+        val underY = yTop + cellH - UNDERLINE_BOTTOM_OFFSET
+        when (underlineStyle) {
+            UNDERLINE_STYLE_DOUBLE -> {
+                // Double underline
+                canvas.drawLine(
+                    xStart,
+                    underY - UNDERLINE_BOTTOM_OFFSET,
+                    xStart + runWidth,
+                    underY - UNDERLINE_BOTTOM_OFFSET,
+                    paint,
+                )
+                canvas.drawLine(xStart, underY, xStart + runWidth, underY, paint)
+            }
+            UNDERLINE_STYLE_CURLY -> {
+                // Curly underline
+                val path = Path()
+                path.moveTo(xStart, underY)
+                var x = xStart
+                val waveLen = cellW
+                while (x < xStart + runWidth) {
+                    path.quadTo(
+                        x + waveLen / CURLY_WAVE_QUARTER_DIV,
+                        underY - CURLY_WAVE_AMPLITUDE,
+                        x + waveLen / CURLY_WAVE_HALF_DIV,
+                        underY,
+                    )
+                    path.quadTo(
+                        x + waveLen * CURLY_WAVE_THREE_QUARTER_MUL / CURLY_WAVE_QUARTER_DIV,
+                        underY + CURLY_WAVE_AMPLITUDE,
+                        x + waveLen,
+                        underY,
+                    )
+                    x += waveLen
+                }
+                paint.style = Paint.Style.STROKE
+                canvas.drawPath(path, paint)
+            }
+            UNDERLINE_STYLE_DOTTED -> {
+                // Dotted underline
+                paint.pathEffect = DashPathEffect(floatArrayOf(DOTTED_DASH_ON, DOTTED_DASH_OFF), 0f)
+                canvas.drawLine(xStart, underY, xStart + runWidth, underY, paint)
+                paint.pathEffect = null
+            }
+            UNDERLINE_STYLE_DASHED -> {
+                // Dashed underline
+                paint.pathEffect = DashPathEffect(floatArrayOf(DASHED_DASH_ON, DASHED_DASH_OFF), 0f)
+                canvas.drawLine(xStart, underY, xStart + runWidth, underY, paint)
+                paint.pathEffect = null
+            }
+        }
+        paint.style = Paint.Style.FILL
+        paint.strokeWidth = 0f
+    }
+
+    // Overline: thin line at the top of the cell.
+    if (style.packedIsOverline()) {
+        paint.color = fgArgb
+        paint.style = Paint.Style.FILL
+        canvas.drawRect(xStart, yTop, xStart + runWidth, yTop + OVERLINE_HEIGHT, paint)
+    }
 
     // Reset mutable paint properties.
     paint.isFakeBoldText = false

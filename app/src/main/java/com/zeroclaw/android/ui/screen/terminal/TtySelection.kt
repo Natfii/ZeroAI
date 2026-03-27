@@ -10,6 +10,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.PersistableBundle
 import androidx.compose.runtime.Stable
 import com.zeroclaw.ffi.TtyRenderRow
@@ -141,8 +142,145 @@ fun copyToClipboard(
 ) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     val clip = ClipData.newPlainText(label, text)
-    val extras = PersistableBundle()
-    extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
-    clip.description.extras = extras
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val extras = PersistableBundle()
+        extras.putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+        clip.description.extras = extras
+    }
     clipboard.setPrimaryClip(clip)
 }
+
+/** Patterns that match common secrets in terminal output. */
+private val SECRET_PATTERNS: List<Regex> =
+    listOf(
+        Regex("""(?i)(authorization:\s*bearer\s+)([A-Za-z0-9._\-+/=]{12,})"""),
+        Regex("""(?i)(refresh[_ -]?token["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
+        Regex("""(?i)(access[_ -]?token["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
+        Regex("""(?i)(api[_ -]?key["'=:\s]+)([A-Za-z0-9._\-+/=]{12,})"""),
+        Regex("""\bsk-[A-Za-z0-9_-]{12,}\b"""),
+        Regex("""\bAIza[0-9A-Za-z\-_]{20,}\b"""),
+        Regex("""\bya29\.[0-9A-Za-z._\-]+\b"""),
+        Regex("""(?i)\b(cookie|set-cookie):\s*([^\r\n]+)"""),
+    )
+
+private const val REDACTION_VISIBLE_CHARS = 4
+
+/**
+ * Minimum [MatchResult.groupValues] size to confirm that at least two capture groups
+ * matched (index 0 = full match, 1 = group 1, 2 = group 2).
+ */
+private const val REDACT_MIN_GROUP_VALUES = 3
+
+/**
+ * Redacts recognized secret patterns from terminal text before placing it on the clipboard.
+ *
+ * For each matched secret value, preserves up to [REDACTION_VISIBLE_CHARS] characters at
+ * the start and end of the token with a `[REDACTED]` placeholder in between, keeping enough
+ * context to identify the key type without leaking the full secret.
+ *
+ * @param text Raw terminal text that may contain credentials or tokens.
+ * @return A copy of [text] with secret values replaced by redacted placeholders.
+ */
+internal fun redactClipboardSecrets(text: String): String {
+    var redacted = text
+    SECRET_PATTERNS.forEach { pattern ->
+        redacted =
+            pattern.replace(redacted) { match ->
+                if (match.groupValues.size >= REDACT_MIN_GROUP_VALUES) {
+                    match.groupValues[1] + preserveTokenShape(match.groupValues[2])
+                } else {
+                    preserveTokenShape(match.value)
+                }
+            }
+    }
+    return redacted
+}
+
+private fun preserveTokenShape(token: String): String {
+    val trimmed = token.trim()
+    if (trimmed.length <= REDACTION_VISIBLE_CHARS * 2) {
+        return "[REDACTED]"
+    }
+    return buildString {
+        append(trimmed.take(REDACTION_VISIBLE_CHARS))
+        append("…")
+        append(trimmed.takeLast(REDACTION_VISIBLE_CHARS))
+        append(" [REDACTED]")
+    }
+}
+
+/**
+ * Finds the word boundaries around [col] in a terminal row.
+ *
+ * Scans left and right from the character at [col] until a word
+ * delimiter (whitespace or punctuation) is reached. Returns the
+ * inclusive column range `(startCol, endCol)` of the word, or
+ * `null` if [col] is on a delimiter, whitespace, or out of bounds.
+ *
+ * @param text The row's concatenated UTF-8 text.
+ * @param charOffsets UTF-16 code-unit offset per column (same length as styles).
+ * @param col The column index to test.
+ * @return Inclusive `(startCol, endCol)` pair, or `null` if no word at [col].
+ */
+fun findWordBoundaries(
+    text: String,
+    charOffsets: List<UInt>,
+    col: Int,
+): Pair<Int, Int>? {
+    if (col < 0 || col >= charOffsets.size) return null
+    val totalCols = charOffsets.size
+
+    val charIdx = charOffsets[col].toInt()
+    if (charIdx >= text.length) return null
+    if (text[charIdx].isWordDelimiter()) return null
+
+    var startCol = col
+    while (startCol > 0) {
+        val prevCharIdx = charOffsets[startCol - 1].toInt()
+        if (prevCharIdx >= text.length || text[prevCharIdx].isWordDelimiter()) break
+        startCol--
+    }
+
+    var endCol = col
+    while (endCol < totalCols - 1) {
+        val nextCharIdx = charOffsets[endCol + 1].toInt()
+        if (nextCharIdx >= text.length || text[nextCharIdx].isWordDelimiter()) break
+        endCol++
+    }
+
+    return startCol to endCol
+}
+
+private val WORD_DELIMITERS: Set<Char> =
+    setOf(
+        '(',
+        ')',
+        '[',
+        ']',
+        '{',
+        '}',
+        '<',
+        '>',
+        '\'',
+        '"',
+        ';',
+        ':',
+        ',',
+        '.',
+        '|',
+        '&',
+        '!',
+        '@',
+        '#',
+        '$',
+        '%',
+        '^',
+        '*',
+        '=',
+        '+',
+        '~',
+        '`',
+        '\\',
+    )
+
+private fun Char.isWordDelimiter(): Boolean = isWhitespace() || this in WORD_DELIMITERS

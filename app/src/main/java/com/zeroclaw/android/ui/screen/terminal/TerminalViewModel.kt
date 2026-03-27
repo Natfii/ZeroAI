@@ -6,6 +6,7 @@ package com.zeroclaw.android.ui.screen.terminal
 
 import android.Manifest
 import android.app.Application
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -75,6 +76,8 @@ import com.zeroclaw.ffi.ttyDisconnectSsh
 import com.zeroclaw.ffi.ttyGetOutputSnapshot
 import com.zeroclaw.ffi.ttyGetPendingHostKey
 import com.zeroclaw.ffi.ttyGetRenderFrame
+import com.zeroclaw.ffi.ttyIsBracketedPasteActive
+import com.zeroclaw.ffi.ttyIsPasteSafe
 import com.zeroclaw.ffi.ttyResize
 import com.zeroclaw.ffi.ttySetPalette
 import com.zeroclaw.ffi.ttyStartSsh
@@ -265,6 +268,44 @@ class TerminalViewModel(
      */
     val ttyRenderFrame: StateFlow<TtyRenderFrame?> = _ttyRenderFrame.asStateFlow()
 
+    /**
+     * Whether the terminal cursor is currently set to blinking mode.
+     *
+     * Derived from [ttyRenderFrame] so that callers never read frame state
+     * during Compose composition — updates are gated to the StateFlow emission
+     * path and collected with [collectAsStateWithLifecycle].
+     */
+    val ttyCursorBlinking: StateFlow<Boolean> =
+        _ttyRenderFrame
+            .map { it?.cursor?.blinking == true }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), false)
+
+    /**
+     * Stable string key representing the cursor's current grid position,
+     * formatted as `"col-row"`.
+     *
+     * Used as a [LaunchedEffect] key in [TtySessionContent] so the blink
+     * coroutine restarts whenever the cursor moves without reading frame state
+     * during composition.
+     */
+    val ttyCursorPosition: StateFlow<String> =
+        _ttyRenderFrame
+            .map { frame ->
+                frame?.cursor?.let { "${it.col}-${it.row}" } ?: ""
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), "")
+
+    /**
+     * Current grid column count from the latest render frame.
+     *
+     * Falls back to [TTY_DEFAULT_COLS] before the first frame arrives.
+     * Collected at composition time instead of calling [frameProvider] directly,
+     * keeping frame reads out of the composition phase.
+     */
+    val ttyGridCols: StateFlow<Int> =
+        _ttyRenderFrame
+            .map { it?.cols?.toInt() ?: TTY_DEFAULT_COLS }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), TTY_DEFAULT_COLS)
+
     private val themeRepository = TerminalThemeRepository(application)
 
     private val _currentTheme = MutableStateFlow<TerminalTheme?>(null)
@@ -287,6 +328,16 @@ class TerminalViewModel(
      * is active. Updated by [setTtySelection] in response to drag gestures.
      */
     val ttySelection: StateFlow<TtySelectionState?> = _ttySelection.asStateFlow()
+
+    private val _pendingPaste = MutableStateFlow<String?>(null)
+
+    /** Pending paste text awaiting user confirmation via the safety dialog, or `null` when idle. */
+    val pendingPaste: StateFlow<String?> = _pendingPaste
+
+    private val _showPasteBar = MutableStateFlow<Pair<Int, Int>?>(null)
+
+    /** Grid cell `(col, row)` position for the paste-only action bar, or `null` when hidden. */
+    val showPasteBar: StateFlow<Pair<Int, Int>?> = _showPasteBar
 
     /**
      * Whether the Ctrl modifier key is currently toggled on.
@@ -836,6 +887,9 @@ class TerminalViewModel(
                 val textLines = _ttyOutputLines.value
                 buildFallbackFrame(textLines)
             }
+        if (nextFrame.dirtyState == TtyDirtyState.CLEAN && _ttyRenderFrame.value != null) {
+            return
+        }
         _ttyRenderFrame.value = nextFrame
     }
 
@@ -887,19 +941,175 @@ class TerminalViewModel(
         _ttySelection.value = selection
     }
 
-    /** Resizes the PTY when the Canvas grid dimensions change. */
+    /**
+     * Starts a word selection at the given grid cell.
+     *
+     * Finds word boundaries in the current frame's row text. If a word is
+     * found, sets the selection to cover it. If no word is found,
+     * shows the paste-only action bar at the touch position.
+     *
+     * @param col Column index in the frame grid.
+     * @param row Row index in the frame grid.
+     */
+    fun startWordSelection(
+        col: Int,
+        row: Int,
+    ) {
+        val frame = _ttyRenderFrame.value ?: return
+        if (row < 0 || row >= frame.rows.size) return
+        val rowData = frame.rows[row]
+        val boundaries = findWordBoundaries(rowData.text, rowData.charOffsets, col)
+        if (boundaries != null) {
+            _ttySelection.value =
+                TtySelectionState(
+                    startCol = boundaries.first,
+                    startRow = row,
+                    endCol = boundaries.second,
+                    endRow = row,
+                )
+            _showPasteBar.value = null
+        } else {
+            _ttySelection.value = null
+            _showPasteBar.value = col to row
+        }
+    }
+
+    /**
+     * Updates the selection end point during a drag gesture.
+     *
+     * @param col Current finger column position.
+     * @param row Current finger row position.
+     */
+    fun updateSelectionEnd(
+        col: Int,
+        row: Int,
+    ) {
+        _ttySelection.update { current ->
+            current?.copy(endCol = col, endRow = row)
+        }
+    }
+
+    /**
+     * Clears all selection state, pending paste, and paste-only bar.
+     */
+    fun clearSelection() {
+        _ttySelection.value = null
+        _showPasteBar.value = null
+        _pendingPaste.value = null
+    }
+
+    /**
+     * Initiates a paste from the system clipboard with safety validation.
+     *
+     * Reads the clipboard, checks for dangerous content, and either sends
+     * the text directly or shows a confirmation dialog via [_pendingPaste].
+     *
+     * @param context Android context for clipboard access.
+     */
+    fun pasteFromClipboard(context: Context) {
+        val clipboard =
+            context.getSystemService(Context.CLIPBOARD_SERVICE)
+                as android.content.ClipboardManager
+        val text =
+            clipboard.primaryClip
+                ?.getItemAt(0)
+                ?.text
+                ?.toString()
+        if (text.isNullOrEmpty()) return
+        checkAndPaste(text)
+    }
+
+    /**
+     * Initiates paste with pre-read text (used by BasicTextField interception).
+     *
+     * @param text The text to paste.
+     */
+    fun pasteText(text: String) {
+        if (text.isEmpty()) return
+        checkAndPaste(text)
+    }
+
+    private fun checkAndPaste(text: String) {
+        // Kotlin-side pre-check for \r and escape (ghostty misses \r)
+        val kotlinUnsafe = '\r' in text || '\u001b' in text
+
+        // FFI check (catches \n and \x1b[201~)
+        val ffiSafe =
+            try {
+                ttyIsPasteSafe(text)
+            } catch (_: Exception) {
+                false // fail-safe: treat as unsafe
+            }
+
+        if (kotlinUnsafe || !ffiSafe) {
+            _pendingPaste.value = text
+        } else {
+            executePaste(text)
+        }
+    }
+
+    /**
+     * Confirms a pending unsafe paste and sends it to the PTY.
+     */
+    fun confirmPaste() {
+        val text = _pendingPaste.value ?: return
+        _pendingPaste.value = null
+        executePaste(text)
+    }
+
+    /**
+     * Cancels a pending paste and clears all selection state.
+     */
+    fun cancelPaste() {
+        clearSelection()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private fun executePaste(text: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val bracketed =
+                try {
+                    ttyIsBracketedPasteActive()
+                } catch (_: Exception) {
+                    false
+                }
+            val payload =
+                if (bracketed) {
+                    "\u001b[200~$text\u001b[201~"
+                } else {
+                    text
+                }
+            try {
+                ttyWrite(payload.toByteArray(Charsets.UTF_8))
+            } catch (_: Exception) {
+                // PTY write failure — logged by FFI layer
+            }
+        }
+        clearSelection()
+    }
+
+    /**
+     * Resizes the PTY when the Canvas grid dimensions change.
+     *
+     * @param cols grid column count
+     * @param rows grid row count
+     * @param widthPx canvas width in physical pixels
+     * @param heightPx canvas height in physical pixels
+     */
     @Suppress("TooGenericExceptionCaught")
     fun onTtyGridSizeChanged(
         cols: Int,
         rows: Int,
+        widthPx: Int,
+        heightPx: Int,
     ) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 ttyResize(
                     cols.coerceAtLeast(1).toUInt(),
                     rows.coerceAtLeast(1).toUInt(),
-                    0u,
-                    0u,
+                    widthPx.coerceAtLeast(0).toUInt(),
+                    heightPx.coerceAtLeast(0).toUInt(),
                 )
             } catch (e: Exception) {
                 logRepository.append(LogSeverity.WARN, TAG, "TTY resize failed: ${e.message}")
@@ -918,6 +1128,7 @@ class TerminalViewModel(
                 TtyRenderRow(
                     text = line,
                     styles = emptyList(),
+                    charOffsets = emptyList(),
                     dirty = true,
                 )
             }
