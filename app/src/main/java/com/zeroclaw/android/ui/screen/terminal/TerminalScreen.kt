@@ -77,7 +77,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -86,7 +88,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.model.ProcessedImage
@@ -246,7 +250,10 @@ fun TerminalScreen(
     val peerAliases by terminalViewModel.peerAliases.collectAsStateWithLifecycle()
     val terminalMode by terminalViewModel.terminalMode.collectAsStateWithLifecycle()
     val ttyOutputLines by terminalViewModel.ttyOutputLines.collectAsStateWithLifecycle()
-    val ttyRenderFrame by terminalViewModel.ttyRenderFrame.collectAsStateWithLifecycle()
+    val ttyRenderFrameState = terminalViewModel.ttyRenderFrame.collectAsStateWithLifecycle()
+    val hasFrame by remember {
+        derivedStateOf { ttyRenderFrameState.value?.rows?.isNotEmpty() == true }
+    }
     val ttyFontSize by terminalViewModel.ttyFontSize.collectAsStateWithLifecycle()
     val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
     val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
@@ -284,7 +291,8 @@ fun TerminalScreen(
                 TtySessionContent(
                     session = mode.session,
                     outputLines = ttyOutputLines,
-                    renderFrame = ttyRenderFrame,
+                    frameProvider = { ttyRenderFrameState.value },
+                    hasFrame = hasFrame,
                     fontSize = ttyFontSize,
                     onFontSizeChange = terminalViewModel::setTtyFontSize,
                     onSizeChanged = terminalViewModel::onTtyGridSizeChanged,
@@ -1150,6 +1158,9 @@ private const val TTY_TEXT_GREEN = 0xFF4AF626
 /** Terminal background color — near-black. */
 private const val TTY_BG_COLOR = 0xFF1A1A2E
 
+/** Default grid column count when no render frame is available yet. */
+private const val TTY_DEFAULT_GRID_COLS = 80
+
 /** Cursor blink toggle interval matching xterm/ghostty-web convention. */
 private const val CURSOR_BLINK_INTERVAL_MS = 530L
 
@@ -1165,8 +1176,10 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  *
  * @param session Current TTY session UI state for the status bar and auth dialogs.
  * @param outputLines ANSI-stripped output lines retained for accessibility fallback.
- * @param renderFrame Current [TtyRenderFrame] produced by the VT backend, or null
- *   when nothing has been rendered yet.
+ * @param frameProvider Lambda that returns the current [TtyRenderFrame], invoked
+ *   inside the Canvas draw phase so that frame updates skip composition and layout.
+ * @param hasFrame Whether a non-empty render frame is available (drives the
+ *   Canvas-vs-LazyColumn branch at composition time).
  * @param fontSize Font size in sp used by [TtyCanvasView] for the monospace cell grid.
  * @param ctrlActive Whether the Ctrl modifier is toggled on.
  * @param altActive Whether the Alt modifier is toggled on.
@@ -1175,7 +1188,7 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onTextInput Callback for text typed via the software keyboard.
  * @param onFontSizeChange Invoked with the new font size after a pinch-to-zoom gesture.
  * @param onSizeChanged Invoked with the new `(cols, rows)` grid dimensions when the
- *   canvas size or cell metrics produce a different grid.
+ *   canvas size or font metrics change.
  * @param onAnswerHostKey Callback invoked with `true` to accept or `false` to reject the host key.
  * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
  * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
@@ -1184,11 +1197,13 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param currentThemeName Name of the currently active theme, or null if none is set.
  * @param onApplyTheme Callback invoked with the chosen [TerminalTheme] when the user selects one.
  */
+@Suppress("LongParameterList")
 @Composable
 fun TtySessionContent(
     session: TtySessionUiState,
     outputLines: List<String>,
-    renderFrame: TtyRenderFrame?,
+    frameProvider: () -> TtyRenderFrame?,
+    hasFrame: Boolean,
     fontSize: Float,
     ctrlActive: Boolean,
     altActive: Boolean,
@@ -1275,11 +1290,12 @@ fun TtySessionContent(
         }
 
         var blinkPhase by remember { mutableStateOf(true) }
-        val cursorPosition = renderFrame?.cursor?.let { "${it.col}-${it.row}" }
+        val cursorSnapshot = frameProvider()?.cursor
+        val cursorPosition = cursorSnapshot?.let { "${it.col}-${it.row}" }
 
-        LaunchedEffect(renderFrame?.cursor?.blinking, cursorPosition) {
+        LaunchedEffect(cursorSnapshot?.blinking, cursorPosition) {
             blinkPhase = true
-            if (renderFrame?.cursor?.blinking == true) {
+            if (cursorSnapshot?.blinking == true) {
                 while (true) {
                     delay(CURSOR_BLINK_INTERVAL_MS)
                     blinkPhase = !blinkPhase
@@ -1287,18 +1303,39 @@ fun TtySessionContent(
             }
         }
 
-        if (renderFrame != null && renderFrame.rows.isNotEmpty()) {
+        val gridCols = (frameProvider()?.cols?.toInt()) ?: TTY_DEFAULT_GRID_COLS
+        var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+        val density = LocalDensity.current
+
+        LaunchedEffect(canvasSize, fontSize) {
+            if (canvasSize.width > 0 && canvasSize.height > 0) {
+                val fontSizePx = with(density) { fontSize.sp.toPx() }
+                val paint =
+                    android.graphics.Paint().apply {
+                        typeface = android.graphics.Typeface.MONOSPACE
+                        textSize = fontSizePx
+                    }
+                val cellWidth = paint.measureText("X")
+                val cellHeight = paint.fontSpacing
+                val cols = (canvasSize.width / cellWidth).toInt().coerceAtLeast(1)
+                val rows = (canvasSize.height / cellHeight).toInt().coerceAtLeast(1)
+                onSizeChanged(cols, rows)
+            }
+        }
+
+        if (hasFrame) {
             TtyCanvasView(
-                frame = renderFrame,
+                frameProvider = frameProvider,
                 fontSize = fontSize,
+                gridCols = gridCols,
                 onFontSizeChange = onFontSizeChange,
                 onTap = { focusRequester.requestFocus() },
-                onSizeChanged = onSizeChanged,
                 cursorVisible = blinkPhase,
                 modifier =
                     Modifier
                         .weight(1f)
-                        .fillMaxWidth(),
+                        .fillMaxWidth()
+                        .onSizeChanged { canvasSize = it },
             )
         } else {
             LazyColumn(

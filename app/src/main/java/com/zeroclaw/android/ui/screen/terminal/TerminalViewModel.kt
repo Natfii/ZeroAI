@@ -816,19 +816,24 @@ class TerminalViewModel(
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun applyTtyRenderFrame() {
-        val textLines =
-            try {
-                val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
-                _ttyOutputLines.value = lines
-                lines
-            } catch (e: Exception) {
-                _ttyOutputLines.value
-            }
         val nextFrame =
             try {
                 val frame = ttyGetRenderFrame()
-                if (frame.rows.isNotEmpty()) frame else buildFallbackFrame(textLines)
+                if (frame.rows.isNotEmpty()) {
+                    frame
+                } else {
+                    val textLines =
+                        try {
+                            val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
+                            _ttyOutputLines.value = lines
+                            lines
+                        } catch (e: Exception) {
+                            _ttyOutputLines.value
+                        }
+                    buildFallbackFrame(textLines)
+                }
             } catch (e: Exception) {
+                val textLines = _ttyOutputLines.value
                 buildFallbackFrame(textLines)
             }
         _ttyRenderFrame.value = nextFrame
