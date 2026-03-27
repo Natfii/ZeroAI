@@ -166,6 +166,24 @@ impl Terminal {
         active
     }
 
+    /// Returns whether bracketed paste mode (DEC 2004) is active.
+    pub(crate) fn is_bracketed_paste_active(&self) -> bool {
+        let mut active = false;
+        // SAFETY: The handle is valid. The output pointer is valid stack
+        // memory for a bool.
+        unsafe {
+            let result = ghostty_terminal_mode_get(
+                self.handle,
+                GHOSTTY_MODE_BRACKETED_PASTE,
+                &mut active,
+            );
+            if result != GhosttyResult::Success {
+                return false;
+            }
+        }
+        active
+    }
+
     /// Returns the raw handle for passing to render state updates and
     /// key encoder sync. The caller must not free or store the handle.
     pub(crate) fn raw_handle(&self) -> GhosttyTerminal {
@@ -216,6 +234,11 @@ pub(crate) struct RenderState {
     row_cells: GhosttyRenderStateRowCells,
 }
 
+// SAFETY: RenderState holds three opaque C pointers (render state,
+// row iterator, row cells). These are only accessed through &mut self
+// in snapshot(), which requires exclusive access. Moving the struct
+// across threads is safe as long as concurrent access is prevented
+// (guaranteed by the Mutex in session.rs).
 unsafe impl Send for RenderState {}
 
 impl RenderState {
@@ -564,12 +587,77 @@ impl RenderState {
                 }
             };
 
+            // Read Style=2: SGR attributes (bold, italic, etc.).
+            let flags = {
+                let mut style = GhosttyStyle::sized();
+                // SAFETY: `style` is a valid sized struct with `size`
+                // pre-filled. The output pointer is valid stack memory.
+                let result = unsafe {
+                    ghostty_render_state_row_cells_get(
+                        self.row_cells,
+                        GhosttyRenderStateRowCellsData::Style,
+                        (&mut style as *mut GhosttyStyle).cast(),
+                    )
+                };
+                if result == GhosttyResult::Success {
+                    CellStyleFlags {
+                        bold: style.bold,
+                        italic: style.italic,
+                        strikethrough: style.strikethrough,
+                        inverse: style.inverse,
+                        dim: style.faint,
+                        invisible: style.invisible,
+                        blink: style.blink,
+                        overline: style.overline,
+                        underline_style: style.underline.clamp(0, 5) as u8,
+                    }
+                } else {
+                    CellStyleFlags::default()
+                }
+            };
+
+            // Read raw cell value then query wide/narrow classification.
+            let width = {
+                let mut raw_cell: u64 = 0;
+                // SAFETY: Output pointer is a valid u64 on the stack.
+                let raw_result = unsafe {
+                    ghostty_render_state_row_cells_get(
+                        self.row_cells,
+                        GhosttyRenderStateRowCellsData::Raw,
+                        (&mut raw_cell as *mut u64).cast(),
+                    )
+                };
+                if raw_result == GhosttyResult::Success {
+                    let mut wide = GhosttyCellWide::Narrow;
+                    // SAFETY: `raw_cell` is the packed cell value just
+                    // read. `wide` is valid stack memory for the enum.
+                    let wide_result = unsafe {
+                        ghostty_cell_get(
+                            raw_cell,
+                            GhosttyCellData::Wide,
+                            (&mut wide as *mut GhosttyCellWide).cast(),
+                        )
+                    };
+                    if wide_result == GhosttyResult::Success {
+                        match wide {
+                            GhosttyCellWide::Wide => 2,
+                            GhosttyCellWide::SpacerTail | GhosttyCellWide::SpacerHead => 0,
+                            GhosttyCellWide::Narrow => 1,
+                        }
+                    } else {
+                        1
+                    }
+                } else {
+                    1
+                }
+            };
+
             cells.push(RenderCell {
                 codepoints,
                 fg,
                 bg,
-                flags: CellStyleFlags::default(),
-                width: 1,
+                flags,
+                width,
             });
         }
 
@@ -617,6 +705,11 @@ pub(crate) struct KeyEncoder {
     event: GhosttyKeyEvent,
 }
 
+// SAFETY: KeyEncoder holds two opaque C pointers (encoder, event).
+// These are only accessed through &mut self in encode_key() and
+// sync_from_terminal(). Moving across threads is safe as long as
+// concurrent access is prevented (guaranteed by the Mutex in
+// session.rs).
 unsafe impl Send for KeyEncoder {}
 
 impl KeyEncoder {
@@ -713,6 +806,237 @@ impl Drop for KeyEncoder {
             }
             if !self.encoder.is_null() {
                 ghostty_key_encoder_free(self.encoder);
+            }
+        }
+    }
+}
+
+// ── Mouse Encoder ──────────────────────────────────────────────────
+
+/// RAII wrapper around `GhosttyMouseEncoder` and a reusable
+/// `GhosttyMouseEvent`. Encodes Android touch events into terminal
+/// mouse escape sequences.
+pub(crate) struct MouseEncoder {
+    encoder: GhosttyMouseEncoder,
+    event: GhosttyMouseEvent,
+    /// `true` once `set_geometry` has been called at least once.
+    has_geometry: bool,
+}
+
+// SAFETY: MouseEncoder holds two opaque C pointers (encoder, event).
+// These are only accessed through &mut self in encode(),
+// sync_from_terminal(), and set_geometry(). Moving across threads is
+// safe as long as concurrent access is prevented (guaranteed by the
+// Mutex in GhosttyBackend / session.rs).
+unsafe impl Send for MouseEncoder {}
+
+impl MouseEncoder {
+    /// Creates a new mouse encoder with a reusable event.
+    pub(crate) fn new() -> Result<Self, TtyBackendError> {
+        let mut encoder: GhosttyMouseEncoder = ptr::null_mut();
+        let mut event: GhosttyMouseEvent = ptr::null_mut();
+
+        // SAFETY: Output pointers are valid stack memory. Allocator is NULL (default).
+        unsafe {
+            check(
+                ghostty_mouse_encoder_new(ptr::null(), &mut encoder),
+                "ghostty_mouse_encoder_new",
+            )?;
+            check(
+                ghostty_mouse_event_new(ptr::null(), &mut event),
+                "ghostty_mouse_event_new",
+            )?;
+        }
+
+        if encoder.is_null() {
+            return Err(TtyBackendError::Internal {
+                detail: "ghostty_mouse_encoder_new returned null handle".into(),
+            });
+        }
+        if event.is_null() {
+            return Err(TtyBackendError::Internal {
+                detail: "ghostty_mouse_event_new returned null handle".into(),
+            });
+        }
+
+        Ok(Self { encoder, event, has_geometry: false })
+    }
+
+    /// Syncs encoder options from the terminal's current mouse mode
+    /// and format state (tracking mode, SGR/X10, etc.).
+    pub(crate) fn sync_from_terminal(&mut self, terminal: &Terminal) {
+        // SAFETY: Both handles are valid and non-null (checked in new()).
+        // Terminal handle is valid and owned by the caller.
+        unsafe {
+            ghostty_mouse_encoder_setopt_from_terminal(
+                self.encoder,
+                terminal.raw_handle(),
+            );
+        }
+    }
+
+    /// Updates the screen and cell geometry used for coordinate
+    /// conversion. Must be called at least once before `encode()`.
+    pub(crate) fn set_geometry(
+        &mut self,
+        cell_w: u32,
+        cell_h: u32,
+        screen_w: u32,
+        screen_h: u32,
+    ) {
+        let mut size = GhosttyMouseEncoderSize::sized();
+        size.screen_width = screen_w;
+        size.screen_height = screen_h;
+        size.cell_width = cell_w;
+        size.cell_height = cell_h;
+
+        // SAFETY: Encoder handle is valid. The size struct pointer is
+        // valid stack memory with correct `size` field set by sized().
+        unsafe {
+            ghostty_mouse_encoder_setopt(
+                self.encoder,
+                GhosttyMouseEncoderOption::Size,
+                &size as *const GhosttyMouseEncoderSize as *const std::ffi::c_void,
+            );
+        }
+        self.has_geometry = true;
+    }
+
+    /// Encodes an Android touch event into terminal mouse escape sequences.
+    ///
+    /// Returns the encoded bytes, or an empty vec if the event produces
+    /// no output (e.g. tracking is disabled, or geometry not yet set).
+    ///
+    /// # Parameters
+    ///
+    /// - `action`: 0 = Press, 1 = Release, 2 = Motion
+    /// - `button`: 0 = Unknown, 1 = Left, 2 = Right, 3 = Middle, 4–11 = extra buttons
+    /// - `x`, `y`: pixel coordinates of the touch event (must be finite)
+    /// - `mods`: packed modifier flags matching [`GhosttyMods`]
+    pub(crate) fn encode(
+        &mut self,
+        action: u8,
+        button: u8,
+        x: f32,
+        y: f32,
+        mods: u32,
+    ) -> Vec<u8> {
+        if !self.has_geometry {
+            tracing::warn!(target: "tty::mouse", "encode called before set_geometry; ignoring");
+            return Vec::new();
+        }
+
+        if !x.is_finite() || !y.is_finite() {
+            tracing::warn!(target: "tty::mouse", "non-finite coordinates ({x}, {y}); ignoring");
+            return Vec::new();
+        }
+
+        let mouse_action = match action {
+            0 => GhosttyMouseAction::Press,
+            1 => GhosttyMouseAction::Release,
+            2 => GhosttyMouseAction::Motion,
+            _ => {
+                tracing::warn!(target: "tty::mouse", "unknown mouse action {action}; ignoring");
+                return Vec::new();
+            }
+        };
+
+        let mouse_button = match button {
+            0 => GhosttyMouseButton::Unknown,
+            1 => GhosttyMouseButton::Left,
+            2 => GhosttyMouseButton::Right,
+            3 => GhosttyMouseButton::Middle,
+            4 => GhosttyMouseButton::Four,
+            5 => GhosttyMouseButton::Five,
+            6 => GhosttyMouseButton::Six,
+            7 => GhosttyMouseButton::Seven,
+            8 => GhosttyMouseButton::Eight,
+            9 => GhosttyMouseButton::Nine,
+            10 => GhosttyMouseButton::Ten,
+            11 => GhosttyMouseButton::Eleven,
+            _ => {
+                tracing::warn!(target: "tty::mouse", "unknown mouse button {button}; ignoring");
+                return Vec::new();
+            }
+        };
+
+        let position = GhosttyMousePosition { x, y };
+
+        // SAFETY: Event handle is valid (non-null, checked in new()).
+        // Clear prior button state before setting new (C API is additive).
+        unsafe {
+            ghostty_mouse_event_set_action(self.event, mouse_action);
+            ghostty_mouse_event_clear_button(self.event);
+            if button != 0 {
+                ghostty_mouse_event_set_button(self.event, mouse_button);
+            }
+            ghostty_mouse_event_set_position(self.event, position);
+            ghostty_mouse_event_set_mods(self.event, mods as GhosttyMods);
+        }
+
+        let mut buf = [0u8; 128];
+        let mut written: usize = 0;
+
+        // SAFETY: Encoder and event handles are valid. Buffer pointer
+        // and size are correct. `written` receives the actual byte count.
+        let result = unsafe {
+            ghostty_mouse_encoder_encode(
+                self.encoder,
+                self.event,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut written,
+            )
+        };
+
+        match result {
+            GhosttyResult::Success if written > 0 => buf[..written].to_vec(),
+            GhosttyResult::Success => Vec::new(),
+            GhosttyResult::OutOfSpace => {
+                tracing::error!(
+                    target: "tty::mouse",
+                    "mouse encode buffer too small ({written} written, 128 available); \
+                     dropping event to prevent truncated escape sequence"
+                );
+                Vec::new()
+            }
+            other => {
+                tracing::warn!(target: "tty::mouse", "mouse encode failed: {other:?}; ignoring");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Queries whether any mouse tracking mode is active on the
+    /// terminal (DEC modes 9, 1000, 1002, or 1003).
+    pub(crate) fn is_tracking_active(terminal: &Terminal) -> bool {
+        let mut active: bool = false;
+
+        // SAFETY: Terminal handle is valid. Output pointer is valid stack memory.
+        let result = unsafe {
+            ghostty_terminal_get(
+                terminal.raw_handle(),
+                GhosttyTerminalData::MouseTracking,
+                &mut active as *mut bool as *mut std::ffi::c_void,
+            )
+        };
+
+        result == GhosttyResult::Success && active
+    }
+}
+
+impl Drop for MouseEncoder {
+    fn drop(&mut self) {
+        // Free event first, then encoder. Event-before-encoder order
+        // prevents dangling internal references in the C library.
+        //
+        // SAFETY: Both handles are valid and exclusively owned by self.
+        unsafe {
+            if !self.event.is_null() {
+                ghostty_mouse_event_free(self.event);
+            }
+            if !self.encoder.is_null() {
+                ghostty_mouse_encoder_free(self.encoder);
             }
         }
     }
