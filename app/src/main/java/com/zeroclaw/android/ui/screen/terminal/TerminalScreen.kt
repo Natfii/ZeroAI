@@ -348,6 +348,8 @@ fun TerminalScreen(
                     onSelectionStart = terminalViewModel::startWordSelection,
                     onSelectionUpdate = terminalViewModel::updateSelectionEnd,
                     onSelectionClear = terminalViewModel::clearSelection,
+                    mouseTrackingActive = { terminalViewModel.isMouseTrackingActive() },
+                    onMouseEvent = terminalViewModel::submitMouseEvent,
                 )
             }
         }
@@ -1211,6 +1213,10 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onSelectionStart Callback invoked at the start of a long-press selection gesture.
  * @param onSelectionUpdate Callback invoked as the selection drag updates.
  * @param onSelectionClear Callback invoked when the selection is dismissed.
+ * @param mouseTrackingActive Lambda returning `true` when the terminal is in
+ *   mouse-tracking mode. Forwarded to [TtyCanvasView] to switch gesture routing.
+ * @param onMouseEvent Callback invoked with encoded mouse event parameters when
+ *   [mouseTrackingActive] returns `true`. Forwarded to [TtyCanvasView].
  */
 @Suppress("LongParameterList")
 @Composable
@@ -1248,6 +1254,8 @@ fun TtySessionContent(
     onSelectionStart: (col: Int, row: Int) -> Unit = { _, _ -> },
     onSelectionUpdate: (col: Int, row: Int) -> Unit = { _, _ -> },
     onSelectionClear: () -> Unit = {},
+    mouseTrackingActive: () -> Boolean = { false },
+    onMouseEvent: (UByte, UByte, Float, Float, UInt) -> Unit = { _, _, _, _, _ -> },
 ) {
     var inputText by remember { mutableStateOf("") }
     var showThemePicker by remember { mutableStateOf(false) }
@@ -1405,6 +1413,8 @@ fun TtySessionContent(
                     onSelectionStart = onSelectionStart,
                     onSelectionUpdate = onSelectionUpdate,
                     onSelectionClear = onSelectionClear,
+                    mouseTrackingActive = mouseTrackingActive,
+                    onMouseEvent = onMouseEvent,
                     modifier =
                         Modifier
                             .fillMaxSize()

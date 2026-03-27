@@ -21,7 +21,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.awaitPointerEventScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.TextUnit
@@ -155,6 +157,14 @@ private const val UNDERLINE_STYLE_DASHED = 5
  *   extends the selection after a long-press.
  * @param onSelectionClear Invoked when a tap should dismiss the active
  *   selection without requesting IME focus.
+ * @param mouseTrackingActive Lambda returning `true` when the terminal is
+ *   in mouse-tracking mode. When `true`, touch events are routed through
+ *   [TtyMouseReporter] instead of the selection gesture handlers. The
+ *   lambda is used as a `pointerInput` key so that Compose restarts the
+ *   gesture scope cleanly on mode transitions.
+ * @param onMouseEvent Invoked with encoded mouse event parameters for FFI
+ *   forwarding. Receives `action`, `button`, pixel coordinates, and a
+ *   modifier bitmask. Only called when [mouseTrackingActive] returns `true`.
  * @param modifier [Modifier] applied to the drawing surface.
  */
 @Suppress("LongMethod", "CyclomaticComplexMethod", "LongParameterList")
@@ -171,6 +181,14 @@ fun TtyCanvasView(
     onSelectionStart: (col: Int, row: Int) -> Unit = { _, _ -> },
     onSelectionUpdate: (col: Int, row: Int) -> Unit = { _, _ -> },
     onSelectionClear: () -> Unit = {},
+    mouseTrackingActive: () -> Boolean = { false },
+    onMouseEvent: (
+        action: UByte,
+        button: UByte,
+        pixelX: Float,
+        pixelY: Float,
+        mods: UInt,
+    ) -> Unit = { _, _, _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val fontState = rememberFontState(fontSize.sp, gridCols)
@@ -186,56 +204,113 @@ fun TtyCanvasView(
                 .fillMaxSize()
                 .semantics {
                     onLongClick(label = "Select word") { true }
-                }.pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { _ ->
-                            if (selectionProvider() != null) {
-                                onSelectionClear()
-                            } else {
-                                onTap()
+                    contentDescription =
+                        if (mouseTrackingActive()) {
+                            "Terminal output. Mouse mode active: tap to click, long-press for right-click, swipe to scroll."
+                        } else {
+                            "Terminal output. Double-tap or long-press to select text."
+                        }
+                }.pointerInput(mouseTrackingActive) {
+                    if (mouseTrackingActive()) {
+                        // Mouse mode: route touch events to TtyMouseReporter
+                        val reporter = TtyMouseReporter()
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: continue
+                                val mods = 0u // Hardware key mods handled separately
+
+                                when {
+                                    change.pressed && !change.previousPressed -> {
+                                        // Pointer down
+                                        reporter.onDown(
+                                            change.position.x,
+                                            change.position.y,
+                                            mods,
+                                            onMouseEvent::invoke,
+                                        )
+                                    }
+                                    change.pressed && change.previousPressed -> {
+                                        // Pointer move
+                                        if (event.changes.size > 1) {
+                                            reporter.onSecondaryPointer()
+                                        }
+                                        reporter.onMove(
+                                            change.position.x,
+                                            change.position.y,
+                                            fontState.cellHeightPx,
+                                            mods,
+                                            onMouseEvent::invoke,
+                                        )
+                                    }
+                                    !change.pressed && change.previousPressed -> {
+                                        // Pointer up
+                                        reporter.onUp(
+                                            change.position.x,
+                                            change.position.y,
+                                            mods,
+                                            onMouseEvent::invoke,
+                                        )
+                                    }
+                                }
+                                change.consume()
                             }
-                        },
-                        onDoubleTap = { offset ->
-                            val col =
-                                (offset.x / fontState.cellWidthPx)
-                                    .toInt()
-                                    .coerceIn(0, gridCols - 1)
-                            val row =
-                                (offset.y / fontState.cellHeightPx)
-                                    .toInt()
-                                    .coerceAtLeast(0)
-                            onSelectionStart(col, row)
-                        },
-                        onLongPress = { offset ->
-                            val col =
-                                (offset.x / fontState.cellWidthPx)
-                                    .toInt()
-                                    .coerceIn(0, gridCols - 1)
-                            val row =
-                                (offset.y / fontState.cellHeightPx)
-                                    .toInt()
-                                    .coerceAtLeast(0)
-                            onSelectionStart(col, row)
-                        },
-                    )
-                }.pointerInput(Unit) {
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = { /* handled by onLongPress above */ },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            val col =
-                                (change.position.x / fontState.cellWidthPx)
-                                    .toInt()
-                                    .coerceIn(0, gridCols - 1)
-                            val row =
-                                (change.position.y / fontState.cellHeightPx)
-                                    .toInt()
-                                    .coerceAtLeast(0)
-                            onSelectionUpdate(col, row)
-                        },
-                        onDragEnd = { },
-                        onDragCancel = { },
-                    )
+                        }
+                    } else {
+                        // Selection mode: existing tap/double-tap/long-press gestures
+                        detectTapGestures(
+                            onTap = { _ ->
+                                if (selectionProvider() != null) {
+                                    onSelectionClear()
+                                } else {
+                                    onTap()
+                                }
+                            },
+                            onDoubleTap = { offset ->
+                                val col =
+                                    (offset.x / fontState.cellWidthPx)
+                                        .toInt()
+                                        .coerceIn(0, gridCols - 1)
+                                val row =
+                                    (offset.y / fontState.cellHeightPx)
+                                        .toInt()
+                                        .coerceAtLeast(0)
+                                onSelectionStart(col, row)
+                            },
+                            onLongPress = { offset ->
+                                val col =
+                                    (offset.x / fontState.cellWidthPx)
+                                        .toInt()
+                                        .coerceIn(0, gridCols - 1)
+                                val row =
+                                    (offset.y / fontState.cellHeightPx)
+                                        .toInt()
+                                        .coerceAtLeast(0)
+                                onSelectionStart(col, row)
+                            },
+                        )
+                    }
+                }.pointerInput(mouseTrackingActive) {
+                    if (!mouseTrackingActive()) {
+                        // Selection drag: only active when NOT in mouse mode
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { /* handled by onLongPress above */ },
+                            onDrag = { change, _ ->
+                                change.consume()
+                                val col =
+                                    (change.position.x / fontState.cellWidthPx)
+                                        .toInt()
+                                        .coerceIn(0, gridCols - 1)
+                                val row =
+                                    (change.position.y / fontState.cellHeightPx)
+                                        .toInt()
+                                        .coerceAtLeast(0)
+                                onSelectionUpdate(col, row)
+                            },
+                            onDragEnd = { },
+                            onDragCancel = { },
+                        )
+                    }
                 }.pointerInput(Unit) {
                     detectTransformGestures { _, _, zoom, _ ->
                         val newSize =
