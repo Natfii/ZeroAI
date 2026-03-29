@@ -25,12 +25,6 @@ val TTY_MAX_FONT_SIZE: TextUnit = 32.sp
 /** Minimum char buffer size for drawTextRun. */
 private const val MIN_CHAR_BUFFER = 512
 
-/** Number of ASCII codepoints to cache widths for. */
-private const val ASCII_CACHE_SIZE = 128
-
-/** First printable ASCII codepoint (space). */
-private const val ASCII_PRINTABLE_START = 32
-
 /** Multiplier for grid columns to char buffer size (UTF-8 worst case). */
 private const val CHAR_BUFFER_MULTIPLIER = 4
 
@@ -45,17 +39,14 @@ private const val CHAR_BUFFER_MULTIPLIER = 4
  * @property cellHeightPx Height of one character cell in pixels (line spacing).
  * @property baselinePx Offset from the top of the cell to the text baseline.
  * @property paint Shared Paint instance — mutated in-place during rendering.
- * @property asciiWidths Pre-measured widths for ASCII codepoints 0-127.
  * @property charBuffer Reusable buffer for passing row text to drawTextRun.
  */
-@Suppress("LongParameterList")
 @Stable
 class TtyFontState(
     val cellWidthPx: Float,
     val cellHeightPx: Float,
     val baselinePx: Float,
     val paint: Paint,
-    val asciiWidths: FloatArray,
     val charBuffer: CharArray,
 )
 
@@ -88,13 +79,6 @@ fun rememberFontState(
         val cellHeight = paint.fontSpacing
         val baseline = -paint.ascent()
 
-        val asciiWidths = FloatArray(ASCII_CACHE_SIZE)
-        val singleChar = CharArray(1)
-        for (i in ASCII_PRINTABLE_START until ASCII_CACHE_SIZE) {
-            singleChar[0] = i.toChar()
-            asciiWidths[i] = paint.measureText(singleChar, 0, 1)
-        }
-
         val bufferSize = maxOf(gridCols * CHAR_BUFFER_MULTIPLIER, MIN_CHAR_BUFFER)
 
         TtyFontState(
@@ -102,7 +86,6 @@ fun rememberFontState(
             cellHeightPx = cellHeight,
             baselinePx = baseline,
             paint = paint,
-            asciiWidths = asciiWidths,
             charBuffer = CharArray(bufferSize),
         )
     }

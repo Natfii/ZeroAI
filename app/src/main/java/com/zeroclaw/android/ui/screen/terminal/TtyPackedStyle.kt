@@ -74,3 +74,15 @@ internal inline fun Long.packedIsInverse(): Boolean = (this and 0x20L) != 0L
 /** Whether the cell text is invisible (bit 6). */
 @Suppress("MagicNumber")
 internal inline fun Long.packedIsInvisible(): Boolean = (this and 0x40L) != 0L
+
+/** Bit 7 — blink. */
+@Suppress("MagicNumber")
+internal inline fun Long.packedIsBlink(): Boolean = (this ushr 7 and 1L) != 0L
+
+/** Bits 56-58 — underline style (0=none, 1=single, 2=double, 3=curly, 4=dotted, 5=dashed). */
+@Suppress("MagicNumber")
+internal inline fun Long.packedUnderlineStyle(): Int = ((this ushr 56) and 0x7L).toInt()
+
+/** Bit 59 — overline. */
+@Suppress("MagicNumber")
+internal inline fun Long.packedIsOverline(): Boolean = (this ushr 59 and 1L) != 0L

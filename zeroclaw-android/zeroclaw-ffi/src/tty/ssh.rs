@@ -1052,6 +1052,31 @@ pub(crate) fn set_palette(bg: u32, fg: u32, cursor: u32, palette: &[u32]) -> Res
     Ok(())
 }
 
+/// Returns whether bracketed paste mode (DEC 2004) is active in the
+/// SSH session's terminal backend.
+///
+/// Returns `Ok(false)` when no SSH session is running.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the backend mutex is poisoned
+/// and cannot be recovered.
+pub(crate) fn is_bracketed_paste_active() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
+
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::ssh",
+            "backend mutex poisoned while querying bracketed paste; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.is_bracketed_paste_active())
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]

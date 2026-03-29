@@ -155,15 +155,27 @@ pub enum TtyDirtyState {
 /// string (wide characters occupy two consecutive logical columns).
 /// `styles` holds one packed `i64` per column encoding foreground color,
 /// background color, and text attribute flags.
+/// `char_offsets` maps each grid column to its starting UTF-16 code-unit
+/// offset within `text`. Wide-character spacer columns share the same
+/// offset as the wide character's first column.
 ///
 /// # Packed style layout (bits of `i64`)
 ///
 /// | Bits  | Content |
 /// |-------|---------|
-/// | 0-7   | Effect flags (bold=0, italic=1, underline=2, strikethrough=3, dim=4, inverse=5, invisible=6, blink=7) |
+/// | 0     | bold |
+/// | 1     | italic |
+/// | 2     | has_underline (underline_style > 0) |
+/// | 3     | strikethrough |
+/// | 4     | dim |
+/// | 5     | inverse |
+/// | 6     | invisible |
+/// | 7     | blink |
 /// | 8-31  | Background color (24-bit RGB, 0 = terminal default) |
 /// | 32-55 | Foreground color (24-bit RGB, 0 = terminal default) |
-/// | 56-63 | Reserved |
+/// | 56-58 | underline_style (3 bits, 0–5) |
+/// | 59    | overline |
+/// | 60-63 | Reserved |
 ///
 /// On the Kotlin side, `i64` arrives as `Long`. All bit extraction
 /// must use `ushr` (unsigned right shift), never `shr`.
@@ -173,6 +185,14 @@ pub struct TtyRenderRow {
     pub text: String,
     /// Packed style per column — one `i64` per grid column.
     pub styles: Vec<i64>,
+    /// UTF-16 code-unit offset of each column's first character in `text`.
+    ///
+    /// One entry per grid column (same length as `styles`). Wide-char
+    /// spacer columns record the offset immediately following the wide
+    /// character's last code unit (i.e. the next cell's start position),
+    /// so the renderer can flush the wide cell's run without including
+    /// stale text.
+    pub char_offsets: Vec<u32>,
     /// `true` when this row's content has changed since the last frame.
     pub dirty: bool,
 }

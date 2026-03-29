@@ -70,4 +70,51 @@ class TtyPackedStyleTest {
         assertEquals(0xAABBCC, style.packedFgRgb())
         assertEquals(0x112233, style.packedBgRgb())
     }
+
+    @Test
+    fun `packedIsBlink extracts bit 7`() {
+        val blink = 1L shl 7
+        assertTrue(blink.packedIsBlink())
+        assertFalse(0L.packedIsBlink())
+    }
+
+    @Test
+    fun `packedUnderlineStyle extracts bits 56-58`() {
+        for (style in 0..5) {
+            val packed = style.toLong() shl 56
+            assertEquals(style, packed.packedUnderlineStyle())
+        }
+    }
+
+    @Test
+    fun `packedIsOverline extracts bit 59`() {
+        val overline = 1L shl 59
+        assertTrue(overline.packedIsOverline())
+        assertFalse(0L.packedIsOverline())
+    }
+
+    @Test
+    fun `all flags combined do not interfere`() {
+        val all =
+            (1L shl 0) or // bold
+                (1L shl 1) or // italic
+                (1L shl 2) or // underline
+                (1L shl 3) or // strikethrough
+                (1L shl 4) or // dim
+                (1L shl 5) or // inverse
+                (1L shl 6) or // invisible
+                (1L shl 7) or // blink
+                (3L shl 56) or // underline style = curly
+                (1L shl 59) // overline
+        assertTrue(all.packedIsBold())
+        assertTrue(all.packedIsItalic())
+        assertTrue(all.packedIsUnderline())
+        assertTrue(all.packedIsStrikethrough())
+        assertTrue(all.packedIsDim())
+        assertTrue(all.packedIsInverse())
+        assertTrue(all.packedIsInvisible())
+        assertTrue(all.packedIsBlink())
+        assertEquals(3, all.packedUnderlineStyle())
+        assertTrue(all.packedIsOverline())
+    }
 }
