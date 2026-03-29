@@ -54,7 +54,7 @@ publishing {
         register<MavenPublication>("release") {
             groupId = "com.zeroclaw"
             artifactId = "zeroai-android"
-            version = "0.0.39"
+            version = "0.2.0"
 
             afterEvaluate {
                 from(components["release"])
