@@ -38,7 +38,10 @@ pub(crate) enum GhosttyError {
     InvalidValue { context: &'static str },
     /// The output buffer was too small; `required` is the size the API
     /// reported as necessary.
-    OutOfSpace { context: &'static str, required: usize },
+    OutOfSpace {
+        context: &'static str,
+        required: usize,
+    },
     /// A handle returned by the C API was null.
     NullHandle { context: &'static str },
 }
@@ -60,7 +63,9 @@ impl std::error::Error for GhosttyError {}
 
 impl From<GhosttyError> for TtyBackendError {
     fn from(e: GhosttyError) -> Self {
-        TtyBackendError::Internal { detail: e.to_string() }
+        TtyBackendError::Internal {
+            detail: e.to_string(),
+        }
     }
 }
 
@@ -76,7 +81,10 @@ fn check(result: GhosttyResult, context: &'static str) -> Result<(), GhosttyErro
         GhosttyResult::Success => Ok(()),
         GhosttyResult::OutOfMemory => Err(GhosttyError::OutOfMemory { context }),
         GhosttyResult::InvalidValue => Err(GhosttyError::InvalidValue { context }),
-        GhosttyResult::OutOfSpace => Err(GhosttyError::OutOfSpace { context, required: 0 }),
+        GhosttyResult::OutOfSpace => Err(GhosttyError::OutOfSpace {
+            context,
+            required: 0,
+        }),
     }
 }
 
@@ -96,7 +104,10 @@ fn check_with_len(
         GhosttyResult::Success => Ok(len),
         GhosttyResult::OutOfMemory => Err(GhosttyError::OutOfMemory { context }),
         GhosttyResult::InvalidValue => Err(GhosttyError::InvalidValue { context }),
-        GhosttyResult::OutOfSpace => Err(GhosttyError::OutOfSpace { context, required: len }),
+        GhosttyResult::OutOfSpace => Err(GhosttyError::OutOfSpace {
+            context,
+            required: len,
+        }),
     }
 }
 
@@ -126,7 +137,11 @@ fn sanitize_terminal_string(bytes: &[u8]) -> Option<String> {
         })
         .take(64)
         .collect();
-    if sanitized.is_empty() { None } else { Some(sanitized) }
+    if sanitized.is_empty() {
+        None
+    } else {
+        Some(sanitized)
+    }
 }
 
 // ── GhosttyObject<T> RAII Wrapper ──────────────────────────────────
@@ -209,9 +224,7 @@ pub(crate) fn encode_focus_event(gained: bool) -> Vec<u8> {
     let mut written: usize = 0;
     // SAFETY: Buffer is valid stack memory. ghostty_focus_encode writes
     // at most 3 bytes (ESC [ I or ESC [ O). out_written is valid.
-    let result = unsafe {
-        ghostty_focus_encode(event, buf.as_mut_ptr(), buf.len(), &mut written)
-    };
+    let result = unsafe { ghostty_focus_encode(event, buf.as_mut_ptr(), buf.len(), &mut written) };
     if result == GhosttyResult::Success && written > 0 {
         buf[..written].to_vec()
     } else {
@@ -234,7 +247,11 @@ unsafe impl Send for Terminal {}
 
 impl Terminal {
     /// Creates a new terminal with the given dimensions and scrollback.
-    pub(crate) fn new(cols: u16, rows: u16, max_scrollback: usize) -> Result<Self, TtyBackendError> {
+    pub(crate) fn new(
+        cols: u16,
+        rows: u16,
+        max_scrollback: usize,
+    ) -> Result<Self, TtyBackendError> {
         let opts = GhosttyTerminalOptions {
             cols,
             rows,
@@ -280,8 +297,15 @@ impl Terminal {
         }
         // SAFETY: The handle is valid (non-null, owned by self).
         // The dimensions have been validated.
-        let result =
-            unsafe { ghostty_terminal_resize(self.handle.as_raw(), cols, rows, cell_width_px, cell_height_px) };
+        let result = unsafe {
+            ghostty_terminal_resize(
+                self.handle.as_raw(),
+                cols,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            )
+        };
         check(result, "ghostty_terminal_resize").map_err(Into::into)
     }
 
@@ -308,8 +332,7 @@ impl Terminal {
             ghostty_terminal_set(
                 self.handle.as_raw(),
                 GhosttyTerminalOption::WritePty,
-                callback
-                    .map_or(ptr::null(), |f| f as *const std::ffi::c_void),
+                callback.map_or(ptr::null(), |f| f as *const std::ffi::c_void),
             );
         }
     }
@@ -323,18 +346,14 @@ impl Terminal {
     /// via [`set_write_pty_callback`] (which sets both userdata and the
     /// write-PTY callback). This method only sets the bell function
     /// pointer — it does **not** re-set userdata.
-    pub(crate) unsafe fn set_bell_callback(
-        &mut self,
-        callback: GhosttyTerminalBellFn,
-    ) {
+    pub(crate) unsafe fn set_bell_callback(&mut self, callback: GhosttyTerminalBellFn) {
         // SAFETY: Userdata was already set by set_write_pty_callback.
         // We only register the bell function pointer here.
         unsafe {
             ghostty_terminal_set(
                 self.handle.as_raw(),
                 GhosttyTerminalOption::Bell,
-                callback
-                    .map_or(ptr::null(), |f| f as *const std::ffi::c_void),
+                callback.map_or(ptr::null(), |f| f as *const std::ffi::c_void),
             );
         }
     }
@@ -418,8 +437,7 @@ impl Terminal {
             ghostty_terminal_set(
                 self.handle.as_raw(),
                 GhosttyTerminalOption::TitleChanged,
-                callback
-                    .map_or(ptr::null(), |f| f as *const std::ffi::c_void),
+                callback.map_or(ptr::null(), |f| f as *const std::ffi::c_void),
             );
         }
     }
@@ -430,7 +448,10 @@ impl Terminal {
     /// Must be called while the session Mutex is held (no concurrent
     /// `vt_write`).
     pub(crate) fn title(&self) -> Option<String> {
-        let mut gs = GhosttyString { ptr: std::ptr::null(), len: 0 };
+        let mut gs = GhosttyString {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
         // SAFETY: The handle is valid. `gs` is valid stack memory.
         // ghostty_terminal_get with Title writes a GhosttyString
         // pointing into terminal-internal memory (no ownership transfer).
@@ -457,7 +478,10 @@ impl Terminal {
     /// Must be called while the session Mutex is held (no concurrent
     /// `vt_write`).
     pub(crate) fn pwd(&self) -> Option<String> {
-        let mut gs = GhosttyString { ptr: std::ptr::null(), len: 0 };
+        let mut gs = GhosttyString {
+            ptr: std::ptr::null(),
+            len: 0,
+        };
         // SAFETY: The handle is valid. `gs` is valid stack memory.
         // ghostty_terminal_get with Pwd writes a GhosttyString
         // pointing into terminal-internal memory (no ownership transfer).
@@ -896,7 +920,11 @@ impl RenderState {
                         (&mut tag as *mut GhosttyCellContentTag).cast(),
                     )
                 } == GhosttyResult::Success;
-                if tag_ok { tag } else { GhosttyCellContentTag::Codepoint }
+                if tag_ok {
+                    tag
+                } else {
+                    GhosttyCellContentTag::Codepoint
+                }
             } else {
                 GhosttyCellContentTag::Codepoint
             };
@@ -1139,10 +1167,7 @@ impl KeyEncoder {
     pub(crate) fn sync_from_terminal(&mut self, terminal: &Terminal) {
         // SAFETY: Both handles are valid and non-null.
         unsafe {
-            ghostty_key_encoder_setopt_from_terminal(
-                self.encoder.as_raw(),
-                terminal.raw_handle(),
-            );
+            ghostty_key_encoder_setopt_from_terminal(self.encoder.as_raw(), terminal.raw_handle());
         }
     }
 
@@ -1267,7 +1292,12 @@ impl MouseEncoder {
             );
         }
 
-        Ok(Self { encoder, event, has_geometry: false, any_pressed: false })
+        Ok(Self {
+            encoder,
+            event,
+            has_geometry: false,
+            any_pressed: false,
+        })
     }
 
     /// Syncs encoder options from the terminal's current mouse mode
@@ -1286,13 +1316,7 @@ impl MouseEncoder {
 
     /// Updates the screen and cell geometry used for coordinate
     /// conversion. Must be called at least once before `encode()`.
-    pub(crate) fn set_geometry(
-        &mut self,
-        cell_w: u32,
-        cell_h: u32,
-        screen_w: u32,
-        screen_h: u32,
-    ) {
+    pub(crate) fn set_geometry(&mut self, cell_w: u32, cell_h: u32, screen_w: u32, screen_h: u32) {
         let mut size = sized!(GhosttyMouseEncoderSize);
         size.screen_width = screen_w;
         size.screen_height = screen_h;
@@ -1325,14 +1349,7 @@ impl MouseEncoder {
     /// - `button`: 0 = Unknown, 1 = Left, 2 = Right, 3 = Middle, 4–11 = extra buttons
     /// - `x`, `y`: pixel coordinates of the touch event (must be finite)
     /// - `mods`: packed modifier flags matching [`GhosttyMods`]
-    pub(crate) fn encode(
-        &mut self,
-        action: u8,
-        button: u8,
-        x: f32,
-        y: f32,
-        mods: u32,
-    ) -> Vec<u8> {
+    pub(crate) fn encode(&mut self, action: u8, button: u8, x: f32, y: f32, mods: u32) -> Vec<u8> {
         if !self.has_geometry {
             tracing::warn!(target: "tty::mouse", "encode called before set_geometry; ignoring");
             return Vec::new();
@@ -1510,5 +1527,9 @@ pub(crate) fn optimize_mode() -> Option<GhosttyOptimizeMode> {
             (&mut mode as *mut GhosttyOptimizeMode).cast(),
         )
     };
-    if result == GhosttyResult::Success { Some(mode) } else { None }
+    if result == GhosttyResult::Success {
+        Some(mode)
+    } else {
+        None
+    }
 }

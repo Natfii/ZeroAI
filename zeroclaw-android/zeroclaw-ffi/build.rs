@@ -27,22 +27,19 @@ fn main() {
     } else if target.starts_with("x86_64") {
         "x86_64"
     } else {
-        println!(
-            "cargo:warning=libghostty_vt: unsupported target '{target}', skipping link"
-        );
+        println!("cargo:warning=libghostty_vt: unsupported target '{target}', skipping link");
         return;
     };
 
     let libs_dir = manifest_dir.join("libs").join(arch_dir);
 
     let so_path = libs_dir.join("libghostty_vt.so");
-    if !so_path.exists() {
-        panic!(
-            "libghostty_vt.so not found at {}. \
-             Run scripts/build-ghostty.sh first.",
-            so_path.display()
-        );
-    }
+    assert!(
+        so_path.exists(),
+        "libghostty_vt.so not found at {}. \
+         Run scripts/build-ghostty.sh first.",
+        so_path.display()
+    );
 
     println!("cargo:rustc-link-search=native={}", libs_dir.display());
     // Dynamic linking — the .so ships in jniLibs and is loaded at runtime
@@ -50,5 +47,8 @@ fn main() {
     // Static linking was attempted but fails because the Zig-compiled archive
     // references C++ symbols from a newer libc++ than the NDK provides.
     println!("cargo:rustc-link-lib=dylib=ghostty_vt");
-    println!("cargo:rerun-if-changed={}", libs_dir.join("libghostty_vt.so").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        libs_dir.join("libghostty_vt.so").display()
+    );
 }

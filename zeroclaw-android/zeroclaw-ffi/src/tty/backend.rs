@@ -255,26 +255,13 @@ pub(crate) trait TerminalBackend: Send {
 
     /// Encodes a mouse event into terminal escape sequence bytes.
     /// Returns empty bytes if tracking is inactive or encoding fails.
-    fn encode_mouse_event(
-        &mut self,
-        action: u8,
-        button: u8,
-        x: f32,
-        y: f32,
-        mods: u32,
-    ) -> Vec<u8> {
+    fn encode_mouse_event(&mut self, action: u8, button: u8, x: f32, y: f32, mods: u32) -> Vec<u8> {
         let _ = (action, button, x, y, mods);
         Vec::new()
     }
 
     /// Updates the screen/cell geometry for the mouse encoder.
-    fn set_mouse_geometry(
-        &mut self,
-        cell_w: u32,
-        cell_h: u32,
-        screen_w: u32,
-        screen_h: u32,
-    ) {
+    fn set_mouse_geometry(&mut self, cell_w: u32, cell_h: u32, screen_w: u32, screen_h: u32) {
         let _ = (cell_w, cell_h, screen_w, screen_h);
     }
 

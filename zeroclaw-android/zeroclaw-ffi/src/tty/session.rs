@@ -118,9 +118,7 @@ pub(crate) fn wait_for_render_signal(timeout_ms: u64) -> bool {
 
     let timeout = std::time::Duration::from_millis(timeout_ms);
     let (_guard, _result) = condvar
-        .wait_timeout_while(guard, timeout, |_| {
-            !RENDER_DIRTY.load(Ordering::Acquire)
-        })
+        .wait_timeout_while(guard, timeout, |_| !RENDER_DIRTY.load(Ordering::Acquire))
         .unwrap_or_else(|e| e.into_inner());
 
     let was_dirty = RENDER_DIRTY.load(Ordering::Acquire);
@@ -382,8 +380,7 @@ pub(crate) fn get_context(max_bytes: usize) -> Result<String, FfiError> {
 /// # Errors
 ///
 /// Returns [`FfiError::StateError`] if no session is running.
-pub(crate) fn get_render_snapshot(
-) -> Result<super::backend::TerminalRenderSnapshot, FfiError> {
+pub(crate) fn get_render_snapshot() -> Result<super::backend::TerminalRenderSnapshot, FfiError> {
     let guard = lock_session();
     let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
         detail: "no local shell session is running".into(),
@@ -422,7 +419,9 @@ pub(crate) fn snapshot_to_frame(
     snapshot: super::backend::TerminalRenderSnapshot,
 ) -> super::types::TtyRenderFrame {
     use super::backend::{CursorStyle, DirtyState};
-    use super::types::{TtyCursorState, TtyCursorStyle, TtyDirtyState, TtyRenderFrame, TtyRenderRow};
+    use super::types::{
+        TtyCursorState, TtyCursorStyle, TtyDirtyState, TtyRenderFrame, TtyRenderRow,
+    };
 
     let dirty_state = match snapshot.dirty {
         DirtyState::Clean => TtyDirtyState::Clean,
@@ -598,14 +597,30 @@ fn pack_cell_style(
     let mut bits: u64 = 0;
 
     // Bits 0-7: effect flags
-    if flags.bold              { bits |= 1 << 0; }
-    if flags.italic            { bits |= 1 << 1; }
-    if flags.has_underline()   { bits |= 1 << 2; }
-    if flags.strikethrough     { bits |= 1 << 3; }
-    if flags.dim               { bits |= 1 << 4; }
-    if flags.inverse           { bits |= 1 << 5; }
-    if flags.invisible         { bits |= 1 << 6; }
-    if flags.blink             { bits |= 1 << 7; }
+    if flags.bold {
+        bits |= 1 << 0;
+    }
+    if flags.italic {
+        bits |= 1 << 1;
+    }
+    if flags.has_underline() {
+        bits |= 1 << 2;
+    }
+    if flags.strikethrough {
+        bits |= 1 << 3;
+    }
+    if flags.dim {
+        bits |= 1 << 4;
+    }
+    if flags.inverse {
+        bits |= 1 << 5;
+    }
+    if flags.invisible {
+        bits |= 1 << 6;
+    }
+    if flags.blink {
+        bits |= 1 << 7;
+    }
 
     // Bits 8-31: background color (24-bit RGB)
     if let Some(c) = bg {
@@ -621,13 +636,19 @@ fn pack_cell_style(
     bits |= (flags.underline_style as u64 & 0x7) << 56;
 
     // Bit 59: overline
-    if flags.overline { bits |= 1 << 59; }
+    if flags.overline {
+        bits |= 1 << 59;
+    }
 
     // Bit 60: has_explicit_fg (distinguishes None from Some(0,0,0))
-    if fg.is_some() { bits |= 1 << 60; }
+    if fg.is_some() {
+        bits |= 1 << 60;
+    }
 
     // Bit 61: has_explicit_bg (distinguishes None from Some(0,0,0))
-    if bg.is_some() { bits |= 1 << 61; }
+    if bg.is_some() {
+        bits |= 1 << 61;
+    }
 
     bits as i64
 }
@@ -635,10 +656,8 @@ fn pack_cell_style(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use super::super::backend::{CellStyleFlags, RenderCell, RenderColor, RenderRow};
     use super::*;
-    use super::super::backend::{
-        CellStyleFlags, RenderCell, RenderColor, RenderRow,
-    };
 
     // ── pack_cell_style tests ────────────────────────────────────────
 
@@ -650,7 +669,11 @@ mod tests {
 
     #[test]
     fn pack_fg_only() {
-        let fg = Some(RenderColor { r: 0xFF, g: 0x80, b: 0x40 });
+        let fg = Some(RenderColor {
+            r: 0xFF,
+            g: 0x80,
+            b: 0x40,
+        });
         let style = pack_cell_style(fg, None, &CellStyleFlags::default());
         let bits = style as u64;
         // Foreground at bits 32-55
@@ -664,7 +687,11 @@ mod tests {
 
     #[test]
     fn pack_bg_only() {
-        let bg = Some(RenderColor { r: 0x10, g: 0x20, b: 0x30 });
+        let bg = Some(RenderColor {
+            r: 0x10,
+            g: 0x20,
+            b: 0x30,
+        });
         let style = pack_cell_style(None, bg, &CellStyleFlags::default());
         let bits = style as u64;
         // Background at bits 8-31
@@ -729,17 +756,33 @@ mod tests {
             assert_eq!(extracted, style_val as u64, "underline_style={style_val}");
             // has_underline bit should match style > 0
             if style_val > 0 {
-                assert_ne!(bits & (1 << 2), 0, "has_underline should be set for style={style_val}");
+                assert_ne!(
+                    bits & (1 << 2),
+                    0,
+                    "has_underline should be set for style={style_val}"
+                );
             } else {
-                assert_eq!(bits & (1 << 2), 0, "has_underline should be clear for style=0");
+                assert_eq!(
+                    bits & (1 << 2),
+                    0,
+                    "has_underline should be clear for style=0"
+                );
             }
         }
     }
 
     #[test]
     fn pack_full_style_roundtrip() {
-        let fg = Some(RenderColor { r: 0xAA, g: 0xBB, b: 0xCC });
-        let bg = Some(RenderColor { r: 0x11, g: 0x22, b: 0x33 });
+        let fg = Some(RenderColor {
+            r: 0xAA,
+            g: 0xBB,
+            b: 0xCC,
+        });
+        let bg = Some(RenderColor {
+            r: 0x11,
+            g: 0x22,
+            b: 0x33,
+        });
         let flags = CellStyleFlags {
             bold: true,
             italic: false,
@@ -826,10 +869,18 @@ mod tests {
 
     #[test]
     fn pack_nonblack_fg_also_sets_bit_60() {
-        let fg = Some(RenderColor { r: 0xFF, g: 0x80, b: 0x40 });
+        let fg = Some(RenderColor {
+            r: 0xFF,
+            g: 0x80,
+            b: 0x40,
+        });
         let style = pack_cell_style(fg, None, &CellStyleFlags::default());
         let bits = style as u64;
-        assert_ne!(bits & (1 << 60), 0, "has_explicit_fg should be set for non-black too");
+        assert_ne!(
+            bits & (1 << 60),
+            0,
+            "has_explicit_fg should be set for non-black too"
+        );
     }
 
     // ── char_offsets tests ───────────────────────────────────────────
@@ -1048,8 +1099,7 @@ fn spawn_local_shell(cols: u16, rows: u16) -> Result<TtySession, FfiError> {
             // Create the terminal backend (ghostty-vt on Android,
             // stub on other targets for testing).
             let backend: Box<dyn TerminalBackend> = create_backend(cols, rows);
-            let backend: Arc<Mutex<Box<dyn TerminalBackend>>> =
-                Arc::new(Mutex::new(backend));
+            let backend: Arc<Mutex<Box<dyn TerminalBackend>>> = Arc::new(Mutex::new(backend));
 
             // Spawn the read loop in a blocking task on the TTY runtime.
             let rt = super::runtime();
@@ -1267,10 +1317,7 @@ fn read_loop(
 ///
 /// Each write is dispatched to [`tokio::task::spawn_blocking`]
 /// because PTY writes can block if the slave's read buffer is full.
-async fn write_loop(
-    master_raw_fd: i32,
-    mut write_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
-) {
+async fn write_loop(master_raw_fd: i32, mut write_rx: tokio::sync::mpsc::Receiver<Vec<u8>>) {
     while let Some(data) = write_rx.recv().await {
         let result = tokio::task::spawn_blocking(move || {
             // SAFETY: `master_raw_fd` is the raw fd of the PTY master,
@@ -1278,13 +1325,7 @@ async fn write_loop(
             // The write is a standard POSIX write on a valid file
             // descriptor. `data` is a valid byte slice for the duration
             // of the call.
-            let ret = unsafe {
-                nix::libc::write(
-                    master_raw_fd,
-                    data.as_ptr().cast(),
-                    data.len(),
-                )
-            };
+            let ret = unsafe { nix::libc::write(master_raw_fd, data.as_ptr().cast(), data.len()) };
 
             if ret < 0 {
                 // Capture errno on the blocking thread where the
@@ -1569,4 +1610,3 @@ pub(crate) fn set_mouse_geometry(
     backend.set_mouse_geometry(cell_w, cell_h, width_px, height_px);
     Ok(())
 }
-

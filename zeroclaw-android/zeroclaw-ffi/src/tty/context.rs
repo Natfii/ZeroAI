@@ -85,8 +85,7 @@ impl AnsiStripState {
                     // \x1bO (SS3), \x1bc (RIS), \x1b7/8 (save/restore),
                     // \x1bD (IND), \x1bE (NEL), \x1bH (HTS), \x1bM (RI),
                     // \x1bZ (DECID).
-                    '=' | '>' | 'N' | 'O' | 'c' | '7' | '8'
-                    | 'D' | 'E' | 'H' | 'M' | 'Z' => {
+                    '=' | '>' | 'N' | 'O' | 'c' | '7' | '8' | 'D' | 'E' | 'H' | 'M' | 'Z' => {
                         *self = Self::Normal;
                         None
                     }
@@ -469,10 +468,7 @@ mod tests {
 
     #[test]
     fn ansi_strip_sgr_truecolor() {
-        assert_eq!(
-            strip_ansi("\x1b[38;2;255;0;0mred\x1b[0m"),
-            "red"
-        );
+        assert_eq!(strip_ansi("\x1b[38;2;255;0;0mred\x1b[0m"), "red");
     }
 
     #[test]
@@ -484,19 +480,13 @@ mod tests {
     #[test]
     fn ansi_strip_osc_title_with_bel() {
         // Set terminal title (OSC 0).
-        assert_eq!(
-            strip_ansi("\x1b]0;my title\x07prompt$"),
-            "prompt$"
-        );
+        assert_eq!(strip_ansi("\x1b]0;my title\x07prompt$"), "prompt$");
     }
 
     #[test]
     fn ansi_strip_osc_title_with_st() {
         // Set terminal title terminated by ST (\x1b\\).
-        assert_eq!(
-            strip_ansi("\x1b]0;my title\x1b\\prompt$"),
-            "prompt$"
-        );
+        assert_eq!(strip_ansi("\x1b]0;my title\x1b\\prompt$"), "prompt$");
     }
 
     #[test]
@@ -901,8 +891,7 @@ mod tests {
 
     #[test]
     fn scrub_bearer_case_insensitive() {
-        let lines =
-            vec!["bearer abcdefghijklmnopqrstuvwxyz1234567890".into()];
+        let lines = vec!["bearer abcdefghijklmnopqrstuvwxyz1234567890".into()];
         let scrubbed = scrub_lines(&lines);
         assert_eq!(scrubbed[0], REDACTED);
     }
@@ -939,7 +928,10 @@ mod tests {
         // Mostly non-hex content.
         let lines = vec!["this is a normal line with some hex abc123 in it".into()];
         let scrubbed = scrub_lines(&lines);
-        assert_eq!(scrubbed[0], "this is a normal line with some hex abc123 in it");
+        assert_eq!(
+            scrubbed[0],
+            "this is a normal line with some hex abc123 in it"
+        );
     }
 
     #[test]

@@ -3358,12 +3358,7 @@ pub fn tty_resize(cols: u32, rows: u32, width_px: u32, height_px: u32) -> Result
         } else {
             let result = tty::session::resize(cols as u16, rows as u16);
             // Update mouse encoder geometry (best-effort, ignore errors).
-            let _ = tty::session::set_mouse_geometry(
-                cols as u16,
-                rows as u16,
-                width_px,
-                height_px,
-            );
+            let _ = tty::session::set_mouse_geometry(cols as u16, rows as u16, width_px, height_px);
             result
         }
     }))
@@ -3484,19 +3479,11 @@ pub fn tty_wait_for_render_signal(timeout_ms: u64) -> Result<bool, FfiError> {
 /// [`FfiError::InvalidArgument`] if palette length is wrong, or
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
-pub fn tty_set_palette(
-    bg: u32,
-    fg: u32,
-    cursor: u32,
-    palette: Vec<u32>,
-) -> Result<(), FfiError> {
+pub fn tty_set_palette(bg: u32, fg: u32, cursor: u32, palette: Vec<u32>) -> Result<(), FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         if palette.len() != 16 {
             return Err(FfiError::InvalidArgument {
-                detail: format!(
-                    "palette must have 16 entries, got {}",
-                    palette.len()
-                ),
+                detail: format!("palette must have 16 entries, got {}", palette.len()),
             });
         }
         if tty::ssh::has_session() {
@@ -3580,11 +3567,7 @@ pub fn ssh_import_key(
     label: String,
 ) -> Result<tty::types::SshKeyMetadata, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
-        tty::key_store::import_file(
-            std::path::Path::new(&file_path),
-            passphrase,
-            &label,
-        )
+        tty::key_store::import_file(std::path::Path::new(&file_path), passphrase, &label)
     }))
     .unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
@@ -3601,10 +3584,7 @@ pub fn ssh_import_key(
 /// [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn ssh_delete_key(key_id: String) -> Result<(), FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::key_store::delete(&key_id)
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(|| tty::key_store::delete(&key_id))).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -3619,10 +3599,7 @@ pub fn ssh_delete_key(key_id: String) -> Result<(), FfiError> {
 /// or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn ssh_export_public_key(key_id: String) -> Result<String, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::key_store::export_public(&key_id)
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(|| tty::key_store::export_public(&key_id))).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -3637,10 +3614,7 @@ pub fn ssh_export_public_key(key_id: String) -> Result<String, FfiError> {
 /// initialized, or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn ssh_key_exists(key_id: String) -> Result<bool, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::key_store::key_exists(&key_id)
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(|| tty::key_store::key_exists(&key_id))).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -3655,10 +3629,7 @@ pub fn ssh_key_exists(key_id: String) -> Result<bool, FfiError> {
 /// or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn ssh_list_key_ids() -> Result<Vec<String>, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::key_store::list_key_ids()
-    }))
-    .unwrap_or_else(|e| {
+    catch_unwind(AssertUnwindSafe(|| tty::key_store::list_key_ids())).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
@@ -3681,7 +3652,11 @@ pub fn tty_start_ssh(host: String, port: u32, user: String) -> Result<(), FfiErr
     catch_unwind(AssertUnwindSafe(|| {
         tty::ssh::start_ssh(&host, port as u16, &user)
     }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Submits a password for the pending SSH authentication challenge.
@@ -3694,10 +3669,11 @@ pub fn tty_start_ssh(host: String, port: u32, user: String) -> Result<(), FfiErr
 /// or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_submit_password(password: Vec<u8>) -> Result<bool, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::ssh::submit_password(password)
-    }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    catch_unwind(AssertUnwindSafe(|| tty::ssh::submit_password(password))).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Submits a stored SSH key for the pending authentication challenge.
@@ -3710,10 +3686,11 @@ pub fn tty_submit_password(password: Vec<u8>) -> Result<bool, FfiError> {
 /// the key ID is not found, or [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_submit_key(key_id: String) -> Result<bool, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::ssh::submit_key(&key_id)
-    }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    catch_unwind(AssertUnwindSafe(|| tty::ssh::submit_key(&key_id))).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Disconnects the active SSH session.
@@ -3726,10 +3703,11 @@ pub fn tty_submit_key(key_id: String) -> Result<bool, FfiError> {
 /// Returns [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_disconnect_ssh() -> Result<(), FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        tty::ssh::disconnect()
-    }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    catch_unwind(AssertUnwindSafe(|| tty::ssh::disconnect())).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Returns the pending host-key verification prompt, if any.
@@ -3743,10 +3721,11 @@ pub fn tty_disconnect_ssh() -> Result<(), FfiError> {
 /// Returns [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_get_pending_host_key() -> Result<Option<tty::types::TtyHostKeyPrompt>, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        Ok(tty::ssh::get_pending_host_key())
-    }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    catch_unwind(AssertUnwindSafe(|| Ok(tty::ssh::get_pending_host_key()))).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Accepts or rejects the pending SSH host-key verification prompt.
@@ -3763,7 +3742,11 @@ pub fn tty_answer_host_key(decision: tty::types::TtyHostKeyDecision) -> Result<(
     catch_unwind(AssertUnwindSafe(|| {
         tty::ssh::answer_host_key(decision == tty::types::TtyHostKeyDecision::Accept)
     }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Returns the current SSH connection state.
@@ -3775,10 +3758,11 @@ pub fn tty_answer_host_key(decision: tty::types::TtyHostKeyDecision) -> Result<(
 /// Returns [`FfiError::InternalPanic`] if native code panics.
 #[uniffi::export]
 pub fn tty_get_ssh_state() -> Result<tty::types::SshState, FfiError> {
-    catch_unwind(AssertUnwindSafe(|| {
-        Ok(tty::ssh::get_state())
-    }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    catch_unwind(AssertUnwindSafe(|| Ok(tty::ssh::get_state()))).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Encodes a special key into terminal escape bytes.
@@ -3803,7 +3787,11 @@ pub fn tty_encode_special_key(key_name: String, modifier_flags: u32) -> Result<V
     catch_unwind(AssertUnwindSafe(|| {
         Ok(encode_special_key(&key_name, modifier_flags))
     }))
-    .unwrap_or_else(|e| Err(FfiError::InternalPanic { detail: panic_detail(&e) }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
 }
 
 /// Returns whether the given text is safe to paste without user confirmation.
@@ -3827,9 +3815,7 @@ pub fn tty_is_paste_safe(text: String) -> Result<bool, FfiError> {
             // Without the ghostty-vt C library, perform a conservative
             // pure-Rust check: treat text as unsafe if it contains a
             // newline or the bracketed-paste-end sequence.
-            let safe = !text.contains('\n')
-                && !text.contains('\r')
-                && !text.contains("\x1b[201~");
+            let safe = !text.contains('\n') && !text.contains('\r') && !text.contains("\x1b[201~");
             Ok(safe)
         }
     }))

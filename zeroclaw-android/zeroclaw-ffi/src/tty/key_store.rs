@@ -59,20 +59,17 @@ pub(crate) fn generate(
 
     let key = match algorithm {
         SshKeyAlgorithm::Ed25519 => {
-            PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| {
-                FfiError::IoError {
-                    detail: format!("key generation failed: {e}"),
-                }
+            PrivateKey::random(&mut OsRng, Algorithm::Ed25519).map_err(|e| FfiError::IoError {
+                detail: format!("key generation failed: {e}"),
             })?
         }
         SshKeyAlgorithm::Rsa4096 => {
-            let rsa_key = rsa::RsaPrivateKey::new(&mut OsRng, 4096).map_err(|e| {
-                FfiError::IoError {
+            let rsa_key =
+                rsa::RsaPrivateKey::new(&mut OsRng, 4096).map_err(|e| FfiError::IoError {
                     detail: format!("RSA key generation failed: {e}"),
-                }
-            })?;
-            let keypair = ssh_key::private::RsaKeypair::try_from(rsa_key)
-                .map_err(|e| FfiError::IoError {
+                })?;
+            let keypair =
+                ssh_key::private::RsaKeypair::try_from(rsa_key).map_err(|e| FfiError::IoError {
                     detail: format!("RSA key conversion failed: {e}"),
                 })?;
             keypair.into()
@@ -122,18 +119,17 @@ pub(crate) fn import_file(
     let _guard = lock()?;
 
     let mut pass_str: Option<String> = passphrase.as_ref().map(|s| {
-        String::from_utf8(s.clone()).unwrap_or_else(|_| {
-            String::from_utf8_lossy(s).into_owned()
-        })
+        String::from_utf8(s.clone()).unwrap_or_else(|_| String::from_utf8_lossy(s).into_owned())
     });
     // Zero passphrase bytes immediately after converting to string.
     if let Some(ref mut bytes) = passphrase {
         bytes.as_mut_slice().zeroize();
     }
-    let key = russh_keys::load_secret_key(file_path, pass_str.as_deref())
-        .map_err(|e| FfiError::IoError {
+    let key = russh_keys::load_secret_key(file_path, pass_str.as_deref()).map_err(|e| {
+        FfiError::IoError {
             detail: format!("failed to parse key file: {e}"),
-        })?;
+        }
+    })?;
     // Zero the intermediate String copy of the passphrase.
     if let Some(ref mut s) = pass_str {
         s.zeroize();

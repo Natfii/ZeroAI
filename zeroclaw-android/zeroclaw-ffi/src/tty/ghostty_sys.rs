@@ -196,9 +196,8 @@ pub type GhosttyTerminalWritePtyFn = Option<
 /// Invoked by libghostty-vt when the terminal receives a BEL (0x07)
 /// character. The callback receives the terminal handle and the
 /// userdata pointer registered alongside it.
-pub type GhosttyTerminalBellFn = Option<
-    unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void),
->;
+pub type GhosttyTerminalBellFn =
+    Option<unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void)>;
 
 /// Callback for `GHOSTTY_TERMINAL_OPT_TITLE_CHANGED`.
 ///
@@ -207,9 +206,8 @@ pub type GhosttyTerminalBellFn = Option<
 /// the userdata pointer registered alongside it. The actual title
 /// text must be read separately via `ghostty_terminal_get` with
 /// [`GhosttyTerminalData::Title`].
-pub type GhosttyTerminalTitleChangedFn = Option<
-    unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void),
->;
+pub type GhosttyTerminalTitleChangedFn =
+    Option<unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void)>;
 
 // ── Render state enums ──────────────────────────────────────────────
 
@@ -507,42 +505,161 @@ pub const GHOSTTY_MODS_SUPER: GhosttyMods = 1 << 3;
 pub enum GhosttyKey {
     Unidentified = 0,
     // Writing System Keys (W3C § 3.1.1)
-    Backquote, Backslash, BracketLeft, BracketRight, Comma,
-    Digit0, Digit1, Digit2, Digit3, Digit4,
-    Digit5, Digit6, Digit7, Digit8, Digit9,
-    Equal, IntlBackslash, IntlRo, IntlYen,
-    A, B, C, D, E, F, G, H, I, J, K, L, M,
-    N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
-    Minus, Period, Quote, Semicolon, Slash,
+    Backquote,
+    Backslash,
+    BracketLeft,
+    BracketRight,
+    Comma,
+    Digit0,
+    Digit1,
+    Digit2,
+    Digit3,
+    Digit4,
+    Digit5,
+    Digit6,
+    Digit7,
+    Digit8,
+    Digit9,
+    Equal,
+    IntlBackslash,
+    IntlRo,
+    IntlYen,
+    A,
+    B,
+    C,
+    D,
+    E,
+    F,
+    G,
+    H,
+    I,
+    J,
+    K,
+    L,
+    M,
+    N,
+    O,
+    P,
+    Q,
+    R,
+    S,
+    T,
+    U,
+    V,
+    W,
+    X,
+    Y,
+    Z,
+    Minus,
+    Period,
+    Quote,
+    Semicolon,
+    Slash,
     // Functional Keys (W3C § 3.1.2)
-    AltLeft, AltRight, Backspace, CapsLock, ContextMenu,
-    ControlLeft, ControlRight, Enter, MetaLeft, MetaRight,
-    ShiftLeft, ShiftRight, Space, Tab,
-    Convert, KanaMode, NonConvert,
+    AltLeft,
+    AltRight,
+    Backspace,
+    CapsLock,
+    ContextMenu,
+    ControlLeft,
+    ControlRight,
+    Enter,
+    MetaLeft,
+    MetaRight,
+    ShiftLeft,
+    ShiftRight,
+    Space,
+    Tab,
+    Convert,
+    KanaMode,
+    NonConvert,
     // Control Pad (W3C § 3.2)
-    Delete, End, Help, Home, Insert, PageDown, PageUp,
+    Delete,
+    End,
+    Help,
+    Home,
+    Insert,
+    PageDown,
+    PageUp,
     // Arrow Pad (W3C § 3.3)
-    ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    ArrowUp,
     // Numpad (W3C § 3.4) — all 41 variants, must match C header exactly
     NumLock,
-    Numpad0, Numpad1, Numpad2, Numpad3, Numpad4,
-    Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
-    NumpadAdd, NumpadBackspace, NumpadClear, NumpadClearEntry,
-    NumpadComma, NumpadDecimal, NumpadDivide, NumpadEnter,
+    Numpad0,
+    Numpad1,
+    Numpad2,
+    Numpad3,
+    Numpad4,
+    Numpad5,
+    Numpad6,
+    Numpad7,
+    Numpad8,
+    Numpad9,
+    NumpadAdd,
+    NumpadBackspace,
+    NumpadClear,
+    NumpadClearEntry,
+    NumpadComma,
+    NumpadDecimal,
+    NumpadDivide,
+    NumpadEnter,
     NumpadEqual,
-    NumpadMemoryAdd, NumpadMemoryClear, NumpadMemoryRecall,
-    NumpadMemoryStore, NumpadMemorySubtract,
-    NumpadMultiply, NumpadParenLeft, NumpadParenRight,
-    NumpadSubtract, NumpadSeparator,
-    NumpadUp, NumpadDown, NumpadRight, NumpadLeft,
-    NumpadBegin, NumpadHome, NumpadEnd,
-    NumpadInsert, NumpadDelete, NumpadPageUp, NumpadPageDown,
+    NumpadMemoryAdd,
+    NumpadMemoryClear,
+    NumpadMemoryRecall,
+    NumpadMemoryStore,
+    NumpadMemorySubtract,
+    NumpadMultiply,
+    NumpadParenLeft,
+    NumpadParenRight,
+    NumpadSubtract,
+    NumpadSeparator,
+    NumpadUp,
+    NumpadDown,
+    NumpadRight,
+    NumpadLeft,
+    NumpadBegin,
+    NumpadHome,
+    NumpadEnd,
+    NumpadInsert,
+    NumpadDelete,
+    NumpadPageUp,
+    NumpadPageDown,
     // Function Keys (W3C § 3.5)
     Escape,
-    F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
-    F13, F14, F15, F16, F17, F18, F19, F20,
-    F21, F22, F23, F24, F25,
-    Fn, FnLock, PrintScreen, ScrollLock, Pause,
+    F1,
+    F2,
+    F3,
+    F4,
+    F5,
+    F6,
+    F7,
+    F8,
+    F9,
+    F10,
+    F11,
+    F12,
+    F13,
+    F14,
+    F15,
+    F16,
+    F17,
+    F18,
+    F19,
+    F20,
+    F21,
+    F22,
+    F23,
+    F24,
+    F25,
+    Fn,
+    FnLock,
+    PrintScreen,
+    ScrollLock,
+    Pause,
 }
 
 // ── Mouse Types ────────────────────────────────────────────────────
@@ -684,11 +801,7 @@ unsafe extern "C" {
 
     pub fn ghostty_terminal_reset(terminal: GhosttyTerminal);
 
-    pub fn ghostty_terminal_vt_write(
-        terminal: GhosttyTerminal,
-        data: *const u8,
-        len: usize,
-    );
+    pub fn ghostty_terminal_vt_write(terminal: GhosttyTerminal, data: *const u8, len: usize);
 
     pub fn ghostty_terminal_resize(
         terminal: GhosttyTerminal,
@@ -754,13 +867,9 @@ unsafe extern "C" {
         out_iterator: *mut GhosttyRenderStateRowIterator,
     ) -> GhosttyResult;
 
-    pub fn ghostty_render_state_row_iterator_free(
-        iterator: GhosttyRenderStateRowIterator,
-    );
+    pub fn ghostty_render_state_row_iterator_free(iterator: GhosttyRenderStateRowIterator);
 
-    pub fn ghostty_render_state_row_iterator_next(
-        iterator: GhosttyRenderStateRowIterator,
-    ) -> bool;
+    pub fn ghostty_render_state_row_iterator_next(iterator: GhosttyRenderStateRowIterator) -> bool;
 
     pub fn ghostty_render_state_row_get(
         iterator: GhosttyRenderStateRowIterator,
@@ -781,9 +890,7 @@ unsafe extern "C" {
         out_cells: *mut GhosttyRenderStateRowCells,
     ) -> GhosttyResult;
 
-    pub fn ghostty_render_state_row_cells_next(
-        cells: GhosttyRenderStateRowCells,
-    ) -> bool;
+    pub fn ghostty_render_state_row_cells_next(cells: GhosttyRenderStateRowCells) -> bool;
 
     pub fn ghostty_render_state_row_cells_select(
         cells: GhosttyRenderStateRowCells,
@@ -796,20 +903,14 @@ unsafe extern "C" {
         out: *mut c_void,
     ) -> GhosttyResult;
 
-    pub fn ghostty_render_state_row_cells_free(
-        cells: GhosttyRenderStateRowCells,
-    );
+    pub fn ghostty_render_state_row_cells_free(cells: GhosttyRenderStateRowCells);
 
     /// Queries a single cell field by tag, writing the result into `out`.
     ///
     /// `cell` is the raw 64-bit cell value obtained via
     /// `GhosttyRenderStateRowCellsData::Raw`. `out` must point to
     /// memory of the appropriate type for the requested `data` tag.
-    pub fn ghostty_cell_get(
-        cell: u64,
-        data: GhosttyCellData,
-        out: *mut c_void,
-    ) -> GhosttyResult;
+    pub fn ghostty_cell_get(cell: u64, data: GhosttyCellData, out: *mut c_void) -> GhosttyResult;
 
     /// Writes a default (zeroed) [`GhosttyStyle`] into `style`.
     ///
@@ -848,35 +949,19 @@ unsafe extern "C" {
 
     pub fn ghostty_key_event_free(event: GhosttyKeyEvent);
 
-    pub fn ghostty_key_event_set_action(
-        event: GhosttyKeyEvent,
-        action: GhosttyKeyAction,
-    );
+    pub fn ghostty_key_event_set_action(event: GhosttyKeyEvent, action: GhosttyKeyAction);
 
-    pub fn ghostty_key_event_set_key(
-        event: GhosttyKeyEvent,
-        key: GhosttyKey,
-    );
+    pub fn ghostty_key_event_set_key(event: GhosttyKeyEvent, key: GhosttyKey);
 
-    pub fn ghostty_key_event_set_mods(
-        event: GhosttyKeyEvent,
-        mods: GhosttyMods,
-    );
+    pub fn ghostty_key_event_set_mods(event: GhosttyKeyEvent, mods: GhosttyMods);
 
-    pub fn ghostty_key_event_set_utf8(
-        event: GhosttyKeyEvent,
-        utf8: *const u8,
-        len: usize,
-    );
+    pub fn ghostty_key_event_set_utf8(event: GhosttyKeyEvent, utf8: *const u8, len: usize);
 
     /// Returns `true` if the paste data is safe (no embedded newlines
     /// or bracketed-paste-end sequences).
     ///
     /// `data` must be non-null and valid for `len` bytes.
-    pub fn ghostty_paste_is_safe(
-        data: *const u8,
-        len: usize,
-    ) -> bool;
+    pub fn ghostty_paste_is_safe(data: *const u8, len: usize) -> bool;
 
     // ── Mouse Event ────────────────────────────────────────────────
 
@@ -887,22 +972,13 @@ unsafe extern "C" {
 
     pub fn ghostty_mouse_event_free(event: GhosttyMouseEvent);
 
-    pub fn ghostty_mouse_event_set_action(
-        event: GhosttyMouseEvent,
-        action: GhosttyMouseAction,
-    );
+    pub fn ghostty_mouse_event_set_action(event: GhosttyMouseEvent, action: GhosttyMouseAction);
 
-    pub fn ghostty_mouse_event_set_button(
-        event: GhosttyMouseEvent,
-        button: GhosttyMouseButton,
-    );
+    pub fn ghostty_mouse_event_set_button(event: GhosttyMouseEvent, button: GhosttyMouseButton);
 
     pub fn ghostty_mouse_event_clear_button(event: GhosttyMouseEvent);
 
-    pub fn ghostty_mouse_event_set_mods(
-        event: GhosttyMouseEvent,
-        mods: GhosttyMods,
-    );
+    pub fn ghostty_mouse_event_set_mods(event: GhosttyMouseEvent, mods: GhosttyMods);
 
     pub fn ghostty_mouse_event_set_position(
         event: GhosttyMouseEvent,
@@ -957,8 +1033,5 @@ unsafe extern "C" {
     /// - [`GhosttyBuildInfo::Simd`] / [`GhosttyBuildInfo::KittyGraphics`]
     ///   / [`GhosttyBuildInfo::TmuxControlMode`]: `*mut bool`
     /// - [`GhosttyBuildInfo::Optimize`]: `*mut GhosttyOptimizeMode`
-    pub fn ghostty_build_info(
-        tag: GhosttyBuildInfo,
-        out: *mut c_void,
-    ) -> GhosttyResult;
+    pub fn ghostty_build_info(tag: GhosttyBuildInfo, out: *mut c_void) -> GhosttyResult;
 }

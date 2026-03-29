@@ -32,8 +32,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh::client::KeyboardInteractiveAuthResponse;
+use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, ChannelWriteHalf, Disconnect};
 use tokio::sync::mpsc;
 use zeroize::Zeroize;
@@ -70,8 +70,7 @@ static SSH_DECISION_TX: Mutex<Option<tokio::sync::oneshot::Sender<bool>>> = Mute
 /// Stored separately because it is shared between the write loop task
 /// and the [`resize`] function. All methods on [`ChannelWriteHalf`]
 /// take `&self`, so `Arc` without a `Mutex` is sufficient.
-static SSH_WRITE_HALF: Mutex<Option<Arc<ChannelWriteHalf<russh::client::Msg>>>> =
-    Mutex::new(None);
+static SSH_WRITE_HALF: Mutex<Option<Arc<ChannelWriteHalf<russh::client::Msg>>>> = Mutex::new(None);
 
 // ── Session state ──────────────────────────────────────────────────
 
@@ -133,8 +132,8 @@ fn lock_decision() -> std::sync::MutexGuard<'static, Option<tokio::sync::oneshot
 }
 
 /// Locks the write half mutex with poison recovery.
-fn lock_write_half(
-) -> std::sync::MutexGuard<'static, Option<Arc<ChannelWriteHalf<russh::client::Msg>>>> {
+fn lock_write_half()
+-> std::sync::MutexGuard<'static, Option<Arc<ChannelWriteHalf<russh::client::Msg>>>> {
     SSH_WRITE_HALF.lock().unwrap_or_else(|e| {
         tracing::warn!(
             target: "tty::ssh",
@@ -167,9 +166,7 @@ impl russh::client::Handler for SshHandler {
         &mut self,
         server_public_key: &RusshPublicKey,
     ) -> Result<bool, Self::Error> {
-        let fp = server_public_key
-            .fingerprint(HashAlg::Sha256)
-            .to_string();
+        let fp = server_public_key.fingerprint(HashAlg::Sha256).to_string();
         let algo = server_public_key.algorithm().to_string();
 
         // Check known hosts (cache lookup -- no file I/O).
@@ -195,10 +192,7 @@ impl russh::client::Handler for SshHandler {
         } // mutex released before .await
 
         // Take the oneshot receiver. It must exist exactly once.
-        let rx = self
-            .decision_rx
-            .take()
-            .ok_or(russh::Error::Disconnect)?;
+        let rx = self.decision_rx.take().ok_or(russh::Error::Disconnect)?;
 
         // Block with 120s timeout for user decision.
         match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
@@ -417,8 +411,7 @@ pub(crate) fn submit_password(mut password: Vec<u8>) -> Result<bool, FfiError> {
         }
 
         // Keyboard-interactive fallback.
-        let ki_result =
-            try_keyboard_interactive(&mut ssh_handle, &user, &password_z).await;
+        let ki_result = try_keyboard_interactive(&mut ssh_handle, &user, &password_z).await;
 
         password_z.zeroize();
 
@@ -478,10 +471,8 @@ async fn try_keyboard_interactive(
             KeyboardInteractiveAuthResponse::Success => return Ok(true),
             KeyboardInteractiveAuthResponse::Failure { .. } => return Ok(false),
             KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
-                let mut answers: Vec<String> = prompts
-                    .iter()
-                    .map(|_| password.to_owned())
-                    .collect();
+                let mut answers: Vec<String> =
+                    prompts.iter().map(|_| password.to_owned()).collect();
 
                 let result = handle
                     .authenticate_keyboard_interactive_respond(answers.clone())
@@ -520,11 +511,10 @@ pub(crate) fn submit_key(key_id: &str) -> Result<bool, FfiError> {
     // russh_keys which uses the standalone ssh-key crate. These are
     // different types at the Rust level even though they look the same.
     let key_path = super::key_store::key_path(key_id)?;
-    let key = russh::keys::load_secret_key(&key_path, None).map_err(|e| {
-        FfiError::InvalidArgument {
+    let key =
+        russh::keys::load_secret_key(&key_path, None).map_err(|e| FfiError::InvalidArgument {
             detail: format!("failed to load SSH key: {e}"),
-        }
-    })?;
+        })?;
 
     let hash_alg = if key.algorithm().is_rsa() {
         Some(HashAlg::Sha256)
@@ -678,9 +668,12 @@ pub(crate) fn write_bytes(data: Vec<u8>) -> Result<(), FfiError> {
         detail: "no SSH session is active".into(),
     })?;
 
-    let tx = session.write_tx.as_ref().ok_or_else(|| FfiError::StateError {
-        detail: "SSH write channel not available (not yet connected)".into(),
-    })?;
+    let tx = session
+        .write_tx
+        .as_ref()
+        .ok_or_else(|| FfiError::StateError {
+            detail: "SSH write channel not available (not yet connected)".into(),
+        })?;
 
     tx.try_send(data).map_err(|e| FfiError::SpawnError {
         detail: format!("SSH write channel error: {e}"),
@@ -741,9 +734,12 @@ pub(crate) fn get_render_frame() -> Result<super::types::TtyRenderFrame, FfiErro
 pub(crate) fn resize(cols: u16, rows: u16) -> Result<(), FfiError> {
     let write_half = {
         let guard = lock_write_half();
-        guard.as_ref().map(Arc::clone).ok_or_else(|| FfiError::StateError {
-            detail: "SSH channel not open".into(),
-        })?
+        guard
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| FfiError::StateError {
+                detail: "SSH channel not open".into(),
+            })?
     };
 
     let rt_handle = super::runtime().handle().clone();
@@ -891,10 +887,7 @@ async fn open_pty_channel() -> Result<(), FfiError> {
         .map_err(map_russh_error)?;
 
     // Request a shell.
-    channel
-        .request_shell(true)
-        .await
-        .map_err(map_russh_error)?;
+    channel.request_shell(true).await.map_err(map_russh_error)?;
 
     // Split channel into read and write halves.
     let (read_half, write_half) = channel.split();
@@ -912,7 +905,10 @@ async fn open_pty_channel() -> Result<(), FfiError> {
         let session = guard.as_ref().ok_or_else(|| FfiError::StateError {
             detail: "no SSH session is active".into(),
         })?;
-        (Arc::clone(&session.ring_buffer), Arc::clone(&session.backend))
+        (
+            Arc::clone(&session.ring_buffer),
+            Arc::clone(&session.backend),
+        )
     };
 
     // Create write mpsc channel.

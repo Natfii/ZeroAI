@@ -93,8 +93,7 @@ impl GhosttyBackend {
         // in `Drop` after the callback is cleared. The callback only
         // appends to a Vec — no reentrancy into libghostty-vt.
         unsafe {
-            let userdata =
-                Arc::into_raw(Arc::clone(&callback_state)) as *mut std::ffi::c_void;
+            let userdata = Arc::into_raw(Arc::clone(&callback_state)) as *mut std::ffi::c_void;
             terminal.set_write_pty_callback(Some(write_pty_callback), userdata);
             terminal.set_bell_callback(Some(bell_callback));
             terminal.set_title_changed_callback(Some(title_changed_callback));
@@ -155,7 +154,11 @@ impl GhosttyBackend {
     ///
     /// Atomically clears the title-changed flag before reading.
     pub(crate) fn take_title_if_changed(&mut self) -> Option<String> {
-        if self.callback_state.title_changed.swap(false, Ordering::AcqRel) {
+        if self
+            .callback_state
+            .title_changed
+            .swap(false, Ordering::AcqRel)
+        {
             self.terminal.title()
         } else {
             None
@@ -178,10 +181,7 @@ impl TerminalBackend for GhosttyBackend {
     fn snapshot_for_render(&mut self) -> TerminalRenderSnapshot {
         if self.terminal.is_synchronized_output() {
             // App is mid-batch — return cached snapshot to prevent tearing.
-            return self
-                .cached_snapshot
-                .clone()
-                .unwrap_or_default();
+            return self.cached_snapshot.clone().unwrap_or_default();
         }
 
         let snapshot = self
@@ -211,25 +211,13 @@ impl TerminalBackend for GhosttyBackend {
         MouseEncoder::is_tracking_active(&self.terminal)
     }
 
-    fn encode_mouse_event(
-        &mut self,
-        action: u8,
-        button: u8,
-        x: f32,
-        y: f32,
-        mods: u32,
-    ) -> Vec<u8> {
+    fn encode_mouse_event(&mut self, action: u8, button: u8, x: f32, y: f32, mods: u32) -> Vec<u8> {
         self.mouse_encoder.encode(action, button, x, y, mods)
     }
 
-    fn set_mouse_geometry(
-        &mut self,
-        cell_w: u32,
-        cell_h: u32,
-        screen_w: u32,
-        screen_h: u32,
-    ) {
-        self.mouse_encoder.set_geometry(cell_w, cell_h, screen_w, screen_h);
+    fn set_mouse_geometry(&mut self, cell_w: u32, cell_h: u32, screen_w: u32, screen_h: u32) {
+        self.mouse_encoder
+            .set_geometry(cell_w, cell_h, screen_w, screen_h);
     }
 
     fn snapshot_for_accessibility(&self, visible_rows: usize) -> Vec<String> {
@@ -325,9 +313,7 @@ impl Drop for GhosttyBackend {
             self.terminal.set_bell_callback(None);
             self.terminal.set_title_changed_callback(None);
 
-            let _ = Arc::from_raw(
-                Arc::as_ptr(&self.callback_state) as *const CallbackState,
-            );
+            let _ = Arc::from_raw(Arc::as_ptr(&self.callback_state) as *const CallbackState);
         }
     }
 }
