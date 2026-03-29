@@ -430,6 +430,41 @@ pub(crate) fn snapshot_to_frame(
         DirtyState::Full => TtyDirtyState::Full,
     };
 
+    // Short-circuit: when the Rust snapshot is Clean, the rows Vec is
+    // already empty and all metadata is cached. Convert the cursor and
+    // colors without iterating rows.
+    if dirty_state == TtyDirtyState::Clean {
+        let cursor_style = match snapshot.cursor.style {
+            CursorStyle::Bar => TtyCursorStyle::Bar,
+            CursorStyle::Block => TtyCursorStyle::Block,
+            CursorStyle::Underline => TtyCursorStyle::Underline,
+            CursorStyle::BlockHollow => TtyCursorStyle::BlockHollow,
+        };
+        return TtyRenderFrame {
+            cols: snapshot.cols,
+            num_rows: snapshot.num_rows,
+            rows: Vec::new(),
+            cursor: TtyCursorState {
+                col: snapshot.cursor.x,
+                row: snapshot.cursor.y,
+                visible: snapshot.cursor.visible,
+                style: cursor_style,
+                blinking: snapshot.cursor.blinking,
+            },
+            default_bg_argb: pack_argb(
+                snapshot.default_bg.r,
+                snapshot.default_bg.g,
+                snapshot.default_bg.b,
+            ),
+            default_fg_argb: pack_argb(
+                snapshot.default_fg.r,
+                snapshot.default_fg.g,
+                snapshot.default_fg.b,
+            ),
+            dirty_state,
+        };
+    }
+
     let rows: Vec<TtyRenderRow> = snapshot
         .rows
         .into_iter()

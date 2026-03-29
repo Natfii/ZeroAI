@@ -227,11 +227,24 @@ impl Drop for Terminal {
 /// and `GhosttyRenderStateRowCells`.
 ///
 /// Owns all three handles and reuses them across frames to avoid
-/// repeated allocation.
+/// repeated allocation. Caches metadata from the last non-clean
+/// frame so that [`DirtyState::Clean`] snapshots can short-circuit
+/// without calling into the C library for dimensions, cursor, or
+/// colors.
 pub(crate) struct RenderState {
     state: GhosttyRenderState,
     row_iter: GhosttyRenderStateRowIterator,
     row_cells: GhosttyRenderStateRowCells,
+    /// Cached column count from the last non-clean snapshot.
+    last_cols: u16,
+    /// Cached row count from the last non-clean snapshot.
+    last_num_rows: u16,
+    /// Cached cursor state from the last non-clean snapshot.
+    last_cursor: RenderCursor,
+    /// Cached default background color from the last non-clean snapshot.
+    last_default_bg: RenderColor,
+    /// Cached default foreground color from the last non-clean snapshot.
+    last_default_fg: RenderColor,
 }
 
 // SAFETY: RenderState holds three opaque C pointers (render state,
@@ -269,6 +282,11 @@ impl RenderState {
             state,
             row_iter,
             row_cells,
+            last_cols: 0,
+            last_num_rows: 0,
+            last_cursor: RenderCursor::default(),
+            last_default_bg: RenderColor::default(),
+            last_default_fg: RenderColor::default(),
         })
     }
 
@@ -292,6 +310,26 @@ impl RenderState {
         }
 
         let dirty = self.get_dirty()?;
+
+        // Short-circuit: when nothing changed, skip the ~50 C library
+        // calls for row iteration / cell extraction and return cached
+        // metadata with an empty row list. The Kotlin ViewModel already
+        // discards Clean frames, so the only cost is the dirty check
+        // itself (~2 C calls).
+        if dirty == DirtyState::Clean {
+            self.clear_dirty();
+            return Ok(TerminalRenderSnapshot {
+                dirty: DirtyState::Clean,
+                rows: Vec::new(),
+                cols: self.last_cols,
+                num_rows: self.last_num_rows,
+                cursor: self.last_cursor,
+                default_bg: self.last_default_bg,
+                default_fg: self.last_default_fg,
+                palette: Vec::new(),
+            });
+        }
+
         let (cols, num_rows) = self.get_dimensions()?;
         let cursor = self.get_cursor()?;
         let (default_bg, default_fg, palette) = self.get_colors()?;
@@ -299,6 +337,13 @@ impl RenderState {
 
         // Clear dirty state after extraction.
         self.clear_dirty();
+
+        // Cache metadata for future Clean short-circuits.
+        self.last_cols = cols;
+        self.last_num_rows = num_rows;
+        self.last_cursor = cursor;
+        self.last_default_bg = default_bg;
+        self.last_default_fg = default_fg;
 
         Ok(TerminalRenderSnapshot {
             dirty,
