@@ -581,7 +581,9 @@ fn pack_argb(r: u8, g: u8, b: u8) -> u32 {
 /// | 32-55 | Foreground RGB (24-bit, 0 = default) |
 /// | 56-58 | underline_style (3 bits, 0–5) |
 /// | 59    | overline |
-/// | 60-63 | Reserved (zero) |
+/// | 60    | has_explicit_fg |
+/// | 61    | has_explicit_bg |
+/// | 62-63 | Reserved (zero) |
 ///
 /// The return type is `i64` (not `u64`) because UniFFI maps `u64` to
 /// Kotlin `ULong`, which erases to signed `Long` in generics. Using
@@ -620,6 +622,12 @@ fn pack_cell_style(
 
     // Bit 59: overline
     if flags.overline { bits |= 1 << 59; }
+
+    // Bit 60: has_explicit_fg (distinguishes None from Some(0,0,0))
+    if fg.is_some() { bits |= 1 << 60; }
+
+    // Bit 61: has_explicit_bg (distinguishes None from Some(0,0,0))
+    if bg.is_some() { bits |= 1 << 61; }
 
     bits as i64
 }
@@ -786,6 +794,42 @@ mod tests {
         assert_eq!(packed & 0xFF, 0, "low flags should be clear");
         assert_eq!((packed >> 8) & 0x00FF_FFFF, 0, "bg should be clear");
         assert_eq!((packed >> 32) & 0x00FF_FFFF, 0, "fg should be clear");
+    }
+
+    // ── explicit color sentinel bits (60-61) ─────────────────────────
+
+    #[test]
+    fn pack_explicit_black_fg_sets_bit_60() {
+        let fg = Some(RenderColor { r: 0, g: 0, b: 0 });
+        let style = pack_cell_style(fg, None, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_ne!(bits & (1 << 60), 0, "has_explicit_fg should be set");
+        assert_eq!((bits >> 32) & 0x00FF_FFFF, 0, "fg RGB should be 0");
+    }
+
+    #[test]
+    fn pack_explicit_black_bg_sets_bit_61() {
+        let bg = Some(RenderColor { r: 0, g: 0, b: 0 });
+        let style = pack_cell_style(None, bg, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_ne!(bits & (1 << 61), 0, "has_explicit_bg should be set");
+        assert_eq!((bits >> 8) & 0x00FF_FFFF, 0, "bg RGB should be 0");
+    }
+
+    #[test]
+    fn pack_default_colors_bits_60_61_clear() {
+        let style = pack_cell_style(None, None, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_eq!(bits & (1 << 60), 0, "has_explicit_fg should be clear");
+        assert_eq!(bits & (1 << 61), 0, "has_explicit_bg should be clear");
+    }
+
+    #[test]
+    fn pack_nonblack_fg_also_sets_bit_60() {
+        let fg = Some(RenderColor { r: 0xFF, g: 0x80, b: 0x40 });
+        let style = pack_cell_style(fg, None, &CellStyleFlags::default());
+        let bits = style as u64;
+        assert_ne!(bits & (1 << 60), 0, "has_explicit_fg should be set for non-black too");
     }
 
     // ── char_offsets tests ───────────────────────────────────────────

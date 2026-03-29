@@ -175,7 +175,9 @@ pub enum TtyDirtyState {
 /// | 32-55 | Foreground color (24-bit RGB, 0 = terminal default) |
 /// | 56-58 | underline_style (3 bits, 0–5) |
 /// | 59    | overline |
-/// | 60-63 | Reserved |
+/// | 60    | has_explicit_fg (1 = explicit color set, 0 = terminal default) |
+/// | 61    | has_explicit_bg (1 = explicit color set, 0 = terminal default) |
+/// | 62-63 | Reserved |
 ///
 /// On the Kotlin side, `i64` arrives as `Long`. All bit extraction
 /// must use `ushr` (unsigned right shift), never `shr`.
