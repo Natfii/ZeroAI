@@ -3819,14 +3819,7 @@ pub fn tty_is_paste_safe(text: String) -> Result<bool, FfiError> {
     catch_unwind(AssertUnwindSafe(|| {
         #[cfg(feature = "ghostty-vt")]
         {
-            let bytes = text.as_bytes();
-            // SAFETY: `text` is a valid UTF-8 String. `as_bytes()` returns
-            // a pointer to the string's backing buffer with correct length.
-            // The string is not moved or dropped during the call.
-            // ghostty_paste_is_safe does not retain the pointer.
-            let safe = unsafe {
-                tty::ghostty_sys::ghostty_paste_is_safe(bytes.as_ptr(), bytes.len())
-            };
+            let safe = tty::ghostty_bridge::is_paste_safe(&text);
             Ok(safe)
         }
         #[cfg(not(feature = "ghostty-vt"))]
@@ -3875,6 +3868,63 @@ pub fn tty_is_bracketed_paste_active() -> Result<bool, FfiError> {
     })
 }
 
+/// Returns `true` if a terminal bell (BEL, 0x07) has fired since the
+/// last call, atomically clearing the pending flag.
+///
+/// Designed to be called once per render frame from Kotlin. The rate
+/// limiter lives in Rust (100 ms cooldown), so Kotlin only needs to
+/// check the boolean and optionally fire haptic feedback.
+///
+/// Returns `Ok(false)` when no session is running.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_take_bell_event() -> Result<bool, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            tty::ssh::take_bell_event()
+        } else {
+            tty::session::take_bell_event()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// If the terminal title has changed since the last call (via
+/// OSC 0 or OSC 2), reads and returns the current title string.
+///
+/// Designed to be called once per render frame from Kotlin alongside
+/// the bell event poll. The title is sanitized in Rust: bidi overrides
+/// are stripped and the length is capped at 64 characters.
+///
+/// Returns `Ok(None)` when no session is running or the title has not
+/// changed since the last poll.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_take_title_if_changed() -> Result<Option<String>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        if tty::ssh::has_session() {
+            tty::ssh::take_title_if_changed()
+        } else {
+            tty::session::take_title_if_changed()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Returns whether mouse tracking is currently active in the
 /// terminal session.
 ///
@@ -3891,6 +3941,51 @@ pub fn tty_is_mouse_tracking_active() -> Result<bool, FfiError> {
             Ok(false)
         } else {
             tty::session::is_mouse_tracking_active()
+        }
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Sends a focus gained or lost event to the terminal if focus
+/// reporting (DEC 1004) is active.
+///
+/// Called from the Android lifecycle observer on `ON_START` (gained)
+/// and `ON_STOP` (lost). If no session is running or focus reporting
+/// is not active, this is a silent no-op.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if a panic is caught.
+#[uniffi::export]
+pub fn tty_send_focus_event(gained: bool) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        // Check if focus reporting is active. If not, silently no-op.
+        // The mode check is done under the session lock; the encode
+        // is stateless (no terminal handle needed), so no TOCTOU risk.
+        if tty::ssh::has_session() {
+            if !tty::ssh::is_focus_reporting_active().unwrap_or(false) {
+                return Ok(());
+            }
+            let encoded = tty::ghostty_bridge::encode_focus_event(gained);
+            if !encoded.is_empty() {
+                tty::ssh::write_bytes(encoded)
+            } else {
+                Ok(())
+            }
+        } else {
+            if !tty::session::is_focus_reporting_active().unwrap_or(false) {
+                return Ok(());
+            }
+            let encoded = tty::ghostty_bridge::encode_focus_event(gained);
+            if !encoded.is_empty() {
+                tty::session::write_bytes(encoded)
+            } else {
+                Ok(())
+            }
         }
     }))
     .unwrap_or_else(|e| {

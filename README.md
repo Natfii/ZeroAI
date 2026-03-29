@@ -187,6 +187,16 @@ The `zeroclaw/` Rust core in this repository is a **stripped and modified** vers
 
 For the `zeroclaw/` directory, this repo uses the upstream **MIT license option**.
 
+## Acknowledgements
+
+The terminal subsystem's safe Rust FFI wrappers were informed by patterns from
+[libghostty-rs](https://github.com/Uzaaft/libghostty-rs) by Uzair Aftab and
+Leah Amelia Chen (MIT/Apache-2.0) — idiomatic Rust bindings for libghostty-vt.
+Specific patterns adopted include the `Object<T>` RAII handle wrapper, structured
+error handling with `OutOfSpace` retry, zero-allocation grapheme extraction,
+`CellContentTag` discrimination, mouse motion deduplication, focus event encoding,
+paste safety validation, and the `sized!` macro for C struct initialization.
+
 ## Why...?
 
 Zero is not just "an Android chat app." It is an attempt to build a full agent platform around a native mobile runtime, with the in-app Zero at the center of the experience:

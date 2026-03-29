@@ -68,6 +68,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -276,6 +277,7 @@ fun TerminalScreen(
     val ttySelection by terminalViewModel.ttySelection.collectAsStateWithLifecycle()
     val showPasteBar by terminalViewModel.showPasteBar.collectAsStateWithLifecycle()
     val pendingPaste by terminalViewModel.pendingPaste.collectAsStateWithLifecycle()
+    val ttyTitle by terminalViewModel.terminalTitle.collectAsStateWithLifecycle()
     val isPowerSave = LocalPowerSaveMode.current
 
     Crossfade(
@@ -350,6 +352,7 @@ fun TerminalScreen(
                     onSelectionClear = terminalViewModel::clearSelection,
                     mouseTrackingActive = { terminalViewModel.isMouseTrackingActive() },
                     onMouseEvent = terminalViewModel::submitMouseEvent,
+                    terminalTitle = ttyTitle,
                 )
             }
         }
@@ -1217,6 +1220,8 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  *   mouse-tracking mode. Forwarded to [TtyCanvasView] to switch gesture routing.
  * @param onMouseEvent Callback invoked with encoded mouse event parameters when
  *   [mouseTrackingActive] returns `true`. Forwarded to [TtyCanvasView].
+ * @param terminalTitle Terminal title set by OSC 0/2, or `null` if unset.
+ *   Displayed in [TtyStatusBar] alongside the connection status.
  */
 @Suppress("LongParameterList")
 @Composable
@@ -1256,11 +1261,39 @@ fun TtySessionContent(
     onSelectionClear: () -> Unit = {},
     mouseTrackingActive: () -> Boolean = { false },
     onMouseEvent: (UByte, UByte, Float, Float, UInt) -> Unit = { _, _, _, _, _ -> },
+    terminalTitle: String? = null,
 ) {
     var inputText by remember { mutableStateOf("") }
     var showThemePicker by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val isPowerSave = LocalPowerSaveMode.current
+
+    // Send focus gained/lost events to the terminal for DEC 1004
+    // focus reporting. Uses ON_START/ON_STOP (not ON_RESUME/ON_PAUSE)
+    // so multi-window and PiP mode work correctly.
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            androidx.lifecycle.LifecycleEventObserver { _, event ->
+                when (event) {
+                    androidx.lifecycle.Lifecycle.Event.ON_START -> {
+                        try {
+                            com.zeroclaw.ffi.ttySendFocusEvent(true)
+                        } catch (_: Exception) {
+                        }
+                    }
+                    androidx.lifecycle.Lifecycle.Event.ON_STOP -> {
+                        try {
+                            com.zeroclaw.ffi.ttySendFocusEvent(false)
+                        } catch (_: Exception) {
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     if (showThemePicker) {
         TerminalThemePicker(
@@ -1284,6 +1317,7 @@ fun TtySessionContent(
         TtyStatusBar(
             session = session,
             onClose = onClose,
+            terminalTitle = terminalTitle,
             modifier = Modifier.fillMaxWidth(),
         )
 

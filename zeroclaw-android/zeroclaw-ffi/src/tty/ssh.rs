@@ -1077,6 +1077,65 @@ pub(crate) fn is_bracketed_paste_active() -> Result<bool, FfiError> {
     Ok(backend.is_bracketed_paste_active())
 }
 
+/// Returns whether focus reporting mode (DEC 1004) is active in the
+/// SSH session's terminal backend.
+pub(crate) fn is_focus_reporting_active() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
+
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::ssh",
+            "backend mutex poisoned while querying focus reporting; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.is_focus_reporting_active())
+}
+
+/// Returns `true` if a terminal bell (BEL) has fired since the last
+/// call, atomically clearing the pending flag.
+///
+/// Returns `Ok(false)` when no SSH session is running.
+pub(crate) fn take_bell_event() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
+
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::ssh",
+            "backend mutex poisoned while polling bell event; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.take_bell_event())
+}
+
+/// If the terminal title has changed since the last call (OSC 0/2),
+/// reads and returns the current title string.
+///
+/// Returns `Ok(None)` when no SSH session is running or the title
+/// has not changed since the last poll.
+pub(crate) fn take_title_if_changed() -> Result<Option<String>, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(None);
+    };
+
+    let mut backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::ssh",
+            "backend mutex poisoned while polling title change; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.take_title_if_changed())
+}
+
 // ── Tests ──────────────────────────────────────────────────────────
 
 #[cfg(test)]

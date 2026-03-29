@@ -58,6 +58,9 @@ private const val TOUCH_TARGET_SIZE_DP = 48
  * The entire row is marked as a polite live region so screen readers
  * announce state transitions without interrupting the user.
  *
+ * When a [terminalTitle] is provided (set by the shell via OSC 0/2),
+ * it is appended to the status label after an em-dash separator.
+ *
  * Color mapping:
  * - [TtySessionUiState.LocalShell] and [TtySessionUiState.SshConnected]:
  *   [MaterialTheme.colorScheme.tertiary] (green-like).
@@ -69,15 +72,18 @@ private const val TOUCH_TARGET_SIZE_DP = 48
  *
  * @param session Current lifecycle state of the TTY session.
  * @param onClose Callback when the user taps the close button.
+ * @param terminalTitle Terminal title set by OSC 0/2, or `null` if unset.
  * @param modifier Modifier applied to the outer [Row].
  */
 @Composable
 fun TtyStatusBar(
     session: TtySessionUiState,
     onClose: () -> Unit,
+    terminalTitle: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    val (indicatorColor, label) = resolveStatusDisplay(session)
+    val (indicatorColor, baseLabel) = resolveStatusDisplay(session)
+    val label = if (terminalTitle != null) "$baseLabel \u2014 $terminalTitle" else baseLabel
 
     Row(
         verticalAlignment = Alignment.CenterVertically,

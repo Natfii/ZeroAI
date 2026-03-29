@@ -12,7 +12,10 @@ use std::path::PathBuf;
 fn main() {
     let target = env::var("TARGET").unwrap_or_default();
 
-    if !cfg!(feature = "ghostty-vt") || !target.contains("-android") {
+    // NOTE: cfg!(feature = ...) evaluates the *build script's* features, not
+    // the crate's. Use the CARGO_FEATURE_* env var injected by Cargo instead.
+    let has_ghostty_vt = env::var("CARGO_FEATURE_GHOSTTY_VT").is_ok();
+    if !has_ghostty_vt || !target.contains("-android") {
         return;
     }
 
@@ -32,12 +35,13 @@ fn main() {
 
     let libs_dir = manifest_dir.join("libs").join(arch_dir);
 
-    if !libs_dir.join("libghostty_vt.so").exists() {
-        println!(
-            "cargo:warning=libghostty_vt.so not found at {}; run scripts/build-ghostty.sh first",
-            libs_dir.display()
+    let so_path = libs_dir.join("libghostty_vt.so");
+    if !so_path.exists() {
+        panic!(
+            "libghostty_vt.so not found at {}. \
+             Run scripts/build-ghostty.sh first.",
+            so_path.display()
         );
-        return;
     }
 
     println!("cargo:rustc-link-search=native={}", libs_dir.display());

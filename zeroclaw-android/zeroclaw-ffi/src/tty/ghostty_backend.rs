@@ -11,7 +11,9 @@
 //! (device status reports, etc.) are captured and can be written back
 //! to the PTY by the session layer.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use super::backend::{TerminalBackend, TerminalRenderSnapshot, TtyBackendError};
 use super::ghostty_bridge::{KeyEncoder, MouseEncoder, RenderState, Terminal};
@@ -25,6 +27,27 @@ const DEFAULT_CELL_WIDTH_PX: u32 = 8;
 /// Default cell height in pixels.
 const DEFAULT_CELL_HEIGHT_PX: u32 = 16;
 
+/// Shared state passed as C callback userdata for all libghostty-vt
+/// callbacks (write-PTY, bell, title-changed, etc.).
+///
+/// Stored behind `Arc` and leaked into the C userdata pointer via
+/// [`Arc::into_raw`]. The `GhosttyBackend` holds one strong reference;
+/// the leaked raw pointer is the second. Both are dropped in
+/// [`GhosttyBackend::drop`].
+pub(crate) struct CallbackState {
+    /// Buffer for write-PTY callback responses (device status reports,
+    /// cursor position queries, etc.).
+    write_buf: Mutex<Vec<u8>>,
+    /// Set by the bell callback; polled and cleared by Kotlin via
+    /// [`GhosttyBackend::take_bell_event`].
+    bell_pending: AtomicBool,
+    /// Rate limiter: last time a bell was actually recorded.
+    last_bell: Mutex<Option<Instant>>,
+    /// Set by the title-changed callback; polled and cleared by
+    /// [`GhosttyBackend::take_title_if_changed`].
+    title_changed: AtomicBool,
+}
+
 /// Terminal backend powered by libghostty-vt.
 pub(crate) struct GhosttyBackend {
     /// The VT terminal instance.
@@ -35,9 +58,8 @@ pub(crate) struct GhosttyBackend {
     key_encoder: KeyEncoder,
     /// Mouse encoder for converting touch events to escape sequences.
     mouse_encoder: MouseEncoder,
-    /// Buffer for write-PTY callback responses. Shared with the C
-    /// callback via a raw pointer.
-    write_pty_buf: Arc<Mutex<Vec<u8>>>,
+    /// Callback state shared with the C callback via a raw pointer.
+    callback_state: Arc<CallbackState>,
     /// Cached snapshot for synchronized output mode. When DEC 2026 is
     /// active, we return this instead of updating the render state.
     cached_snapshot: Option<TerminalRenderSnapshot>,
@@ -54,20 +76,28 @@ impl GhosttyBackend {
         let render_state = RenderState::new()?;
         let key_encoder = KeyEncoder::new()?;
         let mouse_encoder = MouseEncoder::new()?;
-        let write_pty_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+        let callback_state = Arc::new(CallbackState {
+            write_buf: Mutex::new(Vec::new()),
+            bell_pending: AtomicBool::new(false),
+            last_bell: Mutex::new(None),
+            title_changed: AtomicBool::new(false),
+        });
 
         // Register the write-PTY callback so terminal query responses
-        // are captured into `write_pty_buf`.
+        // are captured into `callback_state.write_buf`.
         //
-        // SAFETY: The `Arc<Mutex<Vec<u8>>>` is converted to a raw
-        // pointer that the C callback receives as userdata. The Arc
-        // is kept alive by `self.write_pty_buf` for the lifetime of
-        // the terminal. The callback is safe to call from within
-        // `ghostty_terminal_vt_write` (no reentrancy — it only
-        // appends to a Vec).
+        // SAFETY: We clone the Arc (bringing strong count to 2) and
+        // leak the clone via `Arc::into_raw`. The raw pointer is
+        // passed as C userdata and reconstituted as a borrow (not an
+        // owned Arc) inside the callback. The leaked Arc is recovered
+        // in `Drop` after the callback is cleared. The callback only
+        // appends to a Vec — no reentrancy into libghostty-vt.
         unsafe {
-            let userdata = Arc::into_raw(Arc::clone(&write_pty_buf)) as *mut std::ffi::c_void;
+            let userdata =
+                Arc::into_raw(Arc::clone(&callback_state)) as *mut std::ffi::c_void;
             terminal.set_write_pty_callback(Some(write_pty_callback), userdata);
+            terminal.set_bell_callback(Some(bell_callback));
+            terminal.set_title_changed_callback(Some(title_changed_callback));
         }
 
         Ok(Self {
@@ -75,7 +105,7 @@ impl GhosttyBackend {
             render_state,
             key_encoder,
             mouse_encoder,
-            write_pty_buf,
+            callback_state,
             cached_snapshot: None,
         })
     }
@@ -83,7 +113,11 @@ impl GhosttyBackend {
     /// Takes any pending write-PTY response bytes (terminal query
     /// responses that should be written back to the PTY).
     pub(crate) fn take_write_pty_response(&self) -> Vec<u8> {
-        let mut buf = self.write_pty_buf.lock().unwrap_or_else(|e| e.into_inner());
+        let mut buf = self
+            .callback_state
+            .write_buf
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         std::mem::take(&mut *buf)
     }
 
@@ -102,6 +136,30 @@ impl GhosttyBackend {
     /// tracking mode and format state.
     pub(crate) fn sync_mouse_encoder(&mut self) {
         self.mouse_encoder.sync_from_terminal(&self.terminal);
+    }
+
+    /// Returns `true` if a bell event has fired since the last call,
+    /// atomically clearing the pending flag.
+    ///
+    /// This is the poll-and-clear entry point called from the FFI
+    /// layer on each render frame. O(1) — single atomic swap.
+    pub(crate) fn take_bell_event(&self) -> bool {
+        self.callback_state
+            .bell_pending
+            .swap(false, Ordering::AcqRel)
+    }
+
+    /// If the terminal title has changed since the last call, reads
+    /// and returns the current title. Returns `None` if unchanged or
+    /// if no title is set.
+    ///
+    /// Atomically clears the title-changed flag before reading.
+    pub(crate) fn take_title_if_changed(&mut self) -> Option<String> {
+        if self.callback_state.title_changed.swap(false, Ordering::AcqRel) {
+            self.terminal.title()
+        } else {
+            None
+        }
     }
 }
 
@@ -143,6 +201,10 @@ impl TerminalBackend for GhosttyBackend {
 
     fn is_bracketed_paste_active(&self) -> bool {
         self.terminal.is_bracketed_paste_active()
+    }
+
+    fn is_focus_reporting_active(&self) -> bool {
+        self.terminal.is_focus_reporting_active()
     }
 
     fn is_mouse_tracking_active(&self) -> bool {
@@ -198,6 +260,14 @@ impl TerminalBackend for GhosttyBackend {
         self.take_write_pty_response()
     }
 
+    fn take_bell_event(&self) -> bool {
+        self.take_bell_event()
+    }
+
+    fn take_title_if_changed(&mut self) -> Option<String> {
+        self.take_title_if_changed()
+    }
+
     fn apply_palette(&mut self, bg: u32, fg: u32, cursor: u32, palette: &[u32]) {
         let unpack = |argb: u32| -> (u8, u8, u8) {
             (
@@ -225,20 +295,38 @@ impl TerminalBackend for GhosttyBackend {
 
 impl Drop for GhosttyBackend {
     fn drop(&mut self) {
-        // Recover the Arc we leaked into the C callback userdata.
-        // Clear the callback first to prevent use-after-free.
+        // SAFETY: Recover the Arc<CallbackState> leaked into C userdata
+        // in new(). Three invariants must hold for Arc::from_raw:
         //
-        // SAFETY: We set the callback to None before recovering the
-        // Arc. The raw pointer was created by Arc::into_raw in new().
+        // 1. **Pointer origin**: The raw pointer was created by
+        //    `Arc::into_raw(Arc::clone(&callback_state))` in `new()`.
+        //    `Arc::as_ptr(&self.callback_state)` yields the same inner
+        //    pointer because both Arcs share the same allocation.
+        //
+        // 2. **Single recovery**: This is the only site that calls
+        //    `Arc::from_raw` for this allocation. `Drop` runs exactly
+        //    once (GhosttyBackend is non-Copy, never `mem::forget`ed).
+        //
+        // 3. **No concurrent access to the raw pointer**: We clear the
+        //    callback before recovering the Arc. Clearing is synchronous
+        //    — `ghostty_terminal_set` immediately replaces the stored
+        //    function pointer. All callbacks are invoked synchronously
+        //    during `vt_write`, and we hold `&mut self` (which requires
+        //    the session Mutex), so no `vt_write` can be in-flight.
+        //    Therefore no callback will dereference the userdata pointer
+        //    after this point.
+        //
+        // After recovery, the Arc's strong count drops from 2 to 1
+        // (self.callback_state holds the remaining reference, which is
+        // dropped when the struct fields are dropped).
         unsafe {
             self.terminal
                 .set_write_pty_callback(None, std::ptr::null_mut());
+            self.terminal.set_bell_callback(None);
+            self.terminal.set_title_changed_callback(None);
 
-            // Recover the leaked Arc. We cloned it in new(), so there
-            // are two strong refs: self.write_pty_buf and this one.
-            // Dropping this one brings the count back to 1.
             let _ = Arc::from_raw(
-                Arc::as_ptr(&self.write_pty_buf) as *const Mutex<Vec<u8>>,
+                Arc::as_ptr(&self.callback_state) as *const CallbackState,
             );
         }
     }
@@ -249,7 +337,7 @@ impl Drop for GhosttyBackend {
 ///
 /// # Safety
 ///
-/// `userdata` must be a valid `*const Mutex<Vec<u8>>` created by
+/// `userdata` must be a valid `*const CallbackState` created by
 /// `Arc::into_raw`. `data` must be valid for `len` bytes.
 unsafe extern "C" fn write_pty_callback(
     _terminal: super::ghostty_sys::GhosttyTerminal,
@@ -261,16 +349,84 @@ unsafe extern "C" fn write_pty_callback(
         return;
     }
 
-    // SAFETY: `userdata` was created by Arc::into_raw and is valid
-    // for the lifetime of the terminal (guaranteed by GhosttyBackend).
-    // We must NOT drop this reference — just borrow it.
-    let buf_ptr = userdata as *const Mutex<Vec<u8>>;
-    let buf = unsafe { &*buf_ptr };
+    // SAFETY: `userdata` was created by Arc::into_raw(Arc<CallbackState>)
+    // in GhosttyBackend::new() and is valid for the lifetime of the
+    // terminal. We borrow the pointer — we must NOT drop it.
+    let state = unsafe { &*(userdata as *const CallbackState) };
 
     // SAFETY: `data` is valid for `len` bytes per the C API contract.
     let bytes = unsafe { std::slice::from_raw_parts(data, len) };
 
-    if let Ok(mut guard) = buf.lock() {
-        guard.extend_from_slice(bytes);
+    state
+        .write_buf
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .extend_from_slice(bytes);
+}
+
+/// Minimum interval between recorded bell events (rate limiter).
+const BELL_COOLDOWN: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// C callback invoked by libghostty-vt when BEL (0x07) is received.
+///
+/// Rate-limited to at most one bell per [`BELL_COOLDOWN`] interval.
+/// Sets [`CallbackState::bell_pending`] to `true` which is polled
+/// and cleared by the Kotlin render loop via
+/// [`GhosttyBackend::take_bell_event`].
+///
+/// # Safety
+///
+/// `userdata` must be a valid `*const CallbackState` created by
+/// `Arc::into_raw` in [`GhosttyBackend::new`].
+unsafe extern "C" fn bell_callback(
+    _terminal: super::ghostty_sys::GhosttyTerminal,
+    userdata: *mut std::ffi::c_void,
+) {
+    if userdata.is_null() {
+        return;
     }
+
+    // SAFETY: `userdata` was created by Arc::into_raw(Arc<CallbackState>)
+    // in GhosttyBackend::new() and is valid for the lifetime of the
+    // terminal. We borrow the pointer — we must NOT drop it.
+    let state = unsafe { &*(userdata as *const CallbackState) };
+
+    // Rate limit: only record a bell if 100ms+ has elapsed since the
+    // last one. This prevents haptic spam from rapid BEL sequences.
+    let now = Instant::now();
+    let mut last = state.last_bell.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(prev) = *last {
+        if now.duration_since(prev) < BELL_COOLDOWN {
+            return;
+        }
+    }
+    *last = Some(now);
+    state.bell_pending.store(true, Ordering::Release);
+}
+
+/// C callback invoked by libghostty-vt when the terminal title
+/// changes via OSC 0 or OSC 2.
+///
+/// Sets [`CallbackState::title_changed`] to `true` which is polled
+/// and cleared by the Kotlin render loop via
+/// [`GhosttyBackend::take_title_if_changed`]. The actual title text
+/// must be read separately via [`Terminal::title`].
+///
+/// # Safety
+///
+/// `userdata` must be a valid `*const CallbackState` created by
+/// `Arc::into_raw` in [`GhosttyBackend::new`].
+unsafe extern "C" fn title_changed_callback(
+    _terminal: super::ghostty_sys::GhosttyTerminal,
+    userdata: *mut std::ffi::c_void,
+) {
+    if userdata.is_null() {
+        return;
+    }
+
+    // SAFETY: `userdata` was created by Arc::into_raw(Arc<CallbackState>)
+    // in GhosttyBackend::new() and is valid for the lifetime of the
+    // terminal. We borrow the pointer — we must NOT drop it.
+    let state = unsafe { &*(userdata as *const CallbackState) };
+    state.title_changed.store(true, Ordering::Release);
 }

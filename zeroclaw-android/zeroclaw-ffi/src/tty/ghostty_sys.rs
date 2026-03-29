@@ -12,6 +12,21 @@
 
 use core::ffi::c_void;
 
+// ── Sized-struct helper macro ────────────────────────────────────────
+
+/// Creates a default-initialized sized struct with `size` pre-filled.
+///
+/// The "sized struct" ABI pattern lets the C library detect which struct
+/// version the caller is using by reading the `size` field.
+macro_rules! sized {
+    ($ty:ty) => {{
+        let mut t = <$ty as ::std::default::Default>::default();
+        t.size = ::std::mem::size_of::<$ty>();
+        t
+    }};
+}
+pub(crate) use sized;
+
 // ── Result codes ────────────────────────────────────────────────────
 
 /// Result codes for libghostty-vt operations.
@@ -96,6 +111,24 @@ pub const GHOSTTY_MODE_SYNC_OUTPUT: GhosttyMode = 2026 & 0x7FFF; // DEC private:
 /// `\x1b[200~` ... `\x1b[201~`.
 pub const GHOSTTY_MODE_BRACKETED_PASTE: GhosttyMode = 2004 & 0x7FFF;
 
+/// Focus reporting mode (DEC private mode 1004).
+///
+/// When active, the terminal expects `CSI I` (gained) and `CSI O`
+/// (lost) sequences when the window gains or loses focus.
+pub const GHOSTTY_MODE_FOCUS_REPORTING: GhosttyMode = 1004 & 0x7FFF;
+
+// ── Focus Events ───────────────────────────────────────────────────
+
+/// Focus event type for [`ghostty_focus_encode`].
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyFocusEvent {
+    /// Terminal window gained focus.
+    Gained = 0,
+    /// Terminal window lost focus.
+    Lost = 1,
+}
+
 // ── Terminal options ────────────────────────────────────────────────
 
 /// Terminal initialization options.
@@ -156,6 +189,26 @@ pub type GhosttyTerminalWritePtyFn = Option<
         data: *const u8,
         len: usize,
     ),
+>;
+
+/// Callback for `GHOSTTY_TERMINAL_OPT_BELL`.
+///
+/// Invoked by libghostty-vt when the terminal receives a BEL (0x07)
+/// character. The callback receives the terminal handle and the
+/// userdata pointer registered alongside it.
+pub type GhosttyTerminalBellFn = Option<
+    unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void),
+>;
+
+/// Callback for `GHOSTTY_TERMINAL_OPT_TITLE_CHANGED`.
+///
+/// Invoked by libghostty-vt when the terminal title changes via
+/// OSC 0 or OSC 2. The callback receives the terminal handle and
+/// the userdata pointer registered alongside it. The actual title
+/// text must be read separately via `ghostty_terminal_get` with
+/// [`GhosttyTerminalData::Title`].
+pub type GhosttyTerminalTitleChangedFn = Option<
+    unsafe extern "C" fn(terminal: GhosttyTerminal, userdata: *mut c_void),
 >;
 
 // ── Render state enums ──────────────────────────────────────────────
@@ -253,6 +306,14 @@ pub struct GhosttyRenderStateColors {
     pub palette: [GhosttyColorRgb; 256],
 }
 
+impl Default for GhosttyRenderStateColors {
+    fn default() -> Self {
+        // SAFETY: All-zero is valid for this repr(C) struct: RGB fields
+        // default to black, bool to false, palette to 256x black.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 // ── Style types ─────────────────────────────────────────────────────
 
 /// Style color tags.
@@ -326,7 +387,7 @@ pub enum GhosttySgrUnderline {
 ///
 /// `size` must be set to `size_of::<GhosttyStyle>()` before passing to
 /// `ghostty_render_state_row_cells_get` with the `Style` data tag.
-/// Use [`GhosttyStyle::sized()`] to construct a correctly sized instance.
+/// Use `sized!(GhosttyStyle)` to construct a correctly initialized instance.
 #[repr(C)]
 pub struct GhosttyStyle {
     /// Must equal `size_of::<GhosttyStyle>()`.
@@ -366,16 +427,22 @@ impl Default for GhosttyStyle {
     }
 }
 
-impl GhosttyStyle {
-    /// Returns a zero-initialised style with `size` pre-filled.
-    ///
-    /// Use this before passing to `ghostty_render_state_row_cells_get`
-    /// so the C library can detect the struct version at runtime.
-    pub fn sized() -> Self {
-        let mut s = Self::default();
-        s.size = core::mem::size_of::<Self>();
-        s
-    }
+/// Cell content tag — describes what kind of content a cell holds.
+///
+/// Maps to `GhosttyCellContentTag` in `ghostty/vt/screen.h`.
+/// Query via [`ghostty_cell_get`] with [`GhosttyCellData::ContentTag`]
+/// on the raw cell value from [`GhosttyRenderStateRowCellsData::Raw`].
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyCellContentTag {
+    /// A single codepoint (may be zero for an empty cell).
+    Codepoint = 0,
+    /// A codepoint that is part of a multi-codepoint grapheme cluster.
+    CodepointGrapheme = 1,
+    /// No text content; cell carries a background color from the palette.
+    BgColorPalette = 2,
+    /// No text content; cell carries a background color as an RGB value.
+    BgColorRgb = 3,
 }
 
 /// Wide/narrow cell classification from the terminal grid.
@@ -439,7 +506,7 @@ pub const GHOSTTY_MODS_SUPER: GhosttyMods = 1 << 3;
 #[allow(clippy::enum_variant_names)]
 pub enum GhosttyKey {
     Unidentified = 0,
-    // Writing system keys
+    // Writing System Keys (W3C § 3.1.1)
     Backquote, Backslash, BracketLeft, BracketRight, Comma,
     Digit0, Digit1, Digit2, Digit3, Digit4,
     Digit5, Digit6, Digit7, Digit8, Digit9,
@@ -447,20 +514,35 @@ pub enum GhosttyKey {
     A, B, C, D, E, F, G, H, I, J, K, L, M,
     N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
     Minus, Period, Quote, Semicolon, Slash,
-    // Functional keys
+    // Functional Keys (W3C § 3.1.2)
     AltLeft, AltRight, Backspace, CapsLock, ContextMenu,
     ControlLeft, ControlRight, Enter, MetaLeft, MetaRight,
     ShiftLeft, ShiftRight, Space, Tab,
     Convert, KanaMode, NonConvert,
-    // Control pad
+    // Control Pad (W3C § 3.2)
     Delete, End, Help, Home, Insert, PageDown, PageUp,
-    // Arrow pad
+    // Arrow Pad (W3C § 3.3)
     ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
-    // Numpad (truncated — we only use a few)
+    // Numpad (W3C § 3.4) — all 41 variants, must match C header exactly
     NumLock,
-    // Function keys
-    Escape = 86, // offset to match C enum after all numpad entries
+    Numpad0, Numpad1, Numpad2, Numpad3, Numpad4,
+    Numpad5, Numpad6, Numpad7, Numpad8, Numpad9,
+    NumpadAdd, NumpadBackspace, NumpadClear, NumpadClearEntry,
+    NumpadComma, NumpadDecimal, NumpadDivide, NumpadEnter,
+    NumpadEqual,
+    NumpadMemoryAdd, NumpadMemoryClear, NumpadMemoryRecall,
+    NumpadMemoryStore, NumpadMemorySubtract,
+    NumpadMultiply, NumpadParenLeft, NumpadParenRight,
+    NumpadSubtract, NumpadSeparator,
+    NumpadUp, NumpadDown, NumpadRight, NumpadLeft,
+    NumpadBegin, NumpadHome, NumpadEnd,
+    NumpadInsert, NumpadDelete, NumpadPageUp, NumpadPageDown,
+    // Function Keys (W3C § 3.5)
+    Escape,
     F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+    F13, F14, F15, F16, F17, F18, F19, F20,
+    F21, F22, F23, F24, F25,
+    Fn, FnLock, PrintScreen, ScrollLock, Pause,
 }
 
 // ── Mouse Types ────────────────────────────────────────────────────
@@ -557,13 +639,34 @@ pub struct GhosttyMouseEncoderSize {
     pub padding_left: u32,
 }
 
-impl GhosttyMouseEncoderSize {
-    /// Returns a zero-initialised size struct with `size` pre-filled.
-    pub fn sized() -> Self {
-        let mut s = Self::default();
-        s.size = core::mem::size_of::<Self>();
-        s
-    }
+// ── Build info ──────────────────────────────────────────────────────
+
+/// Build info query tags for `ghostty_build_info`.
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyBuildInfo {
+    /// Whether SIMD acceleration is compiled in.
+    Simd = 0,
+    /// Whether Kitty graphics protocol support is compiled in.
+    KittyGraphics = 1,
+    /// Whether tmux control-mode integration is compiled in.
+    TmuxControlMode = 2,
+    /// The optimization mode the library was built with.
+    Optimize = 3,
+}
+
+/// Optimization mode returned by [`GhosttyBuildInfo::Optimize`].
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhosttyOptimizeMode {
+    /// Debug build (no optimizations, safety checks enabled).
+    Debug = 0,
+    /// ReleaseSafe build (optimizations with safety checks).
+    ReleaseSafe = 1,
+    /// ReleaseSmall build (optimized for binary size).
+    ReleaseSmall = 2,
+    /// ReleaseFast build (maximum optimizations, no safety checks).
+    ReleaseFast = 3,
 }
 
 // ── Extern C functions ──────────────────────────────────────────────
@@ -834,5 +937,28 @@ unsafe extern "C" {
         out_buf: *mut u8,
         out_buf_size: usize,
         out_len: *mut usize,
+    ) -> GhosttyResult;
+
+    // ── Focus ─────────────────────────────────────────────────────
+
+    pub fn ghostty_focus_encode(
+        event: GhosttyFocusEvent,
+        buf: *mut u8,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+
+    // ── Build info ────────────────────────────────────────────────
+
+    /// Queries build-time capability flags and options.
+    ///
+    /// `tag` selects the capability to query. `out` must point to
+    /// memory of the appropriate type for the requested tag:
+    /// - [`GhosttyBuildInfo::Simd`] / [`GhosttyBuildInfo::KittyGraphics`]
+    ///   / [`GhosttyBuildInfo::TmuxControlMode`]: `*mut bool`
+    /// - [`GhosttyBuildInfo::Optimize`]: `*mut GhosttyOptimizeMode`
+    pub fn ghostty_build_info(
+        tag: GhosttyBuildInfo,
+        out: *mut c_void,
     ) -> GhosttyResult;
 }

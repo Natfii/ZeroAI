@@ -240,6 +240,13 @@ pub(crate) trait TerminalBackend: Send {
     /// Applies a color palette to the terminal. Default is a no-op.
     fn apply_palette(&mut self, _bg: u32, _fg: u32, _cursor: u32, _palette: &[u32]) {}
 
+    /// Returns whether focus reporting mode (DEC 1004) is active.
+    ///
+    /// Default returns `false` for backends that don't support this query.
+    fn is_focus_reporting_active(&self) -> bool {
+        false
+    }
+
     /// Returns whether the terminal has an active mouse tracking mode
     /// (DEC modes 9, 1000, 1002, or 1003).
     fn is_mouse_tracking_active(&self) -> bool {
@@ -269,6 +276,24 @@ pub(crate) trait TerminalBackend: Send {
         screen_h: u32,
     ) {
         let _ = (cell_w, cell_h, screen_w, screen_h);
+    }
+
+    /// Returns `true` if a terminal bell (BEL, 0x07) has fired since
+    /// the last call, atomically clearing the pending flag.
+    ///
+    /// Default returns `false` for backends that don't support bell
+    /// detection (e.g. the stub backend).
+    fn take_bell_event(&self) -> bool {
+        false
+    }
+
+    /// If the terminal title has changed since the last call (via
+    /// OSC 0 or OSC 2), reads and returns the current title.
+    ///
+    /// Returns `None` if unchanged, if no title is set, or if the
+    /// backend does not support title tracking (e.g. the stub backend).
+    fn take_title_if_changed(&mut self) -> Option<String> {
+        None
     }
 }
 

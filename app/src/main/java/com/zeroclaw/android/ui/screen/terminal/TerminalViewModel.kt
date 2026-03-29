@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.PowerManager
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
@@ -85,6 +86,8 @@ import com.zeroclaw.ffi.ttyStartSsh
 import com.zeroclaw.ffi.ttySubmitKey
 import com.zeroclaw.ffi.ttySubmitMouseEvent
 import com.zeroclaw.ffi.ttySubmitPassword
+import com.zeroclaw.ffi.ttyTakeBellEvent
+import com.zeroclaw.ffi.ttyTakeTitleIfChanged
 import com.zeroclaw.ffi.ttyWaitForRenderSignal
 import com.zeroclaw.ffi.ttyWrite
 import com.zeroclaw.ffi.validateScript
@@ -93,9 +96,12 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
@@ -269,6 +275,46 @@ class TerminalViewModel(
      * coroutine started in [startTtyPolling].
      */
     val ttyRenderFrame: StateFlow<TtyRenderFrame?> = _ttyRenderFrame.asStateFlow()
+
+    /**
+     * One-shot event emitted when the terminal receives a BEL (0x07)
+     * character. The UI layer observes this to fire haptic feedback.
+     *
+     * Uses [MutableSharedFlow] with `extraBufferCapacity = 1` and
+     * [kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST] so the
+     * producer never suspends and at most one bell is buffered.
+     */
+    private val _bellEvent =
+        MutableSharedFlow<Unit>(
+            extraBufferCapacity = 1,
+        )
+
+    /**
+     * Observable bell event stream for the UI layer.
+     *
+     * Collect this in a [LaunchedEffect] and call
+     * [android.view.View.performHapticFeedback] when a value is emitted,
+     * gated on [PowerManager.isPowerSaveMode] being `false`.
+     */
+    val bellEvent: SharedFlow<Unit> = _bellEvent.asSharedFlow()
+
+    /**
+     * Terminal title set by OSC 0/2, or `null` if unset.
+     *
+     * Updated alongside the bell poll in the render loop. Sanitized in
+     * Rust (bidi overrides stripped, capped at 64 chars) before crossing
+     * the FFI boundary. The UI layer can display this in the status bar
+     * or tab strip.
+     */
+    private val _terminalTitle = MutableStateFlow<String?>(null)
+
+    /**
+     * Observable terminal title for the UI layer.
+     *
+     * Collect with [collectAsStateWithLifecycle] to show the current
+     * terminal title (e.g. in [TtyStatusBar]).
+     */
+    val terminalTitle: StateFlow<String?> = _terminalTitle
 
     /**
      * Whether the terminal cursor is currently set to blinking mode.
@@ -843,6 +889,8 @@ class TerminalViewModel(
                 while (true) {
                     val hasData = waitForRenderSignal()
                     if (hasData) applyTtyRenderFrame()
+                    pollBellEvent()
+                    pollTitleChange()
                 }
             }
     }
@@ -861,6 +909,44 @@ class TerminalViewModel(
             delay(TTY_RENDER_WAIT_TIMEOUT_MS)
             true
         }
+
+    /**
+     * Polls the Rust bell flag and emits to [_bellEvent] if a bell has
+     * fired since the last call.
+     *
+     * Checks [PowerManager.isPowerSaveMode] before emitting so the UI
+     * layer does not need to repeat the check. Swallows all exceptions
+     * — bell haptics are best-effort.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun pollBellEvent() {
+        try {
+            if (!ttyTakeBellEvent()) return
+            val pm =
+                getApplication<Application>()
+                    .getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (pm.isPowerSaveMode) return
+            _bellEvent.tryEmit(Unit)
+        } catch (_: Exception) {
+            // Best-effort: swallow FFI or system service failures.
+        }
+    }
+
+    /**
+     * Polls the Rust title-changed flag and updates [_terminalTitle]
+     * if the terminal title has changed since the last call.
+     *
+     * Swallows all exceptions -- title display is best-effort.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun pollTitleChange() {
+        try {
+            val title = ttyTakeTitleIfChanged() ?: return
+            _terminalTitle.value = title
+        } catch (_: Exception) {
+            // Best-effort: swallow FFI failures.
+        }
+    }
 
     /**
      * Reads the latest PTY output snapshot and render frame from Rust, then pushes both to
@@ -1124,11 +1210,17 @@ class TerminalViewModel(
                 } catch (_: Exception) {
                     false
                 }
-            val payload =
+            val safeText =
                 if (bracketed) {
-                    "\u001b[200~$text\u001b[201~"
+                    text.replace("\u001b[201~", "")
                 } else {
                     text
+                }
+            val payload =
+                if (bracketed) {
+                    "\u001b[200~$safeText\u001b[201~"
+                } else {
+                    safeText
                 }
             try {
                 ttyWrite(payload.toByteArray(Charsets.UTF_8))
