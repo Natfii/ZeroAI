@@ -117,4 +117,40 @@ class TtyPackedStyleTest {
         assertEquals(3, all.packedUnderlineStyle())
         assertTrue(all.packedIsOverline())
     }
+
+    @Test
+    fun `packedHasExplicitFg extracts bit 60`() {
+        val explicit = 1L shl 60
+        assertTrue(explicit.packedHasExplicitFg())
+        assertFalse(0L.packedHasExplicitFg())
+    }
+
+    @Test
+    fun `packedHasExplicitBg extracts bit 61`() {
+        val explicit = 1L shl 61
+        assertTrue(explicit.packedHasExplicitBg())
+        assertFalse(0L.packedHasExplicitBg())
+    }
+
+    @Test
+    fun `explicit black fg returns opaque black ARGB`() {
+        val style = 1L shl 60
+        assertEquals(0xFF000000.toInt(), style.packedFgArgb())
+    }
+
+    @Test
+    fun `explicit black bg returns opaque black ARGB`() {
+        val style = 1L shl 61
+        assertEquals(0xFF000000.toInt(), style.packedBgArgb())
+    }
+
+    @Test
+    fun `default fg returns zero ARGB`() {
+        assertEquals(0, 0L.packedFgArgb())
+    }
+
+    @Test
+    fun `default bg returns zero ARGB`() {
+        assertEquals(0, 0L.packedBgArgb())
+    }
 }

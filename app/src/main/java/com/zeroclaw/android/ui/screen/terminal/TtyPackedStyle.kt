@@ -25,7 +25,7 @@ internal inline fun Long.packedFgRgb(): Int = ((this ushr 32) and 0xFFFFFFL).toI
 @Suppress("MagicNumber")
 internal inline fun Long.packedFgArgb(): Int {
     val rgb = packedFgRgb()
-    return if (rgb == 0) 0 else rgb or 0xFF000000.toInt()
+    return if (rgb != 0 || packedHasExplicitFg()) rgb or 0xFF000000.toInt() else 0
 }
 
 /**
@@ -44,7 +44,7 @@ internal inline fun Long.packedBgRgb(): Int = ((this ushr 8) and 0xFFFFFFL).toIn
 @Suppress("MagicNumber")
 internal inline fun Long.packedBgArgb(): Int {
     val rgb = packedBgRgb()
-    return if (rgb == 0) 0 else rgb or 0xFF000000.toInt()
+    return if (rgb != 0 || packedHasExplicitBg()) rgb or 0xFF000000.toInt() else 0
 }
 
 /** Whether the cell text is bold (bit 0). */
@@ -86,3 +86,11 @@ internal inline fun Long.packedUnderlineStyle(): Int = ((this ushr 56) and 0x7L)
 /** Bit 59 — overline. */
 @Suppress("MagicNumber")
 internal inline fun Long.packedIsOverline(): Boolean = (this ushr 59 and 1L) != 0L
+
+/** Whether the foreground color is explicitly set, not terminal default (bit 60). */
+@Suppress("MagicNumber")
+internal inline fun Long.packedHasExplicitFg(): Boolean = (this ushr 60 and 1L) != 0L
+
+/** Whether the background color is explicitly set, not terminal default (bit 61). */
+@Suppress("MagicNumber")
+internal inline fun Long.packedHasExplicitBg(): Boolean = (this ushr 61 and 1L) != 0L
