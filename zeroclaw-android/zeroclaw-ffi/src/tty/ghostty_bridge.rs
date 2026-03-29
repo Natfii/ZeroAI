@@ -816,13 +816,11 @@ impl RenderState {
                 );
             }
 
-            // Only extract cell data for dirty rows. Clean rows get
-            // an empty sentinel — the Kotlin side reuses cached data.
-            let cells = if row_dirty {
-                self.extract_cells(cols)?
-            } else {
-                Vec::new()
-            };
+            // Always extract all rows to avoid stale-cache rendering
+            // when PARTIAL frames race with FULL frames in the polling
+            // loop. The per-row dirty optimisation can be re-enabled
+            // once the Kotlin render pipeline caches rows reliably.
+            let cells = self.extract_cells(cols)?;
 
             // Clear per-row dirty flag after reading.
             // SAFETY: The iterator is positioned on a valid row.

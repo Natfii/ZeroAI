@@ -93,9 +93,11 @@ import com.zeroclaw.ffi.ttyWrite
 import com.zeroclaw.ffi.validateScript
 import com.zeroclaw.ffi.validateWorkspaceScript
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -888,6 +890,7 @@ class TerminalViewModel(
             viewModelScope.launch(Dispatchers.IO) {
                 while (true) {
                     val hasData = waitForRenderSignal()
+                    ensureActive()
                     if (hasData) applyTtyRenderFrame()
                     pollBellEvent()
                     pollTitleChange()
@@ -905,6 +908,8 @@ class TerminalViewModel(
     private suspend fun waitForRenderSignal(): Boolean =
         try {
             ttyWaitForRenderSignal(TTY_RENDER_WAIT_TIMEOUT_MS.toULong())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             delay(TTY_RENDER_WAIT_TIMEOUT_MS)
             true
@@ -960,6 +965,8 @@ class TerminalViewModel(
                 val frame = ttyGetRenderFrame()
                 if (frame.rows.isNotEmpty()) {
                     frame
+                } else if (_ttyRenderFrame.value != null) {
+                    return
                 } else {
                     val textLines =
                         try {
@@ -1474,6 +1481,8 @@ class TerminalViewModel(
                 bytes = ByteArray(buf.remaining()).also { buf.get(it) }
                 val success = ttySubmitPassword(bytes)
                 if (success) {
+                    sshPollJob?.cancel()
+                    sshPollJob = null
                     _terminalMode.value =
                         TerminalMode.Tty(
                             session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
@@ -1514,6 +1523,8 @@ class TerminalViewModel(
             try {
                 val success = ttySubmitKey(keyId)
                 if (success) {
+                    sshPollJob?.cancel()
+                    sshPollJob = null
                     _terminalMode.value =
                         TerminalMode.Tty(
                             session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
