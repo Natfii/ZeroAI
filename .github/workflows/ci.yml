@@ -163,6 +163,14 @@ jobs:
           key: ${{ runner.os }}-release-${{ hashFiles('zeroclaw-android/Cargo.lock', '**/*.gradle.kts') }}
           restore-keys: ${{ runner.os }}-release-
 
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: '0.15.0'
+
+      - name: Build libghostty-vt
+        run: bash scripts/build-ghostty.sh --clone
+
       - name: Decode keystore
         if: env.RELEASE_KEYSTORE_BASE64 != ''
         env:
