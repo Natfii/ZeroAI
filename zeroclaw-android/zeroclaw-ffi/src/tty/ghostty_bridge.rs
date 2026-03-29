@@ -784,15 +784,18 @@ impl RenderState {
 
     fn extract_rows(&mut self, cols: u16) -> Result<Vec<RenderRow>, TtyBackendError> {
         // Populate the row iterator from the render state.
-        // SAFETY: Both handles are valid. The row iterator is
-        // populated by reference — data is valid until the next
-        // render_state_update.
+        // SAFETY: The generic ghostty_render_state_get API expects `out`
+        // to be a pointer TO the output variable. For RowIterator, the
+        // output variable is a GhosttyRenderStateRowIterator (which is
+        // itself *mut c_void), so `out` must be *mut *mut c_void — a
+        // pointer to the handle, not the handle itself.
+        let mut iter_handle = self.row_iter.as_raw();
         unsafe {
             check(
                 ghostty_render_state_get(
                     self.state.as_raw(),
                     GhosttyRenderStateData::RowIterator,
-                    self.row_iter.as_raw().cast(),
+                    (&mut iter_handle as *mut *mut std::ffi::c_void).cast(),
                 ),
                 "render_state_get(RowIterator)",
             )?;
@@ -843,13 +846,15 @@ impl RenderState {
 
     fn extract_cells(&mut self, cols: u16) -> Result<Vec<RenderCell>, TtyBackendError> {
         // Populate row cells from the current row.
-        // SAFETY: The row iterator is positioned on a valid row.
+        // SAFETY: Same pointer-to-handle convention as RowIterator:
+        // `out` must be a pointer to the cells handle variable.
+        let mut cells_handle = self.row_cells.as_raw();
         unsafe {
             check(
                 ghostty_render_state_row_get(
                     self.row_iter.as_raw(),
                     GhosttyRenderStateRowData::Cells,
-                    self.row_cells.as_raw().cast(),
+                    (&mut cells_handle as *mut *mut std::ffi::c_void).cast(),
                 ),
                 "render_state_row_get(Cells)",
             )?;
