@@ -107,6 +107,14 @@ private const val CURLY_WAVE_QUARTER_DIV = 4f
 /** Divisor for the half-wave control-point x-offset in the curly underline. */
 private const val CURLY_WAVE_HALF_DIV = 2f
 
+/**
+ * Minimum ratio of glyphWidth/expectedWidth to trigger horizontal scaling.
+ * Below this threshold the glyph fits within the cell grid and no scaling
+ * is needed. A small margin (1.01) avoids unnecessary scale calls from
+ * floating-point imprecision.
+ */
+private const val WIDE_CHAR_SCALE_THRESHOLD = 1.01f
+
 /** Multiplier for the three-quarter-wave control-point x-offset in the curly underline. */
 private const val CURLY_WAVE_THREE_QUARTER_MUL = 3f
 
@@ -690,18 +698,58 @@ private fun flushRun(
     paint.isUnderlineText = underlineStyle == 1 // Only Paint's built-in for single
     paint.isStrikeThruText = style.packedIsStrikethrough()
 
-    // Draw the text run.
-    canvas.drawTextRun(
-        chars,
-        charStart,
-        charCount,
-        charStart,
-        charCount,
-        xStart,
-        yBaseline,
-        false,
-        paint,
-    )
+    // Wide-char detection: if the run spans more columns than it has
+    // characters, it contains wide/emoji glyphs. Measure the actual
+    // rendered width and scale down if it overflows the cell grid.
+    val runCols = colEnd - colStart
+    val isWideRun = charCount < runCols && charCount > 0
+    val expectedWidth = runCols * cellW
+
+    if (isWideRun) {
+        val glyphWidth = paint.measureText(chars, charStart, charCount)
+        if (glyphWidth > expectedWidth * WIDE_CHAR_SCALE_THRESHOLD) {
+            val scale = expectedWidth / glyphWidth
+            canvas.save()
+            canvas.translate(xStart, 0f)
+            canvas.scale(scale, 1f)
+            canvas.drawTextRun(
+                chars,
+                charStart,
+                charCount,
+                charStart,
+                charCount,
+                0f,
+                yBaseline,
+                false,
+                paint,
+            )
+            canvas.restore()
+        } else {
+            canvas.drawTextRun(
+                chars,
+                charStart,
+                charCount,
+                charStart,
+                charCount,
+                xStart,
+                yBaseline,
+                false,
+                paint,
+            )
+        }
+    } else {
+        canvas.drawTextRun(
+            chars,
+            charStart,
+            charCount,
+            charStart,
+            charCount,
+            xStart,
+            yBaseline,
+            false,
+            paint,
+        )
+    }
 
     // Custom underline variants (double, curly, dotted, dashed).
     if (underlineStyle >= UNDERLINE_STYLE_DOUBLE) {
