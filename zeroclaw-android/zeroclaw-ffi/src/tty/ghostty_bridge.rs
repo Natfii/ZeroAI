@@ -317,7 +317,6 @@ impl RenderState {
         // discards Clean frames, so the only cost is the dirty check
         // itself (~2 C calls).
         if dirty == DirtyState::Clean {
-            self.clear_dirty();
             return Ok(TerminalRenderSnapshot {
                 dirty: DirtyState::Clean,
                 rows: Vec::new(),
