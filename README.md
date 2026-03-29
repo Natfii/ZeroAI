@@ -136,12 +136,17 @@ The **Terminal** tab is your in-app command center. Type messages to talk to you
 
 Once in TTY mode (`@tty`), connect to any SSH server:
 
+<p>
+ <img align="right" src="https://github.com/user-attachments/assets/7ac0c143-4902-4d0b-b3ec-77ea14cffb5e" width="30%" />
+</p> 
+
+
 ```
 /ssh user@hostname
-/ssh user@hostname -p 2222
-```
+/ssh user@hostname -p 2222     
+```  
 
-Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.
+Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.   
 
 Manage SSH keys in **Settings > SSH Keys** (generate Ed25519/RSA, import from file, copy public key).
 
