@@ -50,8 +50,11 @@ ref_as_ptr = "allow"
 let_unit_value = "allow"
 if_not_else = "allow"
 decimal_literal_representation = "allow"
+decimal_bitwise_operands = "allow"
 duplicated_attributes = "allow"
 undocumented_unsafe_blocks = "allow"
+ignored_unit_patterns = "allow"
+unnecessary_map_or = "allow"
 
 [workspace.lints.rust]
 dead_code = "allow"
