@@ -1743,6 +1743,49 @@ pub fn run_startup_consolidation() -> Result<consolidation::FfiConsolidationRepo
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Leaderboard cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Writes a JSON string to the in-memory leaderboard cache.
+///
+/// Called by the Kotlin `ZeroAIDaemonService` after querying the Room DAO.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::StateCorrupted`] if the cache lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn set_leaderboard_cache(json: String) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::set_leaderboard_cache_inner(json)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns the current leaderboard cache JSON string.
+///
+/// Returns `"[]"` if no data has been written yet.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::StateCorrupted`] if the cache lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn get_leaderboard_cache() -> Result<String, FfiError> {
+    catch_unwind(memory_browse::get_leaderboard_cache_inner).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Evaluates a Rhai expression against the embedded REPL engine.
 ///
 /// The REPL engine has all gateway functions registered as native Rhai

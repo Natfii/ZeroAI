@@ -67,6 +67,9 @@ pub(crate) struct DaemonState {
     /// Gateway pairing guard, shared with the gateway for programmatic
     /// token registration from the FFI layer.
     pairing: Arc<PairingGuard>,
+    /// Cached leaderboard JSON string, written by Kotlin and read by the
+    /// gateway `GET /api/memory/leaderboard` endpoint.
+    pub(crate) leaderboard_cache: Arc<std::sync::RwLock<String>>,
 }
 
 /// Returns a reference to the daemon state mutex, initialising it on first access.
@@ -514,6 +517,7 @@ pub(crate) fn start_daemon_inner(
         memory,
         archive,
         pairing,
+        leaderboard_cache: Arc::new(std::sync::RwLock::new("[]".into())),
     });
 
     // Register ClawBoy trigger handler for channel message interception.

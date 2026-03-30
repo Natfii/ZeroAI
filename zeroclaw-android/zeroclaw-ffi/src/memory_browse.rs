@@ -545,3 +545,47 @@ mod tests {
         assert_eq!(ffi.score, Some(0.95));
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Leaderboard cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Writes a JSON string to the in-memory leaderboard cache.
+///
+/// Called by the Kotlin `ZeroAIDaemonService` after querying the Room DAO.
+/// The gateway `/api/memory/leaderboard` endpoint reads this cache.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or
+/// the cache lock is poisoned.
+pub(crate) fn set_leaderboard_cache_inner(json: String) -> Result<(), FfiError> {
+    let guard = crate::runtime::lock_daemon();
+    let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "daemon not running".into(),
+    })?;
+    let mut cache = state.leaderboard_cache.write().map_err(|_| FfiError::StateCorrupted {
+        detail: "leaderboard cache lock poisoned".into(),
+    })?;
+    *cache = json;
+    Ok(())
+}
+
+/// Reads the current leaderboard cache JSON string.
+///
+/// Returns `"[]"` if no data has been written yet.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or
+/// the cache lock is poisoned.
+pub(crate) fn get_leaderboard_cache_inner() -> Result<String, FfiError> {
+    let guard = crate::runtime::lock_daemon();
+    let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "daemon not running".into(),
+    })?;
+    let cache = state.leaderboard_cache.read().map_err(|_| FfiError::StateCorrupted {
+        detail: "leaderboard cache lock poisoned".into(),
+    })?;
+    Ok(cache.clone())
+}
