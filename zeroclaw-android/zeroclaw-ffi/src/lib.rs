@@ -1544,6 +1544,137 @@ pub fn memory_count() -> Result<u32, FfiError> {
     })
 }
 
+/// Stores a memory entry with full scoring metadata.
+///
+/// Validates arguments before delegating to the memory backend's
+/// `store_with_metadata` method.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] if confidence is out of range,
+/// source is not a recognised value, or decay half-life is zero.
+/// Returns [`FfiError::StateError`] if the daemon is not running or
+/// memory is unavailable,
+/// [`FfiError::SpawnError`] on backend failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn store_memory_with_metadata(
+    key: String,
+    content: String,
+    category: String,
+    confidence: f64,
+    source: String,
+    tags: String,
+    decay_half_life_days: u32,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::store_memory_with_metadata_inner(
+            key, content, category, confidence, source, tags, decay_half_life_days,
+        )
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Searches memory entries by query, returning scored results with metadata.
+///
+/// Returns up to `limit` entries ranked by relevance, with scoring metadata
+/// fields (confidence, source, tags, access_count) populated when available.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or
+/// memory is unavailable,
+/// [`FfiError::SpawnError`] on backend failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn recall_memory_scored(
+    query: String,
+    limit: u32,
+    session_id: Option<String>,
+) -> Result<Vec<memory_browse::FfiMemoryEntryScored>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::recall_memory_scored_inner(query, limit, session_id)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Assembles working context for system prompt injection.
+///
+/// Creates a token budget from `token_budget` (split 36%/36%/28%) and
+/// assembles identity, recall, and episodic blocks from the memory backend.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or
+/// memory is unavailable,
+/// [`FfiError::SpawnError`] on backend failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn assemble_context(
+    message: String,
+    session_id: String,
+    token_budget: u32,
+) -> Result<memory_browse::FfiWorkingContext, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::assemble_context_inner(message, session_id, token_budget)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Runs daily memory maintenance (pruning and merging).
+///
+/// Currently a stub that returns zero counts. Actual logic will be
+/// wired when the consolidation module is implemented.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn run_memory_maintenance() -> Result<memory_browse::FfiMaintenanceReport, FfiError> {
+    catch_unwind(AssertUnwindSafe(
+        memory_browse::run_memory_maintenance_inner,
+    ))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Extracts facts from a user message using heuristic pattern matching.
+///
+/// Runs 8 regex rules in ~50us with zero network cost. Returns an empty
+/// vector if no patterns match.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn extract_facts(
+    message: String,
+) -> Result<Vec<memory_browse::FfiExtractedFact>, FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::extract_facts_inner(message)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
 /// Evaluates a Rhai expression against the embedded REPL engine.
 ///
 /// The REPL engine has all gateway functions registered as native Rhai
