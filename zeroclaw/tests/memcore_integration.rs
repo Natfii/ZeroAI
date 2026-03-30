@@ -686,3 +686,154 @@ async fn recall_scored_core_fact_boosted_above_daily() {
         "Core fact ({core_score:.4}) should rank above Daily fact ({daily_score:.4}) due to 1.5x boost"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2a integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn memory_links_cascade_delete() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "fact_x",
+        "X is related to Y",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "topic,shared",
+        365,
+    )
+    .await
+    .unwrap();
+
+    mem.store_with_metadata(
+        "fact_y",
+        "Y is related to X",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "topic,shared,extra",
+        365,
+    )
+    .await
+    .unwrap();
+
+    {
+        let conn = mem.conn.lock();
+        let links: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+            .unwrap();
+        assert!(links > 0, "should have created links between x and y");
+    }
+
+    mem.forget("fact_x").await.unwrap();
+
+    {
+        let conn = mem.conn.lock();
+        let links: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory_links WHERE source_id IN \
+                 (SELECT id FROM memories WHERE key = 'fact_x') \
+                 OR target_id IN (SELECT id FROM memories WHERE key = 'fact_x')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(links, 0, "links involving deleted fact should be gone");
+    }
+}
+
+#[tokio::test]
+async fn backlog_overflow_pruned_to_200() {
+    let (_dir, mem) = create_test_memory();
+    let conn = mem.conn.lock();
+
+    for i in 0..250 {
+        let id = format!("msg-{i:04}");
+        let now = chrono::Local::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO consolidation_backlog (id, session_id, message_text, created_at) \
+             VALUES (?1, 'sess', ?2, ?3)",
+            rusqlite::params![id, format!("message {i}"), now],
+        )
+        .unwrap();
+    }
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM consolidation_backlog",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 250, "should have 250 rows before prune");
+
+    conn.execute(
+        "DELETE FROM consolidation_backlog WHERE id IN \
+         (SELECT id FROM consolidation_backlog ORDER BY created_at ASC LIMIT ?1)",
+        rusqlite::params![250 - 200],
+    )
+    .unwrap();
+
+    let after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM consolidation_backlog",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(after, 200, "should have 200 rows after prune");
+}
+
+#[tokio::test]
+async fn boost_ranking_core_recent_frequent_above_daily_same_base() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "boosted_fact",
+        "important core memory about Rust",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "programming",
+        365,
+    )
+    .await
+    .unwrap();
+
+    for _ in 0..6 {
+        let _ = mem.recall_scored("Rust", 10, None).await;
+    }
+
+    mem.store_with_metadata(
+        "unboosted_fact",
+        "daily note about Rust update",
+        MemoryCategory::Daily,
+        None,
+        0.9,
+        "heuristic",
+        "programming",
+        7,
+    )
+    .await
+    .unwrap();
+
+    let results = mem.recall_scored("Rust", 10, None).await.unwrap();
+    assert!(results.len() >= 2, "should recall at least 2 facts");
+
+    let boosted = results.iter().find(|e| e.entry.key == "boosted_fact");
+    let unboosted = results.iter().find(|e| e.entry.key == "unboosted_fact");
+
+    if let (Some(b), Some(u)) = (boosted, unboosted) {
+        assert!(
+            b.combined_score > u.combined_score,
+            "Core+recent+frequent ({:.4}) should outrank Daily ({:.4})",
+            b.combined_score,
+            u.combined_score,
+        );
+    }
+}
