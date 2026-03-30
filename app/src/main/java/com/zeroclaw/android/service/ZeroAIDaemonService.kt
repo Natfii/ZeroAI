@@ -14,6 +14,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -33,6 +34,7 @@ import com.zeroclaw.android.data.repository.ChannelConfigRepository
 import com.zeroclaw.android.data.repository.LogRepository
 import com.zeroclaw.android.data.repository.SettingsRepository
 import com.zeroclaw.android.data.saf.SharedFolderCallbackHandler
+import com.zeroclaw.android.memory.MemoryExtractionPipeline
 import com.zeroclaw.android.model.ActivityType
 import com.zeroclaw.android.model.ApiKey
 import com.zeroclaw.android.model.AppSettings
@@ -120,6 +122,26 @@ class ZeroAIDaemonService : Service() {
     @Volatile private var isScreenOn: Boolean = true
     private var screenReceiver: BroadcastReceiver? = null
 
+    /**
+     * Current power state derived from battery level and charging status.
+     *
+     * Updated by [batteryReceiver] whenever the system broadcasts a battery
+     * change intent. Defaults to [MemoryExtractionPipeline.PowerState.FULL]
+     * so memory extraction is enabled until the first battery broadcast arrives.
+     */
+    @Volatile
+    private var currentPowerState: MemoryExtractionPipeline.PowerState =
+        MemoryExtractionPipeline.PowerState.FULL
+
+    private var batteryReceiver: BroadcastReceiver? = null
+
+    /**
+     * Memory extraction pipeline, initialised after daemon startup.
+     *
+     * Null before the first successful [attemptStart] completes.
+     */
+    private var memoryPipeline: MemoryExtractionPipeline? = null
+
     override fun onCreate() {
         super.onCreate()
         val app = application as ZeroAIApplication
@@ -138,6 +160,7 @@ class ZeroAIDaemonService : Service() {
         notificationManager.createChannel()
         networkMonitor.register()
         registerScreenReceiver()
+        registerBatteryReceiver()
         observeServiceState()
         observeNetworkState()
     }
@@ -227,6 +250,7 @@ class ZeroAIDaemonService : Service() {
     override fun onDestroy() {
         saveActiveSessions()
         releaseWakeLock()
+        unregisterBatteryReceiver()
         unregisterScreenReceiver()
         networkMonitor.unregister()
         serviceScope.cancel()
@@ -1104,6 +1128,7 @@ class ZeroAIDaemonService : Service() {
                             runMemoryHealthCheck(memoryBackend)
                             restorePersistedSessions()
                             initMessageClassifier()
+                            initMemoryPipeline()
                             try {
                                 val curSettings = settingsRepository.settings.first()
                                 if (curSettings.sharedFolderEnabled) {
@@ -1392,6 +1417,92 @@ class ZeroAIDaemonService : Service() {
     }
 
     /**
+     * Registers a [BroadcastReceiver] for [Intent.ACTION_BATTERY_CHANGED]
+     * to track battery level and charging status.
+     *
+     * Updates [currentPowerState] based on battery percentage and charging
+     * state. When [PowerManager.isPowerSaveMode] is active, forces
+     * [MemoryExtractionPipeline.PowerState.CRITICAL] regardless of battery
+     * level to respect the user's power-saving intent.
+     *
+     * Thresholds:
+     * - Charging or >50%: [MemoryExtractionPipeline.PowerState.FULL]
+     * - 20-50%: [MemoryExtractionPipeline.PowerState.CONSERVE]
+     * - <20% or power save: [MemoryExtractionPipeline.PowerState.CRITICAL]
+     */
+    @Suppress("UnspecifiedRegisterReceiverFlag")
+    private fun registerBatteryReceiver() {
+        val receiver =
+            object : BroadcastReceiver() {
+                override fun onReceive(
+                    context: Context?,
+                    intent: Intent?,
+                ) {
+                    if (intent == null) return
+                    val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                    val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                    val pct = if (scale > 0) level * PERCENT_SCALE / scale else DEFAULT_BATTERY_PCT
+                    val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+                    val isCharging =
+                        status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                            status == BatteryManager.BATTERY_STATUS_FULL
+
+                    val pm = getSystemService(POWER_SERVICE) as PowerManager
+                    currentPowerState =
+                        when {
+                            pm.isPowerSaveMode ->
+                                MemoryExtractionPipeline.PowerState.CRITICAL
+                            isCharging || pct > BATTERY_FULL_THRESHOLD ->
+                                MemoryExtractionPipeline.PowerState.FULL
+                            pct > BATTERY_CONSERVE_THRESHOLD ->
+                                MemoryExtractionPipeline.PowerState.CONSERVE
+                            else ->
+                                MemoryExtractionPipeline.PowerState.CRITICAL
+                        }
+                }
+            }
+        val filter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(receiver, filter)
+        }
+        batteryReceiver = receiver
+    }
+
+    /**
+     * Unregisters the battery state [BroadcastReceiver] if it was
+     * previously registered.
+     */
+    private fun unregisterBatteryReceiver() {
+        batteryReceiver?.let { unregisterReceiver(it) }
+        batteryReceiver = null
+    }
+
+    /**
+     * Creates the [MemoryExtractionPipeline] and wires it to the [EventBridge].
+     *
+     * Called once after a successful daemon start. The pipeline and outcome
+     * tracking DAO are injected into the event bridge so that incoming messages
+     * trigger memory extraction and turn completions record interaction outcomes.
+     */
+    private fun initMemoryPipeline() {
+        val app = application as ZeroAIApplication
+        val pipeline =
+            MemoryExtractionPipeline(
+                memoryBridge = app.memoryBridge,
+                powerStateProvider = { currentPowerState },
+            )
+        memoryPipeline = pipeline
+        app.eventBridge.memoryPipeline = pipeline
+        app.eventBridge.interactionOutcomeDao = app.database.interactionOutcomeDao()
+        app.eventBridge.pipelineScope = serviceScope
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Memory extraction pipeline initialized (power=${currentPowerState.name})")
+        }
+    }
+
+    /**
      * Acquires a partial wake lock for the startup phase.
      *
      * If a previous wake lock reference exists but is no longer held
@@ -1643,6 +1754,18 @@ class ZeroAIDaemonService : Service() {
         private const val OAUTH_HOLD_TIMEOUT_MS = 120_000L
         private const val BEARER_TOKEN_BYTES = 32
         private val VALID_PORT_RANGE = 1..65535
+
+        /** Battery percentage above which the power state is [MemoryExtractionPipeline.PowerState.FULL]. */
+        private const val BATTERY_FULL_THRESHOLD = 50
+
+        /** Battery percentage above which the power state is [MemoryExtractionPipeline.PowerState.CONSERVE]. */
+        private const val BATTERY_CONSERVE_THRESHOLD = 20
+
+        /** Multiplier for converting battery level/scale to a percentage. */
+        private const val PERCENT_SCALE = 100
+
+        /** Default battery percentage when scale is zero or unavailable. */
+        private const val DEFAULT_BATTERY_PCT = 50
     }
 }
 

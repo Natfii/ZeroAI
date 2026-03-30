@@ -7,7 +7,11 @@
 package com.zeroclaw.android.service
 
 import android.util.Log
+import com.zeroclaw.android.data.local.dao.InteractionOutcomeDao
+import com.zeroclaw.android.data.local.entity.InteractionOutcomeEntity
 import com.zeroclaw.android.data.repository.ActivityRepository
+import com.zeroclaw.android.memory.MemoryExtractionPipeline
+import com.zeroclaw.android.memory.OutcomeClassifier
 import com.zeroclaw.android.model.ActivityType
 import com.zeroclaw.android.model.DaemonEvent
 import com.zeroclaw.android.tailscale.PeerMatchResult
@@ -69,6 +73,72 @@ class EventBridge(
     val events: SharedFlow<DaemonEvent> = _events.asSharedFlow()
 
     /**
+     * Memory extraction pipeline, set by [ZeroAIDaemonService] after daemon start.
+     *
+     * When non-null, incoming user messages trigger heuristic memory extraction.
+     */
+    @Volatile
+    var memoryPipeline: MemoryExtractionPipeline? = null
+
+    /**
+     * DAO for persisting interaction outcome records, set by [ZeroAIDaemonService].
+     *
+     * When non-null, agent turn completions are classified and recorded.
+     */
+    @Volatile
+    var interactionOutcomeDao: InteractionOutcomeDao? = null
+
+    /**
+     * Coroutine scope for pipeline and outcome operations.
+     *
+     * Set by [ZeroAIDaemonService] to the service's lifecycle-bound scope.
+     * Falls back to the constructor [scope] when null.
+     */
+    @Volatile
+    var pipelineScope: CoroutineScope? = null
+
+    /**
+     * Tracks the number of tool calls in the current agent turn.
+     *
+     * Reset on `agent_start`, incremented on `tool_call`, read on `agent_end`.
+     */
+    @Volatile
+    private var turnToolCallCount: Int = 0
+
+    /**
+     * Whether any tool call in the current turn reported a failure.
+     *
+     * Reset on `agent_start`, set to `true` when a `tool_call` event carries
+     * `status=error`. Read on `agent_end` for outcome classification.
+     */
+    @Volatile
+    private var turnHasToolFailure: Boolean = false
+
+    /**
+     * Epoch millis when the current agent turn started.
+     *
+     * Set on `agent_start`, used to compute latency on `agent_end`.
+     */
+    @Volatile
+    private var turnStartMs: Long = 0L
+
+    /**
+     * Provider active during the current agent turn.
+     *
+     * Captured from `agent_start` event data.
+     */
+    @Volatile
+    private var turnProvider: String = ""
+
+    /**
+     * Model active during the current agent turn.
+     *
+     * Captured from `agent_start` event data.
+     */
+    @Volatile
+    private var turnModel: String = ""
+
+    /**
      * Called by the native layer when a new event is produced.
      *
      * Parses the JSON string into a [DaemonEvent]. Incoming `channel_message` events
@@ -76,8 +146,15 @@ class EventBridge(
      * [handlePeerRoute]; all other events are emitted on [events] and recorded in the
      * [ActivityRepository]. Malformed JSON is logged at warning level and dropped.
      *
+     * Additionally hooks into the memory extraction pipeline and outcome classifier:
+     * - `channel_message` (direction=in): triggers [MemoryExtractionPipeline.process]
+     * - `agent_start`: resets per-turn tracking counters
+     * - `tool_call`: increments tool call count and tracks failures
+     * - `agent_end`: classifies the interaction outcome and persists it
+     *
      * @param eventJson Raw JSON event string from the Rust daemon.
      */
+    @Suppress("CognitiveComplexMethod")
     override fun onEvent(eventJson: String) {
         val event = parseEvent(eventJson) ?: return
 
@@ -94,7 +171,11 @@ class EventBridge(
                     return
                 }
             }
+
+            handleIncomingMessage(content)
         }
+
+        handleTurnTracking(event)
 
         if (event.kind == "capability_approval_required") {
             scope.launch(Dispatchers.IO) {
@@ -107,6 +188,98 @@ class EventBridge(
             _events.emit(event)
             val (type, message) = event.toActivityRecord()
             activityRepository.record(type, message)
+        }
+    }
+
+    /**
+     * Triggers the memory extraction pipeline for an incoming user message.
+     *
+     * Dispatches to the pipeline scope on [Dispatchers.IO]. Failures are
+     * logged and swallowed to avoid disrupting the event callback thread.
+     *
+     * @param content The user message text, or null if not available.
+     */
+    private fun handleIncomingMessage(content: String?) {
+        val pipeline = memoryPipeline ?: return
+        if (content.isNullOrBlank()) return
+        val launchScope = pipelineScope ?: scope
+        launchScope.launch(Dispatchers.IO) {
+            @Suppress("TooGenericExceptionCaught")
+            try {
+                val stored = pipeline.process(content, SESSION_ID_DEFAULT)
+                if (stored > 0) {
+                    Log.d(EVENT_BRIDGE_TAG, "Memory pipeline stored $stored fact(s)")
+                }
+            } catch (e: Exception) {
+                Log.w(EVENT_BRIDGE_TAG, "Memory pipeline error: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Tracks per-turn metrics from agent lifecycle and tool call events.
+     *
+     * Resets counters on `agent_start`, increments tool call stats on
+     * `tool_call`, and classifies + persists the outcome on `agent_end`.
+     *
+     * @param event The parsed daemon event.
+     */
+    private fun handleTurnTracking(event: DaemonEvent) {
+        when (event.kind) {
+            "agent_start" -> {
+                turnToolCallCount = 0
+                turnHasToolFailure = false
+                turnStartMs = System.currentTimeMillis()
+                turnProvider = event.data["provider"].orEmpty()
+                turnModel = event.data["model"].orEmpty()
+            }
+            "tool_call" -> {
+                turnToolCallCount++
+                val toolStatus = event.data["status"]
+                if (toolStatus == "error" || toolStatus == "failed") {
+                    turnHasToolFailure = true
+                }
+            }
+            "agent_end" -> recordInteractionOutcome()
+            else -> { /* no tracking needed */ }
+        }
+    }
+
+    /**
+     * Classifies the current turn and inserts an [InteractionOutcomeEntity].
+     *
+     * Uses [OutcomeClassifier] with best-effort signals: tool success is
+     * derived from [turnHasToolFailure], latency from [turnStartMs], and
+     * follow-up message is always null (classification from follow-up
+     * requires the next user message, which is not yet available).
+     */
+    private fun recordInteractionOutcome() {
+        val dao = interactionOutcomeDao ?: return
+        val latencyMs = System.currentTimeMillis() - turnStartMs
+        val outcome =
+            OutcomeClassifier.classify(
+                followUpMessage = null,
+                toolCallsSucceeded = !turnHasToolFailure,
+                wasRetry = false,
+            )
+        val launchScope = pipelineScope ?: scope
+        launchScope.launch(Dispatchers.IO) {
+            @Suppress("TooGenericExceptionCaught")
+            try {
+                dao.insert(
+                    InteractionOutcomeEntity(
+                        routeHint = "default",
+                        provider = turnProvider,
+                        model = turnModel,
+                        outcome = outcome.name,
+                        toolCallCount = turnToolCallCount,
+                        latencyMs = latencyMs,
+                        createdAt = System.currentTimeMillis(),
+                    ),
+                )
+            } catch (e: Exception) {
+                Log.w(EVENT_BRIDGE_TAG, "Outcome insert failed: ${e.message}")
+            }
         }
     }
 
@@ -244,6 +417,12 @@ class EventBridge(
     /** Constants for [EventBridge]. */
     companion object {
         private const val BUFFER_CAPACITY = 64
+
+        /**
+         * Default session ID used for memory extraction when no explicit
+         * session identifier is available from the event data.
+         */
+        private const val SESSION_ID_DEFAULT = "main"
     }
 }
 
