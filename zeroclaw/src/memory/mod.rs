@@ -1,6 +1,7 @@
 pub mod backend;
 pub mod chunker;
 pub mod cli;
+pub mod consolidation;
 pub mod discord_archive;
 pub mod embeddings;
 pub mod heuristic;
