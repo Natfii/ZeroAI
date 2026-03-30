@@ -1040,10 +1040,16 @@ impl SqliteMemory {
             let recency = scoring::recency_score(last_accessed.as_deref(), decay_half_life);
             let frequency = scoring::frequency_score(access_count);
             let combined = scoring::combined_score(hybrid_score, recency, frequency);
+            let boosted = scoring::apply_boosts(
+                combined,
+                &entry.category,
+                last_accessed.as_deref(),
+                access_count,
+            );
 
             scored.push(ScoredMemoryEntry {
                 entry,
-                combined_score: combined,
+                combined_score: boosted,
                 confidence,
                 source,
                 tags,

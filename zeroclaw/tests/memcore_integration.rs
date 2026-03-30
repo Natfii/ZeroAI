@@ -632,3 +632,57 @@ async fn store_with_metadata_no_links_for_disjoint_tags() {
         "disjoint tags should produce no links"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// recall_scored boost integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn recall_scored_core_fact_boosted_above_daily() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "core_fact",
+        "Rust is the user's primary language",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "programming,rust",
+        365,
+    )
+    .await
+    .unwrap();
+
+    mem.store_with_metadata(
+        "daily_fact",
+        "Rust compiler updated yesterday",
+        MemoryCategory::Daily,
+        None,
+        0.9,
+        "heuristic",
+        "programming,update",
+        7,
+    )
+    .await
+    .unwrap();
+
+    let results = mem.recall_scored("Rust programming", 10, None).await.unwrap();
+    assert!(
+        results.len() >= 2,
+        "should recall at least 2 facts, got {}",
+        results.len()
+    );
+
+    let core_entry = results.iter().find(|e| e.entry.key == "core_fact");
+    let daily_entry = results.iter().find(|e| e.entry.key == "daily_fact");
+    assert!(core_entry.is_some(), "core_fact should be recalled");
+    assert!(daily_entry.is_some(), "daily_fact should be recalled");
+
+    let core_score = core_entry.unwrap().combined_score;
+    let daily_score = daily_entry.unwrap().combined_score;
+    assert!(
+        core_score > daily_score,
+        "Core fact ({core_score:.4}) should rank above Daily fact ({daily_score:.4}) due to 1.5x boost"
+    );
+}
