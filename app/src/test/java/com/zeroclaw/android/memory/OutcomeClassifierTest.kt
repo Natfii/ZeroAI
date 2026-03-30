@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test
 
 @DisplayName("OutcomeClassifier")
 class OutcomeClassifierTest {
-
     @Test
     @DisplayName("thanks message classifies as SUCCESS")
     fun `thanks is success`() {
