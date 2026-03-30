@@ -113,6 +113,7 @@ data class AgentTomlEntry(
  * @property memoryEmbeddingModel Embedding model name.
  * @property memoryVectorWeight Weight for vector similarity in recall.
  * @property memoryKeywordWeight Weight for keyword matching in recall.
+ * @property memorySmartExtraction Whether LLM consolidation runs at startup.
  * @property composioEnabled Whether Composio tool integration is active.
  * @property composioApiKey Composio API key.
  * @property composioEntityId Composio entity identifier.
@@ -229,6 +230,7 @@ data class GlobalTomlConfig(
     val memoryEmbeddingModel: String = "",
     val memoryVectorWeight: Double = DEFAULT_VECTOR_WEIGHT,
     val memoryKeywordWeight: Double = DEFAULT_KEYWORD_WEIGHT,
+    val memorySmartExtraction: Boolean = false,
     val composioEnabled: Boolean = false,
     val composioApiKey: String = "",
     val composioEntityId: String = "default",
@@ -828,6 +830,7 @@ object ConfigTomlBuilder {
         }
         appendLine("vector_weight = ${config.memoryVectorWeight}")
         appendLine("keyword_weight = ${config.memoryKeywordWeight}")
+        appendLine("smart_extraction = ${config.memorySmartExtraction}")
     }
 
     /**

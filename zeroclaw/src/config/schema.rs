@@ -1928,6 +1928,12 @@ pub struct MemoryConfig {
     /// None = wait indefinitely (default). Recommended max: 300.
     #[serde(default)]
     pub sqlite_open_timeout_secs: Option<u64>,
+
+    /// Enable LLM-based startup consolidation for messages heuristics missed.
+    /// When true, unextracted messages are batched and sent to the default provider
+    /// on app launch.
+    #[serde(default)]
+    pub smart_extraction: bool,
 }
 
 fn default_embedding_provider() -> String {
@@ -1997,6 +2003,7 @@ impl Default for MemoryConfig {
             snapshot_on_hygiene: false,
             auto_hydrate: true,
             sqlite_open_timeout_secs: None,
+            smart_extraction: false,
         }
     }
 }
