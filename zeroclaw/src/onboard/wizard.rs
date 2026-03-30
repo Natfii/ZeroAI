@@ -334,7 +334,7 @@ fn apply_provider_update(
 }
 
 /// Non-interactive setup: generates a sensible default config instantly.
-/// Use `zeroclaw onboard` or `zeroclaw onboard --api-key sk-... --provider anthropic --memory sqlite|lucid`.
+/// Use `zeroclaw onboard` or `zeroclaw onboard --api-key sk-... --provider anthropic --memory sqlite`.
 /// Use `zeroclaw onboard --interactive` for the full wizard.
 fn backend_key_from_choice(choice: usize) -> &'static str {
     selectable_memory_backends()
@@ -371,7 +371,6 @@ fn memory_config_defaults_for_backend(backend: &str) -> MemoryConfig {
         snapshot_on_hygiene: false,
         auto_hydrate: true,
         sqlite_open_timeout_secs: None,
-        qdrant: crate::config::QdrantConfig::default(),
     }
 }
 
@@ -4614,23 +4613,17 @@ mod tests {
     #[test]
     fn backend_key_from_choice_maps_supported_backends() {
         assert_eq!(backend_key_from_choice(0), "sqlite");
-        assert_eq!(backend_key_from_choice(1), "lucid");
-        assert_eq!(backend_key_from_choice(2), "markdown");
-        assert_eq!(backend_key_from_choice(3), "none");
+        assert_eq!(backend_key_from_choice(1), "none");
         assert_eq!(backend_key_from_choice(999), "sqlite");
     }
 
     #[test]
-    fn memory_backend_profile_marks_lucid_as_optional_sqlite_backed() {
-        let lucid = memory_backend_profile("lucid");
-        assert!(lucid.auto_save_default);
-        assert!(lucid.uses_sqlite_hygiene);
-        assert!(lucid.sqlite_based);
-        assert!(lucid.optional_dependency);
-
-        let markdown = memory_backend_profile("markdown");
-        assert!(markdown.auto_save_default);
-        assert!(!markdown.uses_sqlite_hygiene);
+    fn memory_backend_profile_sqlite_and_none() {
+        let sqlite = memory_backend_profile("sqlite");
+        assert!(sqlite.auto_save_default);
+        assert!(sqlite.uses_sqlite_hygiene);
+        assert!(sqlite.sqlite_based);
+        assert!(!sqlite.optional_dependency);
 
         let none = memory_backend_profile("none");
         assert!(!none.auto_save_default);
@@ -4642,9 +4635,9 @@ mod tests {
     }
 
     #[test]
-    fn memory_config_defaults_for_lucid_enable_sqlite_hygiene() {
-        let config = memory_config_defaults_for_backend("lucid");
-        assert_eq!(config.backend, "lucid");
+    fn memory_config_defaults_for_sqlite_enable_hygiene() {
+        let config = memory_config_defaults_for_backend("sqlite");
+        assert_eq!(config.backend, "sqlite");
         assert!(config.auto_save);
         assert!(config.hygiene_enabled);
         assert_eq!(config.archive_after_days, 7);

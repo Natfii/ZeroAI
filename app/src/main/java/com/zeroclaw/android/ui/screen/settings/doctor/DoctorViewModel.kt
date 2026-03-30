@@ -285,9 +285,6 @@ class DoctorViewModel(
             securityEstopEnabled = settings.securityEstopEnabled,
             securityEstopRequireOtpToResume =
                 settings.securityEstopRequireOtpToResume,
-            memoryQdrantUrl = settings.memoryQdrantUrl,
-            memoryQdrantCollection = settings.memoryQdrantCollection,
-            memoryQdrantApiKey = settings.memoryQdrantApiKey,
             proxyEnabled = settings.proxyEnabled,
             proxyHttpProxy = settings.proxyHttpProxy,
             proxyHttpsProxy = settings.proxyHttpsProxy,

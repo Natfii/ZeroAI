@@ -4,7 +4,10 @@ package com.zeroclaw.android.service
 
 import com.zeroclaw.android.model.MemoryEntry
 import com.zeroclaw.ffi.FfiException
+import com.zeroclaw.ffi.FfiMaintenanceReport
 import com.zeroclaw.ffi.FfiMemoryEntry
+import com.zeroclaw.ffi.FfiMemoryEntryScored
+import com.zeroclaw.ffi.FfiWorkingContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -99,6 +102,96 @@ class MemoryBridge(
             com.zeroclaw.ffi.memoryCount()
         }
 
+    /**
+     * Stores a memory with full MemCore metadata.
+     *
+     * Safe to call from the main thread; the underlying blocking FFI call is
+     * dispatched to [ioDispatcher].
+     *
+     * @param key Unique fact key.
+     * @param metadata Full MemCore metadata for the entry.
+     * @throws FfiException if the native layer reports an error.
+     */
+    @Throws(FfiException::class)
+    suspend fun storeWithMetadata(
+        key: String,
+        metadata: MemoryMetadata,
+    ): Unit =
+        withContext(ioDispatcher) {
+            // FFI name resolved by UniFFI from Rust `store_memory_with_metadata`
+            com.zeroclaw.ffi.storeMemoryWithMetadata(
+                key,
+                metadata.content,
+                metadata.category,
+                metadata.confidence,
+                metadata.source,
+                metadata.tags,
+                metadata.decayHalfLifeDays,
+            )
+        }
+
+    /**
+     * Recalls memories with three-factor scored ranking.
+     *
+     * Safe to call from the main thread; the underlying blocking FFI call is
+     * dispatched to [ioDispatcher].
+     *
+     * @param query Search query text.
+     * @param limit Maximum results to return.
+     * @param sessionId Optional session ID for scoped recall.
+     * @return Scored memory entries, sorted by combined score.
+     * @throws FfiException if the native layer reports an error.
+     */
+    @Throws(FfiException::class)
+    suspend fun recallScored(
+        query: String,
+        limit: UInt = DEFAULT_LIMIT,
+        sessionId: String? = null,
+    ): List<FfiMemoryEntryScored> =
+        withContext(ioDispatcher) {
+            // FFI name resolved by UniFFI from Rust `recall_memory_scored`
+            com.zeroclaw.ffi.recallMemoryScored(query, limit, sessionId)
+        }
+
+    /**
+     * Assembles working context for system prompt injection.
+     *
+     * Safe to call from the main thread; the underlying blocking FFI call is
+     * dispatched to [ioDispatcher].
+     *
+     * @param message Current user message for semantic recall.
+     * @param sessionId Current session identifier.
+     * @param tokenBudget Total token budget for all context blocks.
+     * @return Assembled working context with identity, recall, and episodic blocks.
+     * @throws FfiException if the native layer reports an error.
+     */
+    @Throws(FfiException::class)
+    suspend fun assembleContext(
+        message: String,
+        sessionId: String,
+        tokenBudget: UInt,
+    ): FfiWorkingContext =
+        withContext(ioDispatcher) {
+            // FFI name resolved by UniFFI from Rust `assemble_context`
+            com.zeroclaw.ffi.assembleContext(message, sessionId, tokenBudget)
+        }
+
+    /**
+     * Runs daily memory maintenance (pruning + merging).
+     *
+     * Safe to call from the main thread; the underlying blocking FFI call is
+     * dispatched to [ioDispatcher].
+     *
+     * @return Report with pruned and merged counts.
+     * @throws FfiException if the native layer reports an error.
+     */
+    @Throws(FfiException::class)
+    suspend fun runMaintenance(): FfiMaintenanceReport =
+        withContext(ioDispatcher) {
+            // FFI name resolved by UniFFI from Rust `run_memory_maintenance`
+            com.zeroclaw.ffi.runMemoryMaintenance()
+        }
+
     /** Constants for [MemoryBridge]. */
     companion object {
         /** Default maximum number of memory entries to retrieve. */
@@ -124,3 +217,25 @@ private fun FfiMemoryEntry.toModel(): MemoryEntry =
         timestamp = timestamp,
         score = score,
     )
+
+/**
+ * Full MemCore metadata for storing a memory entry.
+ *
+ * Groups the seven metadata fields required by [MemoryBridge.storeWithMetadata]
+ * to stay within the six-parameter limit enforced by detekt.
+ *
+ * @property content Fact content text.
+ * @property category Memory category — `"core"`, `"daily"`, `"conversation"`, or custom.
+ * @property confidence Extraction confidence in `[0.0, 1.0]`.
+ * @property source Origin: `"heuristic"`, `"llm"`, `"agent"`, or `"user"`.
+ * @property tags Comma-separated tags describing the entry.
+ * @property decayHalfLifeDays Ebbinghaus half-life in days for memory decay.
+ */
+data class MemoryMetadata(
+    val content: String,
+    val category: String,
+    val confidence: Double,
+    val source: String,
+    val tags: String,
+    val decayHalfLifeDays: UInt,
+)

@@ -337,6 +337,7 @@ impl Agent {
             identity_config: Some(&self.identity_config),
             dispatcher_instructions: &instructions,
             hub_app_context: None,
+            working_context: None,
         };
         self.prompt_builder.build(&ctx)
     }

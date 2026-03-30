@@ -557,7 +557,6 @@ fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Confi
     mask_optional_secret(&mut masked.web_search.brave_api_key);
     mask_optional_secret(&mut masked.twitter_browse.cookie_string);
     mask_optional_secret(&mut masked.storage.provider.config.db_url);
-    mask_optional_secret(&mut masked.memory.qdrant.api_key);
 
     for agent in masked.agents.values_mut() {
         mask_optional_secret(&mut agent.api_key);
@@ -605,11 +604,6 @@ fn restore_masked_sensitive_fields(
         &mut incoming.storage.provider.config.db_url,
         &current.storage.provider.config.db_url,
     );
-    restore_optional_secret(
-        &mut incoming.memory.qdrant.api_key,
-        &current.memory.qdrant.api_key,
-    );
-
     for (name, agent) in &mut incoming.agents {
         if let Some(current_agent) = current.agents.get(name) {
             restore_optional_secret(&mut agent.api_key, &current_agent.api_key);
@@ -657,7 +651,6 @@ mod tests {
         cfg.api_key = Some("sk-live-123".to_string());
         cfg.reliability.api_keys = vec!["rk-1".to_string(), "rk-2".to_string()];
         cfg.gateway.paired_tokens = vec!["pair-token-1".to_string()];
-        cfg.memory.qdrant.api_key = Some("qdrant-key".to_string());
 
         let masked = mask_sensitive_fields(&cfg);
         let toml = toml::to_string_pretty(&masked).expect("masked config should serialize");
@@ -673,7 +666,6 @@ mod tests {
             parsed.gateway.paired_tokens,
             vec![MASKED_SECRET.to_string()]
         );
-        assert_eq!(parsed.memory.qdrant.api_key.as_deref(), Some(MASKED_SECRET));
     }
 
     #[test]
@@ -684,13 +676,11 @@ mod tests {
         current.api_key = Some("real-key".to_string());
         current.reliability.api_keys = vec!["r1".to_string(), "r2".to_string()];
         current.gateway.paired_tokens = vec!["pair-1".to_string(), "pair-2".to_string()];
-        current.memory.qdrant.api_key = Some("qdrant-real".to_string());
 
         let mut incoming = mask_sensitive_fields(&current);
         incoming.default_model = Some("gpt-4.1-mini".to_string());
         incoming.reliability.api_keys = vec![MASKED_SECRET.to_string(), "r2-new".to_string()];
         incoming.gateway.paired_tokens = vec![MASKED_SECRET.to_string(), "pair-2-new".to_string()];
-        incoming.memory.qdrant.api_key = Some(MASKED_SECRET.to_string());
 
         let hydrated = hydrate_config_for_save(incoming, &current);
 
@@ -705,10 +695,6 @@ mod tests {
         assert_eq!(
             hydrated.gateway.paired_tokens,
             vec!["pair-1".to_string(), "pair-2-new".to_string()]
-        );
-        assert_eq!(
-            hydrated.memory.qdrant.api_key.as_deref(),
-            Some("qdrant-real")
         );
     }
 }

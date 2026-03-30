@@ -44,6 +44,7 @@ pub mod http_request;
 pub mod image_info;
 pub mod memory_forget;
 pub mod memory_recall;
+pub mod memory_search;
 pub mod memory_store;
 pub mod model_routing_config;
 pub mod pdf_read;
@@ -84,6 +85,7 @@ pub use http_request::HttpRequestTool;
 pub use image_info::ImageInfoTool;
 pub use memory_forget::MemoryForgetTool;
 pub use memory_recall::MemoryRecallTool;
+pub use memory_search::MemorySearchTool;
 pub use memory_store::MemoryStoreTool;
 pub use model_routing_config::ModelRoutingConfigTool;
 pub use pdf_read::PdfReadTool;
@@ -323,6 +325,7 @@ pub fn all_tools_with_runtime(
         Arc::new(CronRunsTool::new(config.clone())),
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
+        Arc::new(MemorySearchTool::new(memory.clone())),
         Arc::new(MemoryForgetTool::new(memory, security.clone())),
         Arc::new(ScheduleTool::new(security.clone(), root_config.clone())),
         Arc::new(ModelRoutingConfigTool::new(

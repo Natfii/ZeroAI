@@ -16,7 +16,9 @@ import com.zeroclaw.android.data.local.dao.ActivityEventDao
 import com.zeroclaw.android.data.local.dao.AgentDao
 import com.zeroclaw.android.data.local.dao.ConnectedChannelDao
 import com.zeroclaw.android.data.local.dao.EmailConfigDao
+import com.zeroclaw.android.data.local.dao.InteractionOutcomeDao
 import com.zeroclaw.android.data.local.dao.LogEntryDao
+import com.zeroclaw.android.data.local.dao.MemoryFactDao
 import com.zeroclaw.android.data.local.dao.PluginDao
 import com.zeroclaw.android.data.local.dao.SkillExecutionDao
 import com.zeroclaw.android.data.local.dao.TerminalEntryDao
@@ -24,7 +26,9 @@ import com.zeroclaw.android.data.local.entity.ActivityEventEntity
 import com.zeroclaw.android.data.local.entity.AgentEntity
 import com.zeroclaw.android.data.local.entity.ConnectedChannelEntity
 import com.zeroclaw.android.data.local.entity.EmailConfigEntity
+import com.zeroclaw.android.data.local.entity.InteractionOutcomeEntity
 import com.zeroclaw.android.data.local.entity.LogEntryEntity
+import com.zeroclaw.android.data.local.entity.MemoryFactEntity
 import com.zeroclaw.android.data.local.entity.PluginEntity
 import com.zeroclaw.android.data.local.entity.SkillExecutionEntity
 import com.zeroclaw.android.data.local.entity.TerminalEntryEntity
@@ -53,8 +57,10 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         TerminalEntryEntity::class,
         EmailConfigEntity::class,
         SkillExecutionEntity::class,
+        MemoryFactEntity::class,
+        InteractionOutcomeEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 abstract class ZeroAIDatabase : RoomDatabase() {
@@ -81,6 +87,12 @@ abstract class ZeroAIDatabase : RoomDatabase() {
 
     /** Data access object for skill execution history. */
     abstract fun skillExecutionDao(): SkillExecutionDao
+
+    /** Data access object for memory fact mirror operations. */
+    abstract fun memoryFactDao(): MemoryFactDao
+
+    /** Data access object for interaction outcome statistics. */
+    abstract fun interactionOutcomeDao(): InteractionOutcomeDao
 
     /** Factory and constants for [ZeroAIDatabase]. */
     companion object {
@@ -412,6 +424,54 @@ abstract class ZeroAIDatabase : RoomDatabase() {
                 }
             }
 
+        /** Migration from schema version 16 to 17: adds memory_facts and interaction_outcomes tables. */
+        private val MIGRATION_16_17 =
+            object : Migration(16, 17) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `memory_facts` (" +
+                            "`id` TEXT NOT NULL PRIMARY KEY, " +
+                            "`key` TEXT NOT NULL, " +
+                            "`content_preview` TEXT NOT NULL, " +
+                            "`category` TEXT NOT NULL, " +
+                            "`tags` TEXT NOT NULL, " +
+                            "`confidence` REAL NOT NULL, " +
+                            "`source` TEXT NOT NULL, " +
+                            "`access_count` INTEGER NOT NULL, " +
+                            "`created_at` INTEGER NOT NULL, " +
+                            "`last_accessed_at` INTEGER, " +
+                            "`decay_half_life_days` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS " +
+                            "`index_memory_facts_category` ON `memory_facts` (`category`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS " +
+                            "`index_memory_facts_last_accessed_at` ON `memory_facts` (`last_accessed_at`)",
+                    )
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `interaction_outcomes` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`route_hint` TEXT NOT NULL, " +
+                            "`provider` TEXT NOT NULL, " +
+                            "`model` TEXT NOT NULL, " +
+                            "`outcome` TEXT NOT NULL, " +
+                            "`tool_call_count` INTEGER NOT NULL, " +
+                            "`latency_ms` INTEGER NOT NULL, " +
+                            "`created_at` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS " +
+                            "`index_interaction_outcomes_provider` ON `interaction_outcomes` (`provider`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS " +
+                            "`index_interaction_outcomes_created_at` ON `interaction_outcomes` (`created_at`)",
+                    )
+                }
+            }
+
         /**
          * Ordered array of schema migrations.
          *
@@ -435,6 +495,7 @@ abstract class ZeroAIDatabase : RoomDatabase() {
                 MIGRATION_13_14,
                 MIGRATION_14_15,
                 MIGRATION_15_16,
+                MIGRATION_16_17,
             )
 
         /**

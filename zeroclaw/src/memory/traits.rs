@@ -66,6 +66,33 @@ pub trait Memory: Send + Sync {
         session_id: Option<&str>,
     ) -> anyhow::Result<()>;
 
+    /// Stores a memory with full scoring metadata.
+    ///
+    /// Default implementation delegates to [`store`](Memory::store),
+    /// ignoring metadata. [`SqliteMemory`] overrides this to persist
+    /// confidence, source, tags, and decay half-life.
+    ///
+    /// # Parameters
+    ///
+    /// * `confidence` - Extraction confidence \[0.0, 1.0\].
+    /// * `source` - Origin: "heuristic", "llm", "agent", "user", "migrated".
+    /// * `tags` - Comma-separated fact tags.
+    /// * `decay_half_life_days` - Ebbinghaus half-life in days (must be > 0).
+    async fn store_with_metadata(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        confidence: f64,
+        source: &str,
+        tags: &str,
+        decay_half_life_days: u32,
+    ) -> anyhow::Result<()> {
+        let _ = (confidence, source, tags, decay_half_life_days);
+        self.store(key, content, category, session_id).await
+    }
+
     /// Recall memories matching a query (keyword search), optionally scoped to a session
     async fn recall(
         &self,

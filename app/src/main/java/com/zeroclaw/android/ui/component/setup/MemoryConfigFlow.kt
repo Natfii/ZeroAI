@@ -98,11 +98,6 @@ private val BACKEND_OPTIONS =
             description = "Fast local database. Best for most users.",
         ),
         BackendOption(
-            id = "markdown",
-            title = "Markdown",
-            description = "Plain text files. Easy to read and edit manually.",
-        ),
-        BackendOption(
             id = "none",
             title = "None",
             description = "No persistent memory. Agent starts fresh each session.",
@@ -152,7 +147,7 @@ private val RETENTION_OPTIONS =
  * Memory configuration form for selecting backend, auto-save, embedding, and retention.
  *
  * Presents:
- * 1. Backend selector with three selectable [Card] options.
+ * 1. Backend selector with two selectable [Card] options.
  * 2. Auto-save toggle as a [Switch] in a labelled [Row].
  * 3. Embedding provider dropdown using [ExposedDropdownMenuBox].
  * 4. Retention period picker using [FilterChip] options.
@@ -160,7 +155,7 @@ private val RETENTION_OPTIONS =
  * Field names align with [GlobalTomlConfig][com.zeroclaw.android.service.GlobalTomlConfig]:
  * `memoryBackend`, `memoryAutoSave`, `memoryEmbeddingProvider`, and `memoryPurgeAfterDays`.
  *
- * @param backend Current memory backend identifier: "sqlite", "markdown", or "none".
+ * @param backend Current memory backend identifier: "sqlite" or "none".
  * @param autoSave Whether the agent auto-saves conversation context.
  * @param embeddingProvider Current embedding provider: "", "openai", or "anthropic".
  * @param retentionDays Memory retention period in days, or -1 for forever.
@@ -458,25 +453,6 @@ private fun PreviewSqlite() {
                 autoSave = true,
                 embeddingProvider = "",
                 retentionDays = 30,
-                onBackendChanged = {},
-                onAutoSaveChanged = {},
-                onEmbeddingProviderChanged = {},
-                onRetentionDaysChanged = {},
-            )
-        }
-    }
-}
-
-@Preview(name = "Memory Config - Markdown with Embeddings")
-@Composable
-private fun PreviewMarkdown() {
-    ZeroAITheme {
-        Surface {
-            MemoryConfigFlow(
-                backend = "markdown",
-                autoSave = false,
-                embeddingProvider = "openai",
-                retentionDays = 90,
                 onBackendChanged = {},
                 onAutoSaveChanged = {},
                 onEmbeddingProviderChanged = {},

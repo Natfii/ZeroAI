@@ -1,5 +1,6 @@
 use crate::config::IdentityConfig;
 use crate::identity;
+use crate::memory::working_context::WorkingContext;
 use crate::skills::Skill;
 use crate::tools::Tool;
 use anyhow::Result;
@@ -18,6 +19,7 @@ pub struct PromptContext<'a> {
     pub identity_config: Option<&'a IdentityConfig>,
     pub dispatcher_instructions: &'a str,
     pub hub_app_context: Option<&'a str>,
+    pub working_context: Option<&'a WorkingContext>,
 }
 
 pub trait PromptSection: Send + Sync {
@@ -35,6 +37,7 @@ impl SystemPromptBuilder {
         Self {
             sections: vec![
                 Box::new(IdentitySection),
+                Box::new(MemCoreSection),
                 Box::new(ConnectedAppsSection),
                 Box::new(ToolsSection),
                 Box::new(SafetySection),
@@ -66,6 +69,7 @@ impl SystemPromptBuilder {
 }
 
 pub struct IdentitySection;
+pub struct MemCoreSection;
 pub struct ToolsSection;
 pub struct SafetySection;
 pub struct SkillsSection;
@@ -131,6 +135,35 @@ impl PromptSection for IdentitySection {
         }
 
         Ok(prompt)
+    }
+}
+
+impl PromptSection for MemCoreSection {
+    fn name(&self) -> &str {
+        "memcore"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let Some(wc) = ctx.working_context else {
+            return Ok(String::new());
+        };
+        let mut out = String::new();
+        if !wc.identity_block.is_empty() {
+            out.push_str("## Memory - Identity\n\n");
+            out.push_str(&wc.identity_block);
+            out.push_str("\n\n");
+        }
+        if !wc.recall_block.is_empty() {
+            out.push_str("## Memory - Recalled\n\n");
+            out.push_str(&wc.recall_block);
+            out.push_str("\n\n");
+        }
+        if !wc.episodic_summary.is_empty() {
+            out.push_str("## Memory - Recent\n\n");
+            out.push_str(&wc.episodic_summary);
+            out.push_str("\n\n");
+        }
+        Ok(out)
     }
 }
 
@@ -321,6 +354,7 @@ mod tests {
             identity_config: Some(&identity_config),
             dispatcher_instructions: "",
             hub_app_context: None,
+            working_context: None,
         };
 
         let section = IdentitySection;
@@ -350,6 +384,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "instr",
             hub_app_context: None,
+            working_context: None,
         };
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
         assert!(prompt.contains("## Tools"));
@@ -390,6 +425,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             hub_app_context: None,
+            working_context: None,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -433,6 +469,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             hub_app_context: None,
+            working_context: None,
         };
 
         let output = SkillsSection.build(&ctx).unwrap();
@@ -455,6 +492,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "instr",
             hub_app_context: None,
+            working_context: None,
         };
 
         let rendered = DateTimeSection.build(&ctx).unwrap();
@@ -498,6 +536,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             hub_app_context: None,
+            working_context: None,
         };
 
         let prompt = SystemPromptBuilder::with_defaults().build(&ctx).unwrap();
@@ -526,6 +565,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             hub_app_context: Some("- Twitter/X: Connected.\n- Email: Connected as test@example.com."),
+            working_context: None,
         };
         let section = ConnectedAppsSection;
         let output = section.build(&ctx).unwrap();
@@ -545,6 +585,7 @@ mod tests {
             identity_config: None,
             dispatcher_instructions: "",
             hub_app_context: None,
+            working_context: None,
         };
         let section = ConnectedAppsSection;
         let output = section.build(&ctx).unwrap();

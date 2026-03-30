@@ -76,6 +76,7 @@ import com.zeroclaw.android.tailscale.PeerRouteEntry
 import com.zeroclaw.android.tailscale.isAgentKind
 import com.zeroclaw.android.tailscale.normalizeKind
 import com.zeroclaw.android.util.SessionLockManager
+import com.zeroclaw.android.worker.MemoryMaintenanceWorker
 import com.zeroclaw.ffi.getVersion
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -337,6 +338,7 @@ class ZeroAIApplication :
         bindEstopPolling(ioScope)
         reconcileOAuthState(ioScope)
         schedulePluginSyncIfEnabled(ioScope)
+        scheduleMemoryMaintenance()
     }
 
     /**
@@ -556,6 +558,27 @@ class ZeroAIApplication :
                     }
                 }
         }
+    }
+
+    /**
+     * Enqueues the daily [MemoryMaintenanceWorker] with WorkManager.
+     *
+     * Uses [ExistingPeriodicWorkPolicy.KEEP] so that an already-scheduled
+     * run is not reset on every app launch. Constrained to run only when the
+     * battery is not low; power-save deferral is handled inside the worker.
+     */
+    private fun scheduleMemoryMaintenance() {
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            MemoryMaintenanceWorker.WORK_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<MemoryMaintenanceWorker>(1, TimeUnit.DAYS)
+                .setConstraints(
+                    Constraints
+                        .Builder()
+                        .setRequiresBatteryNotLow(true)
+                        .build(),
+                ).build(),
+        )
     }
 
     /**
