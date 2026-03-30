@@ -218,6 +218,68 @@ impl SqliteMemory {
         }
     }
 
+    /// Recomputes `memory_links` for the fact identified by `key`.
+    ///
+    /// Finds other memories sharing at least one tag (comma-separated),
+    /// computes Jaccard similarity on tag sets, and inserts links for
+    /// pairs exceeding the 0.3 threshold. Keeps only the top-5 links
+    /// per node to cap graph density.
+    fn update_memory_links(conn: &Connection, key: &str, tags: &str) -> anyhow::Result<()> {
+        use super::consolidation::jaccard_similarity;
+
+        let tag_set: Vec<&str> = tags.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+        if tag_set.is_empty() {
+            return Ok(());
+        }
+
+        let stored_id: String = conn.query_row(
+            "SELECT id FROM memories WHERE key = ?1",
+            params![key],
+            |r| r.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, tags FROM memories WHERE id != ?1 AND tags != ''"
+        )?;
+        let candidates: Vec<(String, String)> = stmt
+            .query_map(params![stored_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let stored_tags_str = tag_set.join(" ");
+        let mut scored: Vec<(String, f64)> = candidates
+            .iter()
+            .filter_map(|(cid, ctags)| {
+                let other_tags_str = ctags.split(',').map(str::trim).collect::<Vec<_>>().join(" ");
+                let sim = jaccard_similarity(&stored_tags_str, &other_tags_str);
+                if sim > 0.3 { Some((cid.clone(), sim)) } else { None }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(5);
+
+        conn.execute(
+            "DELETE FROM memory_links WHERE source_id = ?1 OR target_id = ?1",
+            params![stored_id],
+        )?;
+
+        for (other_id, sim) in &scored {
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_links (source_id, target_id, similarity) VALUES (?1, ?2, ?3)",
+                params![stored_id, other_id, sim],
+            )?;
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_links (source_id, target_id, similarity) VALUES (?1, ?2, ?3)",
+                params![other_id, stored_id, sim],
+            )?;
+        }
+
+        Ok(())
+    }
+
     /// Deterministic content hash for embedding cache.
     /// Uses SHA-256 (truncated) instead of DefaultHasher, which is
     /// explicitly documented as unstable across Rust versions.
@@ -576,6 +638,9 @@ impl Memory for SqliteMemory {
                     tags = excluded.tags",
                 params![id, key, content, cat, embedding_bytes, now, now, sid, confidence, source, tags, decay_half_life_days],
             )?;
+
+            Self::update_memory_links(&conn, &key, &tags)?;
+
             Ok(())
         })
         .await?

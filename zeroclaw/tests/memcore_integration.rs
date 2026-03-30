@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
+use zeroclaw::memory::consolidation::jaccard_similarity;
 use zeroclaw::memory::heuristic::extract_facts;
 use zeroclaw::memory::scoring::{
     apply_boosts, category_half_life, combined_score, frequency_score, recency_score, should_prune,
@@ -533,5 +534,101 @@ async fn concurrent_access() {
     assert_eq!(
         count, 10,
         "all 10 concurrent stores should succeed, got {count}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memory_links integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn store_with_metadata_creates_memory_links() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "user_name",
+        "The user's name is Alice",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "identity,personal,user",
+        365,
+    )
+    .await
+    .expect("first store should succeed");
+
+    mem.store_with_metadata(
+        "user_role",
+        "The user is a software engineer",
+        MemoryCategory::Core,
+        None,
+        0.85,
+        "heuristic",
+        "identity,professional,user",
+        365,
+    )
+    .await
+    .expect("second store should succeed");
+
+    let conn = mem.conn.lock();
+    let link_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links query should succeed");
+    assert!(
+        link_count > 0,
+        "facts sharing tags 'identity' and 'user' should have created links"
+    );
+
+    let similarity: f64 = conn
+        .query_row(
+            "SELECT similarity FROM memory_links LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("should have at least one link");
+    assert!(
+        similarity > 0.3,
+        "link similarity should be above threshold, got {similarity}"
+    );
+}
+
+#[tokio::test]
+async fn store_with_metadata_no_links_for_disjoint_tags() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "fact_a",
+        "The sky is blue",
+        MemoryCategory::Daily,
+        None,
+        0.7,
+        "heuristic",
+        "weather,sky",
+        7,
+    )
+    .await
+    .expect("first store should succeed");
+
+    mem.store_with_metadata(
+        "fact_b",
+        "Rust is a programming language",
+        MemoryCategory::Daily,
+        None,
+        0.7,
+        "heuristic",
+        "programming,rust",
+        7,
+    )
+    .await
+    .expect("second store should succeed");
+
+    let conn = mem.conn.lock();
+    let link_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links query should succeed");
+    assert_eq!(
+        link_count, 0,
+        "disjoint tags should produce no links"
     );
 }
