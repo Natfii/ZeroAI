@@ -513,6 +513,55 @@ impl Memory for SqliteMemory {
         .await?
     }
 
+    async fn store_with_metadata(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        confidence: f64,
+        source: &str,
+        tags: &str,
+        decay_half_life_days: u32,
+    ) -> anyhow::Result<()> {
+        let embedding_bytes = self
+            .get_or_compute_embedding(content)
+            .await?
+            .map(|emb| vector::vec_to_bytes(&emb));
+
+        let conn = self.conn.clone();
+        let key = key.to_string();
+        let content = content.to_string();
+        let sid = session_id.map(String::from);
+        let source = source.to_string();
+        let tags = tags.to_string();
+
+        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+            let conn = conn.lock();
+            let now = Local::now().to_rfc3339();
+            let cat = Self::category_to_str(&category);
+            let id = Uuid::new_v4().to_string();
+
+            conn.execute(
+                "INSERT INTO memories (id, key, content, category, embedding, created_at, updated_at,
+                                       session_id, access_count, confidence, source, tags, decay_half_life_days)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(key) DO UPDATE SET
+                    content = excluded.content,
+                    category = excluded.category,
+                    embedding = excluded.embedding,
+                    updated_at = excluded.updated_at,
+                    session_id = excluded.session_id,
+                    confidence = CASE WHEN excluded.confidence > confidence THEN excluded.confidence ELSE confidence END,
+                    source = excluded.source,
+                    tags = excluded.tags",
+                params![id, key, content, cat, embedding_bytes, now, now, sid, confidence, source, tags, decay_half_life_days],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
     async fn recall(
         &self,
         query: &str,
@@ -806,6 +855,154 @@ impl Memory for SqliteMemory {
         tokio::task::spawn_blocking(move || conn.lock().execute_batch("SELECT 1").is_ok())
             .await
             .unwrap_or(false)
+    }
+}
+
+/// A memory entry with three-factor combined scoring metadata.
+///
+/// Returned by [`SqliteMemory::recall_scored`] which augments hybrid
+/// search results with recency, frequency, and confidence data.
+#[derive(Debug, Clone)]
+pub struct ScoredMemoryEntry {
+    /// The underlying memory entry.
+    pub entry: MemoryEntry,
+    /// Three-factor combined score (hybrid * 0.6 + recency * 0.25 + frequency * 0.15).
+    pub combined_score: f64,
+    /// Extraction confidence in \[0.0, 1.0\].
+    pub confidence: f64,
+    /// Origin of the memory (e.g. "heuristic", "llm", "user").
+    pub source: String,
+    /// Comma-separated fact tags.
+    pub tags: String,
+    /// Number of times this memory has been accessed.
+    pub access_count: u32,
+}
+
+impl SqliteMemory {
+    /// Recalls memories with three-factor scoring.
+    ///
+    /// Updates `access_count` and `last_accessed_at` for returned entries
+    /// (side effect happens ONLY here, not in `recall()`).
+    pub async fn recall_scored(
+        &self,
+        query: &str,
+        limit: usize,
+        session_id: Option<&str>,
+    ) -> anyhow::Result<Vec<ScoredMemoryEntry>> {
+        use super::scoring;
+
+        let base_results = self.recall(query, limit * 2, session_id).await?;
+
+        if base_results.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let ids: Vec<String> = base_results.iter().map(|e| e.id.clone()).collect();
+
+        let conn = self.conn.clone();
+        let ids_clone = ids.clone();
+        let metadata: Vec<(String, u32, Option<String>, f64, String, String, i64)> =
+            tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<_>> {
+                let conn = conn.lock();
+                let placeholders: String = (1..=ids_clone.len())
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "SELECT id, access_count, last_accessed_at, confidence, source, tags, decay_half_life_days \
+                     FROM memories WHERE id IN ({placeholders})"
+                );
+                let mut stmt = conn.prepare(&sql)?;
+                let id_params: Vec<Box<dyn rusqlite::types::ToSql>> = ids_clone
+                    .iter()
+                    .map(|id| Box::new(id.clone()) as Box<dyn rusqlite::types::ToSql>)
+                    .collect();
+                let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                    id_params.iter().map(AsRef::as_ref).collect();
+                let rows = stmt.query_map(params_ref.as_slice(), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, u32>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, f64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                })?;
+                let mut results = Vec::new();
+                for row in rows {
+                    results.push(row?);
+                }
+                Ok(results)
+            })
+            .await??;
+
+        let meta_map: std::collections::HashMap<String, (u32, Option<String>, f64, String, String, i64)> =
+            metadata
+                .into_iter()
+                .map(|(id, ac, la, conf, src, tags, decay)| (id, (ac, la, conf, src, tags, decay)))
+                .collect();
+
+        let mut scored: Vec<ScoredMemoryEntry> = Vec::new();
+        for entry in base_results {
+            let (access_count, last_accessed, confidence, source, tags, decay_half_life) =
+                meta_map
+                    .get(&entry.id)
+                    .cloned()
+                    .unwrap_or((0, None, 1.0, "agent".to_string(), String::new(), 90));
+
+            let hybrid_score = entry.score.unwrap_or(0.0);
+            let recency = scoring::recency_score(last_accessed.as_deref(), decay_half_life);
+            let frequency = scoring::frequency_score(access_count);
+            let combined = scoring::combined_score(hybrid_score, recency, frequency);
+
+            scored.push(ScoredMemoryEntry {
+                entry,
+                combined_score: combined,
+                confidence,
+                source,
+                tags,
+                access_count,
+            });
+        }
+
+        scored.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        scored.truncate(limit);
+
+        let update_ids: Vec<String> = scored.iter().map(|s| s.entry.id.clone()).collect();
+        if !update_ids.is_empty() {
+            let conn = self.conn.clone();
+            tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                let conn = conn.lock();
+                let now = chrono::Local::now().to_rfc3339();
+                let placeholders: String = (2..=update_ids.len() + 1)
+                    .map(|i| format!("?{i}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let sql = format!(
+                    "UPDATE memories SET access_count = access_count + 1, last_accessed_at = ?1 \
+                     WHERE id IN ({placeholders})"
+                );
+                let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+                    Vec::with_capacity(update_ids.len() + 1);
+                params.push(Box::new(now));
+                for id in &update_ids {
+                    params.push(Box::new(id.clone()));
+                }
+                let params_ref: Vec<&dyn rusqlite::types::ToSql> =
+                    params.iter().map(AsRef::as_ref).collect();
+                conn.execute(&sql, params_ref.as_slice())?;
+                Ok(())
+            })
+            .await??;
+        }
+
+        Ok(scored)
     }
 }
 
@@ -1958,5 +2155,218 @@ mod tests {
         assert_eq!(source, "agent");
         assert_eq!(tags, "");
         assert_eq!(decay, 365, "core category should get 365-day half-life");
+    }
+
+    #[tokio::test]
+    async fn store_with_metadata_persists_all_columns() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store_with_metadata(
+            "fact_key",
+            "User prefers dark mode",
+            MemoryCategory::Core,
+            Some("sess-meta"),
+            0.85,
+            "heuristic",
+            "preference,ui",
+            365,
+        )
+        .await
+        .unwrap();
+
+        let conn = mem.conn.lock();
+        let (content, session_id, access_count, confidence, source, tags, decay): (
+            String,
+            Option<String>,
+            i64,
+            f64,
+            String,
+            String,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT content, session_id, access_count, confidence, source, tags, decay_half_life_days
+                 FROM memories WHERE key = 'fact_key'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(content, "User prefers dark mode");
+        assert_eq!(session_id.as_deref(), Some("sess-meta"));
+        assert_eq!(access_count, 0);
+        assert!((confidence - 0.85).abs() < f64::EPSILON);
+        assert_eq!(source, "heuristic");
+        assert_eq!(tags, "preference,ui");
+        assert_eq!(decay, 365);
+    }
+
+    #[tokio::test]
+    async fn store_with_metadata_upsert_keeps_higher_confidence() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store_with_metadata("dup", "v1", MemoryCategory::Core, None, 0.9, "llm", "a", 90)
+            .await
+            .unwrap();
+        mem.store_with_metadata("dup", "v2", MemoryCategory::Core, None, 0.5, "user", "b", 30)
+            .await
+            .unwrap();
+
+        let conn = mem.conn.lock();
+        let (content, confidence, source, tags, decay): (String, f64, String, String, i64) = conn
+            .query_row(
+                "SELECT content, confidence, source, tags, decay_half_life_days
+                 FROM memories WHERE key = 'dup'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+
+        assert_eq!(content, "v2", "content should be updated");
+        assert!(
+            (confidence - 0.9).abs() < f64::EPSILON,
+            "confidence should keep higher value (0.9 > 0.5)"
+        );
+        assert_eq!(source, "user", "source should be updated");
+        assert_eq!(tags, "b", "tags should be updated");
+        assert_eq!(decay, 90, "decay_half_life_days should NOT be updated on upsert");
+    }
+
+    #[tokio::test]
+    async fn store_with_metadata_upsert_does_not_reset_access_count() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store_with_metadata("cnt", "v1", MemoryCategory::Core, None, 0.8, "agent", "", 90)
+            .await
+            .unwrap();
+
+        {
+            let conn = mem.conn.lock();
+            conn.execute(
+                "UPDATE memories SET access_count = 5 WHERE key = 'cnt'",
+                [],
+            )
+            .unwrap();
+        }
+
+        mem.store_with_metadata("cnt", "v2", MemoryCategory::Core, None, 0.9, "llm", "", 30)
+            .await
+            .unwrap();
+
+        let conn = mem.conn.lock();
+        let count: i64 = conn
+            .query_row(
+                "SELECT access_count FROM memories WHERE key = 'cnt'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 5, "access_count must not be reset on upsert");
+    }
+
+    #[tokio::test]
+    async fn recall_scored_returns_scored_entries() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store_with_metadata(
+            "rs1",
+            "Rust is safe and fast",
+            MemoryCategory::Core,
+            None,
+            0.95,
+            "heuristic",
+            "lang",
+            365,
+        )
+        .await
+        .unwrap();
+        mem.store_with_metadata(
+            "rs2",
+            "Rust has ownership model",
+            MemoryCategory::Core,
+            None,
+            0.80,
+            "llm",
+            "lang,memory",
+            365,
+        )
+        .await
+        .unwrap();
+
+        let results = mem.recall_scored("Rust", 10, None).await.unwrap();
+        assert!(!results.is_empty(), "should return scored results");
+        for r in &results {
+            assert!(r.combined_score >= 0.0 && r.combined_score <= 1.0);
+            assert!(!r.source.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn recall_scored_increments_access_count() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store("ac_key", "access counter test", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+
+        let before: i64 = {
+            let conn = mem.conn.lock();
+            conn.query_row(
+                "SELECT access_count FROM memories WHERE key = 'ac_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(before, 0);
+
+        let _ = mem.recall_scored("access counter", 10, None).await.unwrap();
+
+        let after: i64 = {
+            let conn = mem.conn.lock();
+            conn.query_row(
+                "SELECT access_count FROM memories WHERE key = 'ac_key'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(after, 1, "recall_scored should increment access_count");
+    }
+
+    #[tokio::test]
+    async fn recall_scored_empty_query() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store("x", "data", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+        let results = mem.recall_scored("", 10, None).await.unwrap();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn recall_does_not_increment_access_count() {
+        let (_tmp, mem) = temp_sqlite();
+        mem.store("side_effect", "side effect check", MemoryCategory::Core, None)
+            .await
+            .unwrap();
+
+        let _ = mem.recall("side effect", 10, None).await.unwrap();
+
+        let count: i64 = {
+            let conn = mem.conn.lock();
+            conn.query_row(
+                "SELECT access_count FROM memories WHERE key = 'side_effect'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count, 0, "recall() must NOT have side effects on access_count");
     }
 }

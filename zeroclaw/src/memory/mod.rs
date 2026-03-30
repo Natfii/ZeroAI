@@ -3,13 +3,16 @@ pub mod chunker;
 pub mod cli;
 pub mod discord_archive;
 pub mod embeddings;
+pub mod heuristic;
 pub mod hygiene;
 pub mod none;
 pub mod response_cache;
+pub mod scoring;
 pub mod snapshot;
 pub mod sqlite;
 pub mod traits;
 pub mod vector;
+pub mod working_context;
 
 #[allow(unused_imports)]
 pub use backend::{
