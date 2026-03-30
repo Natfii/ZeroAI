@@ -992,6 +992,7 @@ fn map_tool_name_alias(tool_name: &str) -> &str {
         "filewrite" | "file_write" | "writefile" | "write_file" => "file_write",
         "filelist" | "file_list" | "listfiles" | "list_files" => "file_list",
         "memoryrecall" | "memory_recall" | "recall" | "memrecall" => "memory_recall",
+        "memorysearch" | "memory_search" | "memsearch" => "memory_search",
         "memorystore" | "memory_store" | "store" | "memstore" => "memory_store",
         "memoryforget" | "memory_forget" | "forget" | "memforget" => "memory_forget",
         "http_request" | "http" | "fetch" | "curl" | "wget" => "http_request",
@@ -2416,6 +2417,10 @@ pub async fn run(
             "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
         ),
         (
+            "memory_search",
+            "Search long-term memory with scored ranking. Use before storing to check for duplicates. Returns facts sorted by relevance, recency, and access frequency.",
+        ),
+        (
             "memory_forget",
             "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.",
         ),
@@ -2849,6 +2854,7 @@ pub async fn process_message(config: Config, message: &str) -> Result<String> {
         ("file_write", "Write file contents."),
         ("memory_store", "Save to memory."),
         ("memory_recall", "Search memory."),
+        ("memory_search", "Search memory with scored ranking."),
         ("memory_forget", "Delete a memory entry."),
         (
             "model_routing_config",

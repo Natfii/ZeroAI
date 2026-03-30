@@ -104,6 +104,10 @@ const CORE_TOOLS: &[BuiltInTool] = &[
         description: "Recall memories matching a keyword query",
     },
     BuiltInTool {
+        name: "memory_search",
+        description: "Search memory with scored ranking for duplicate detection",
+    },
+    BuiltInTool {
         name: "memory_forget",
         description: "Remove a memory entry by key",
     },
@@ -202,6 +206,7 @@ const MESSAGES_BRIDGE_TOOLS: &[BuiltInTool] = &[BuiltInTool {
 const SESSION_TOOLS: &[&str] = &[
     "memory_store",
     "memory_recall",
+    "memory_search",
     "memory_forget",
     "cron_list",
     "cron_runs",
@@ -408,7 +413,7 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
         use zeroclaw::security::policy::{SecurityPolicy, ToolOperation};
         let policy = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
         let op = match name {
-            "memory_recall" | "cron_list" | "cron_runs" => ToolOperation::Read,
+            "memory_recall" | "memory_search" | "cron_list" | "cron_runs" => ToolOperation::Read,
             _ => ToolOperation::Act,
         };
         policy
@@ -478,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_core_tools_count() {
-        assert_eq!(CORE_TOOLS.len(), 13);
+        assert_eq!(CORE_TOOLS.len(), 14);
     }
 
     #[test]

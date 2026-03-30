@@ -973,6 +973,7 @@ pub(crate) fn build_tools_registry(
             memory: memory.clone(),
         }),
         Box::new(zeroclaw::tools::MemoryRecallTool::new(memory.clone())),
+        Box::new(zeroclaw::tools::MemorySearchTool::new(memory.clone())),
         Box::new(FfiMemoryForgetTool { memory }),
         Box::new(zeroclaw::tools::CronListTool::new(config_arc.clone())),
         Box::new(zeroclaw::tools::CronRunsTool::new(config_arc)),
@@ -2993,6 +2994,13 @@ fn build_android_tool_descs(config: &zeroclaw::Config) -> Vec<(String, String)> 
             "Search memory. Use when: retrieving prior decisions, user \
              preferences, historical context. Don't use when: answer \
              is already in current context."
+                .into(),
+        ),
+        (
+            "memory_search".into(),
+            "Search long-term memory with scored ranking. Use before \
+             storing to check for duplicates. Returns facts sorted by \
+             relevance, recency, and access frequency."
                 .into(),
         ),
         (
