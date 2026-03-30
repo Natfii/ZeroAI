@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tower_http::compression::CompressionLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::timeout::TimeoutLayer;
 use uuid::Uuid;
@@ -612,10 +613,21 @@ pub async fn run_gateway(
         .route("/api/status", get(api::handle_api_status))
         .route("/api/memory", get(api::handle_api_memory_list))
         .route("/api/memory", post(api::handle_api_memory_store))
+        .route("/api/memory/graph", get(api::handle_api_memory_graph))
+        .route(
+            "/api/memory/leaderboard",
+            get(api::handle_api_memory_leaderboard),
+        )
+        .route("/api/memory/stats", get(api::handle_api_memory_stats))
+        .route(
+            "/api/memory/detail/{id}",
+            get(api::handle_api_memory_detail),
+        )
         .route("/api/memory/{key}", delete(api::handle_api_memory_delete))
         .route("/api/events", get(sse::handle_sse_events))
         .route("/_app/{*path}", get(static_files::handle_static))
         .with_state(state)
+        .layer(CompressionLayer::new())
         .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
