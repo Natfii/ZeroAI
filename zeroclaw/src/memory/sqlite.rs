@@ -26,7 +26,7 @@ const SQLITE_OPEN_TIMEOUT_CAP_SECS: u64 = 300;
 /// - **Embedding Cache**: LRU-evicted cache to avoid redundant API calls
 /// - **Safe Reindex**: temp DB → seed → sync → atomic swap → rollback
 pub struct SqliteMemory {
-    conn: Arc<Mutex<Connection>>,
+    pub conn: Arc<Mutex<Connection>>,
     db_path: PathBuf,
     embedder: Arc<dyn EmbeddingProvider>,
     vector_weight: f32,
@@ -162,7 +162,26 @@ impl SqliteMemory {
                 created_at   TEXT NOT NULL,
                 accessed_at  TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_cache_accessed ON embedding_cache(accessed_at);",
+            CREATE INDEX IF NOT EXISTS idx_cache_accessed ON embedding_cache(accessed_at);
+
+            -- Messages awaiting LLM extraction
+            CREATE TABLE IF NOT EXISTS consolidation_backlog (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_backlog_created_at ON consolidation_backlog(created_at);
+            CREATE INDEX IF NOT EXISTS idx_backlog_session_id ON consolidation_backlog(session_id);
+
+            -- Pre-computed Jaccard similarity links between facts
+            CREATE TABLE IF NOT EXISTS memory_links (
+                source_id   TEXT NOT NULL,
+                target_id   TEXT NOT NULL,
+                similarity  REAL NOT NULL,
+                PRIMARY KEY (source_id, target_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_similarity ON memory_links(similarity);",
         )?;
 
         let has_session_id: bool = conn

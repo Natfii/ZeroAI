@@ -441,6 +441,32 @@ async fn unicode_content() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Schema table existence tests (Phase 2a)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn consolidation_backlog_table_exists() {
+    let (_dir, mem) = create_test_memory();
+
+    let conn = mem.conn.lock();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM consolidation_backlog", [], |r| r.get(0))
+        .expect("consolidation_backlog table should exist after init_schema");
+    assert_eq!(count, 0, "fresh consolidation_backlog should be empty");
+}
+
+#[tokio::test]
+async fn memory_links_table_exists() {
+    let (_dir, mem) = create_test_memory();
+
+    let conn = mem.conn.lock();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links table should exist after init_schema");
+    assert_eq!(count, 0, "fresh memory_links should be empty");
+}
+
 #[tokio::test]
 async fn concurrent_access() {
     let (_dir, mem) = create_test_memory();
