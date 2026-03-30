@@ -10,9 +10,10 @@
 use std::sync::Arc;
 use tempfile::TempDir;
 
+use zeroclaw::memory::consolidation::jaccard_similarity;
 use zeroclaw::memory::heuristic::extract_facts;
 use zeroclaw::memory::scoring::{
-    category_half_life, combined_score, frequency_score, recency_score, should_prune,
+    apply_boosts, category_half_life, combined_score, frequency_score, recency_score, should_prune,
 };
 use zeroclaw::memory::sqlite::SqliteMemory;
 use zeroclaw::memory::traits::{Memory, MemoryCategory};
@@ -223,6 +224,43 @@ fn scoring_recency_and_frequency_sanity() {
     assert!(
         (frequency_score(100) - 1.0).abs() < f64::EPSILON,
         "100 accesses should be capped at 1.0"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// apply_boosts tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn boost_core_recent_frequent() {
+    let now = chrono::Local::now().to_rfc3339();
+    let score = apply_boosts(0.5, &MemoryCategory::Core, Some(&now), 10);
+    // 0.5 * 1.5 * 1.2 * 1.1 = 0.99
+    assert!((score - 0.99).abs() < 0.01, "expected ~0.99, got {score}");
+}
+
+#[test]
+fn boost_core_only() {
+    let score = apply_boosts(0.5, &MemoryCategory::Core, None, 2);
+    // 0.5 * 1.5 = 0.75 (no recency, no frequency boost)
+    assert!((score - 0.75).abs() < 0.01, "expected ~0.75, got {score}");
+}
+
+#[test]
+fn boost_no_boosts_apply() {
+    let old = "2020-01-01T00:00:00+00:00";
+    let score = apply_boosts(0.8, &MemoryCategory::Daily, Some(old), 2);
+    // No boosts: not Core, not recent, count <= 5
+    assert!((score - 0.8).abs() < 0.01, "expected ~0.8, got {score}");
+}
+
+#[test]
+fn boost_preserves_zero() {
+    let now = chrono::Local::now().to_rfc3339();
+    assert_eq!(
+        apply_boosts(0.0, &MemoryCategory::Core, Some(&now), 10),
+        0.0,
+        "zero base score should remain 0.0 after boosts"
     );
 }
 
@@ -441,6 +479,32 @@ async fn unicode_content() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Schema table existence tests (Phase 2a)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn consolidation_backlog_table_exists() {
+    let (_dir, mem) = create_test_memory();
+
+    let conn = mem.conn.lock();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM consolidation_backlog", [], |r| r.get(0))
+        .expect("consolidation_backlog table should exist after init_schema");
+    assert_eq!(count, 0, "fresh consolidation_backlog should be empty");
+}
+
+#[tokio::test]
+async fn memory_links_table_exists() {
+    let (_dir, mem) = create_test_memory();
+
+    let conn = mem.conn.lock();
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links table should exist after init_schema");
+    assert_eq!(count, 0, "fresh memory_links should be empty");
+}
+
 #[tokio::test]
 async fn concurrent_access() {
     let (_dir, mem) = create_test_memory();
@@ -471,4 +535,305 @@ async fn concurrent_access() {
         count, 10,
         "all 10 concurrent stores should succeed, got {count}"
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// memory_links integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn store_with_metadata_creates_memory_links() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "user_name",
+        "The user's name is Alice",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "identity,personal,user",
+        365,
+    )
+    .await
+    .expect("first store should succeed");
+
+    mem.store_with_metadata(
+        "user_role",
+        "The user is a software engineer",
+        MemoryCategory::Core,
+        None,
+        0.85,
+        "heuristic",
+        "identity,professional,user",
+        365,
+    )
+    .await
+    .expect("second store should succeed");
+
+    let conn = mem.conn.lock();
+    let link_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links query should succeed");
+    assert!(
+        link_count > 0,
+        "facts sharing tags 'identity' and 'user' should have created links"
+    );
+
+    let similarity: f64 = conn
+        .query_row(
+            "SELECT similarity FROM memory_links LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("should have at least one link");
+    assert!(
+        similarity > 0.3,
+        "link similarity should be above threshold, got {similarity}"
+    );
+}
+
+#[tokio::test]
+async fn store_with_metadata_no_links_for_disjoint_tags() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "fact_a",
+        "The sky is blue",
+        MemoryCategory::Daily,
+        None,
+        0.7,
+        "heuristic",
+        "weather,sky",
+        7,
+    )
+    .await
+    .expect("first store should succeed");
+
+    mem.store_with_metadata(
+        "fact_b",
+        "Rust is a programming language",
+        MemoryCategory::Daily,
+        None,
+        0.7,
+        "heuristic",
+        "programming,rust",
+        7,
+    )
+    .await
+    .expect("second store should succeed");
+
+    let conn = mem.conn.lock();
+    let link_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+        .expect("memory_links query should succeed");
+    assert_eq!(
+        link_count, 0,
+        "disjoint tags should produce no links"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// recall_scored boost integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn recall_scored_core_fact_boosted_above_daily() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "core_fact",
+        "Rust is the user's primary language",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "programming,rust",
+        365,
+    )
+    .await
+    .unwrap();
+
+    mem.store_with_metadata(
+        "daily_fact",
+        "Rust compiler updated yesterday",
+        MemoryCategory::Daily,
+        None,
+        0.9,
+        "heuristic",
+        "programming,update",
+        7,
+    )
+    .await
+    .unwrap();
+
+    let results = mem.recall_scored("Rust programming", 10, None).await.unwrap();
+    assert!(
+        results.len() >= 2,
+        "should recall at least 2 facts, got {}",
+        results.len()
+    );
+
+    let core_entry = results.iter().find(|e| e.entry.key == "core_fact");
+    let daily_entry = results.iter().find(|e| e.entry.key == "daily_fact");
+    assert!(core_entry.is_some(), "core_fact should be recalled");
+    assert!(daily_entry.is_some(), "daily_fact should be recalled");
+
+    let core_score = core_entry.unwrap().combined_score;
+    let daily_score = daily_entry.unwrap().combined_score;
+    assert!(
+        core_score > daily_score,
+        "Core fact ({core_score:.4}) should rank above Daily fact ({daily_score:.4}) due to 1.5x boost"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2a integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn memory_links_cascade_delete() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "fact_x",
+        "X is related to Y",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "topic,shared",
+        365,
+    )
+    .await
+    .unwrap();
+
+    mem.store_with_metadata(
+        "fact_y",
+        "Y is related to X",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "topic,shared,extra",
+        365,
+    )
+    .await
+    .unwrap();
+
+    {
+        let conn = mem.conn.lock();
+        let links: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memory_links", [], |r| r.get(0))
+            .unwrap();
+        assert!(links > 0, "should have created links between x and y");
+    }
+
+    mem.forget("fact_x").await.unwrap();
+
+    {
+        let conn = mem.conn.lock();
+        let links: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM memory_links WHERE source_id IN \
+                 (SELECT id FROM memories WHERE key = 'fact_x') \
+                 OR target_id IN (SELECT id FROM memories WHERE key = 'fact_x')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(links, 0, "links involving deleted fact should be gone");
+    }
+}
+
+#[tokio::test]
+async fn backlog_overflow_pruned_to_200() {
+    let (_dir, mem) = create_test_memory();
+    let conn = mem.conn.lock();
+
+    for i in 0..250 {
+        let id = format!("msg-{i:04}");
+        let now = chrono::Local::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO consolidation_backlog (id, session_id, message_text, created_at) \
+             VALUES (?1, 'sess', ?2, ?3)",
+            rusqlite::params![id, format!("message {i}"), now],
+        )
+        .unwrap();
+    }
+
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM consolidation_backlog",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 250, "should have 250 rows before prune");
+
+    conn.execute(
+        "DELETE FROM consolidation_backlog WHERE id IN \
+         (SELECT id FROM consolidation_backlog ORDER BY created_at ASC LIMIT ?1)",
+        rusqlite::params![250 - 200],
+    )
+    .unwrap();
+
+    let after: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM consolidation_backlog",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(after, 200, "should have 200 rows after prune");
+}
+
+#[tokio::test]
+async fn boost_ranking_core_recent_frequent_above_daily_same_base() {
+    let (_dir, mem) = create_test_memory();
+
+    mem.store_with_metadata(
+        "boosted_fact",
+        "important core memory about Rust",
+        MemoryCategory::Core,
+        None,
+        0.9,
+        "heuristic",
+        "programming",
+        365,
+    )
+    .await
+    .unwrap();
+
+    for _ in 0..6 {
+        let _ = mem.recall_scored("Rust", 10, None).await;
+    }
+
+    mem.store_with_metadata(
+        "unboosted_fact",
+        "daily note about Rust update",
+        MemoryCategory::Daily,
+        None,
+        0.9,
+        "heuristic",
+        "programming",
+        7,
+    )
+    .await
+    .unwrap();
+
+    let results = mem.recall_scored("Rust", 10, None).await.unwrap();
+    assert!(results.len() >= 2, "should recall at least 2 facts");
+
+    let boosted = results.iter().find(|e| e.entry.key == "boosted_fact");
+    let unboosted = results.iter().find(|e| e.entry.key == "unboosted_fact");
+
+    if let (Some(b), Some(u)) = (boosted, unboosted) {
+        assert!(
+            b.combined_score > u.combined_score,
+            "Core+recent+frequent ({:.4}) should outrank Daily ({:.4})",
+            b.combined_score,
+            u.combined_score,
+        );
+    }
 }

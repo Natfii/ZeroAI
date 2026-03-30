@@ -43,6 +43,11 @@ fn serve_embedded_file(path: &str) -> impl IntoResponse {
                             "no-cache".to_string()
                         },
                     ),
+                    (
+                        header::CONTENT_SECURITY_POLICY,
+                        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+                            .to_string(),
+                    ),
                 ],
                 content.data.to_vec(),
             )

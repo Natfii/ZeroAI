@@ -26,7 +26,7 @@ const SQLITE_OPEN_TIMEOUT_CAP_SECS: u64 = 300;
 /// - **Embedding Cache**: LRU-evicted cache to avoid redundant API calls
 /// - **Safe Reindex**: temp DB → seed → sync → atomic swap → rollback
 pub struct SqliteMemory {
-    conn: Arc<Mutex<Connection>>,
+    pub conn: Arc<Mutex<Connection>>,
     db_path: PathBuf,
     embedder: Arc<dyn EmbeddingProvider>,
     vector_weight: f32,
@@ -162,7 +162,26 @@ impl SqliteMemory {
                 created_at   TEXT NOT NULL,
                 accessed_at  TEXT NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_cache_accessed ON embedding_cache(accessed_at);",
+            CREATE INDEX IF NOT EXISTS idx_cache_accessed ON embedding_cache(accessed_at);
+
+            -- Messages awaiting LLM extraction
+            CREATE TABLE IF NOT EXISTS consolidation_backlog (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                created_at  TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_backlog_created_at ON consolidation_backlog(created_at);
+            CREATE INDEX IF NOT EXISTS idx_backlog_session_id ON consolidation_backlog(session_id);
+
+            -- Pre-computed Jaccard similarity links between facts
+            CREATE TABLE IF NOT EXISTS memory_links (
+                source_id   TEXT NOT NULL,
+                target_id   TEXT NOT NULL,
+                similarity  REAL NOT NULL,
+                PRIMARY KEY (source_id, target_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_similarity ON memory_links(similarity);",
         )?;
 
         let has_session_id: bool = conn
@@ -197,6 +216,68 @@ impl SqliteMemory {
             "conversation" => MemoryCategory::Conversation,
             other => MemoryCategory::Custom(other.to_string()),
         }
+    }
+
+    /// Recomputes `memory_links` for the fact identified by `key`.
+    ///
+    /// Finds other memories sharing at least one tag (comma-separated),
+    /// computes Jaccard similarity on tag sets, and inserts links for
+    /// pairs exceeding the 0.3 threshold. Keeps only the top-5 links
+    /// per node to cap graph density.
+    fn update_memory_links(conn: &Connection, key: &str, tags: &str) -> anyhow::Result<()> {
+        use super::consolidation::jaccard_similarity;
+
+        let tag_set: Vec<&str> = tags.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+        if tag_set.is_empty() {
+            return Ok(());
+        }
+
+        let stored_id: String = conn.query_row(
+            "SELECT id FROM memories WHERE key = ?1",
+            params![key],
+            |r| r.get(0),
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, tags FROM memories WHERE id != ?1 AND tags != ''"
+        )?;
+        let candidates: Vec<(String, String)> = stmt
+            .query_map(params![stored_id], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let stored_tags_str = tag_set.join(" ");
+        let mut scored: Vec<(String, f64)> = candidates
+            .iter()
+            .filter_map(|(cid, ctags)| {
+                let other_tags_str = ctags.split(',').map(str::trim).collect::<Vec<_>>().join(" ");
+                let sim = jaccard_similarity(&stored_tags_str, &other_tags_str);
+                if sim > 0.3 { Some((cid.clone(), sim)) } else { None }
+            })
+            .collect();
+
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(5);
+
+        conn.execute(
+            "DELETE FROM memory_links WHERE source_id = ?1 OR target_id = ?1",
+            params![stored_id],
+        )?;
+
+        for (other_id, sim) in &scored {
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_links (source_id, target_id, similarity) VALUES (?1, ?2, ?3)",
+                params![stored_id, other_id, sim],
+            )?;
+            conn.execute(
+                "INSERT OR REPLACE INTO memory_links (source_id, target_id, similarity) VALUES (?1, ?2, ?3)",
+                params![other_id, stored_id, sim],
+            )?;
+        }
+
+        Ok(())
     }
 
     /// Deterministic content hash for embedding cache.
@@ -470,6 +551,10 @@ pub(crate) fn migrate_memcore_schema(conn: &Connection) -> anyhow::Result<()> {
 
 #[async_trait]
 impl Memory for SqliteMemory {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "sqlite"
     }
@@ -557,6 +642,9 @@ impl Memory for SqliteMemory {
                     tags = excluded.tags",
                 params![id, key, content, cat, embedding_bytes, now, now, sid, confidence, source, tags, decay_half_life_days],
             )?;
+
+            Self::update_memory_links(&conn, &key, &tags)?;
+
             Ok(())
         })
         .await?
@@ -956,10 +1044,16 @@ impl SqliteMemory {
             let recency = scoring::recency_score(last_accessed.as_deref(), decay_half_life);
             let frequency = scoring::frequency_score(access_count);
             let combined = scoring::combined_score(hybrid_score, recency, frequency);
+            let boosted = scoring::apply_boosts(
+                combined,
+                &entry.category,
+                last_accessed.as_deref(),
+                access_count,
+            );
 
             scored.push(ScoredMemoryEntry {
                 entry,
-                combined_score: combined,
+                combined_score: boosted,
                 confidence,
                 source,
                 tags,

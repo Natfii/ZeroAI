@@ -1129,6 +1129,8 @@ class ZeroAIDaemonService : Service() {
                             restorePersistedSessions()
                             initMessageClassifier()
                             initMemoryPipeline()
+                            startConsolidationIfNeeded()
+                            startLeaderboardRefresh()
                             try {
                                 val curSettings = settingsRepository.settings.first()
                                 if (curSettings.sharedFolderEnabled) {
@@ -1503,6 +1505,84 @@ class ZeroAIDaemonService : Service() {
     }
 
     /**
+     * Runs LLM startup consolidation if enabled and conditions are met.
+     *
+     * Checks:
+     * 1. `smart_extraction` is enabled in config
+     * 2. Power state is not [MemoryExtractionPipeline.PowerState.CRITICAL]
+     * 3. At least 1 hour since last consolidation (SharedPreferences)
+     * 4. Backlog has messages queued
+     *
+     * Runs [com.zeroclaw.ffi.runStartupConsolidation] on [Dispatchers.IO]
+     * with a 60-second timeout. Records the timestamp on success.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun startConsolidationIfNeeded() {
+        serviceScope.launch(ioDispatcher) {
+            try {
+                if (currentPowerState == MemoryExtractionPipeline.PowerState.CRITICAL) return@launch
+
+                val backlogCount = com.zeroclaw.ffi.consolidationBacklogCount()
+                if (backlogCount == 0) return@launch
+
+                val prefs = getSharedPreferences("memcore", MODE_PRIVATE)
+                val lastRun = prefs.getLong("last_consolidation_ms", 0L)
+                if (System.currentTimeMillis() - lastRun < CONSOLIDATION_COOLDOWN_MS) return@launch
+
+                Log.i(TAG, "Starting consolidation ($backlogCount backlog messages)")
+                val report = com.zeroclaw.ffi.runStartupConsolidation()
+                Log.i(
+                    TAG,
+                    "Consolidation complete: ${report.factsExtracted} facts, " +
+                        "${report.sessionsSummarized} summaries, " +
+                        "${report.errors.size} errors",
+                )
+                if (report.factsExtracted > 0u) {
+                    prefs.edit().putLong("last_consolidation_ms", System.currentTimeMillis()).apply()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Consolidation failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Starts periodic leaderboard cache refresh.
+     *
+     * Queries [InteractionOutcomeDao.providerLeaderboard] from Room,
+     * serializes to JSON, and pushes to the Rust FFI cache via
+     * [com.zeroclaw.ffi.setLeaderboardCache]. Repeats every 5 minutes.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun startLeaderboardRefresh() {
+        serviceScope.launch(ioDispatcher) {
+            val app = application as ZeroAIApplication
+            val dao = app.database.interactionOutcomeDao()
+            while (true) {
+                try {
+                    val thirtyDaysAgo =
+                        System.currentTimeMillis() - LEADERBOARD_LOOKBACK_MS
+                    val rows = dao.providerLeaderboard(thirtyDaysAgo)
+                    val jsonArray = org.json.JSONArray()
+                    for (row in rows) {
+                        val obj = org.json.JSONObject()
+                        obj.put("provider", row.provider)
+                        obj.put("model", row.model)
+                        obj.put("total", row.total)
+                        obj.put("successRate", row.successRate)
+                        obj.put("avgLatency", row.avgLatency)
+                        jsonArray.put(obj)
+                    }
+                    com.zeroclaw.ffi.setLeaderboardCache(jsonArray.toString())
+                } catch (e: Exception) {
+                    Log.w(TAG, "Leaderboard refresh failed: ${e.message}")
+                }
+                delay(LEADERBOARD_REFRESH_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
      * Acquires a partial wake lock for the startup phase.
      *
      * If a previous wake lock reference exists but is no longer held
@@ -1750,6 +1830,9 @@ class ZeroAIDaemonService : Service() {
         private const val WAKE_LOCK_TAG = "zeroclaw:daemon"
         private const val WAKE_LOCK_TIMEOUT_MS = 180_000L
         private const val RESTART_DELAY_MS = 5_000L
+        private const val LEADERBOARD_REFRESH_INTERVAL_MS = 300_000L
+        private const val LEADERBOARD_LOOKBACK_MS = 30L * 24 * 60 * 60 * 1_000
+        private const val CONSOLIDATION_COOLDOWN_MS = 3_600_000L
         private const val RESTART_REQUEST_CODE = 42
         private const val OAUTH_HOLD_TIMEOUT_MS = 120_000L
         private const val BEARER_TOKEN_BYTES = 32

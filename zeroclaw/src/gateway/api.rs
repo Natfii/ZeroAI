@@ -10,8 +10,6 @@ use axum::{
 };
 use serde::Deserialize;
 
-const MASKED_SECRET: &str = "***MASKED***";
-
 #[derive(Deserialize)]
 pub struct MemoryQuery {
     pub query: Option<String>,
@@ -25,11 +23,12 @@ pub struct MemoryStoreBody {
     pub category: Option<String>,
 }
 
+/// Query parameters for the memory graph endpoint.
 #[derive(Deserialize)]
-pub struct CronAddBody {
-    pub name: Option<String>,
-    pub schedule: String,
-    pub command: String,
+#[serde(rename_all = "camelCase")]
+pub struct GraphQuery {
+    /// Maximum number of links to return per source node (default 5).
+    pub max_links_per_node: Option<usize>,
 }
 
 /// GET /api/session — current dashboard authentication state.
@@ -77,271 +76,6 @@ pub async fn handle_api_status(
     });
 
     Json(body).into_response()
-}
-
-/// GET /api/config — current config (api_key masked)
-pub async fn handle_api_config_get(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-
-    let masked_config = mask_sensitive_fields(&config);
-    let toml_str = match toml::to_string_pretty(&masked_config) {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Failed to serialize config: {e}")})),
-            )
-                .into_response();
-        }
-    };
-
-    Json(serde_json::json!({
-        "format": "toml",
-        "content": toml_str,
-    }))
-    .into_response()
-}
-
-/// PUT /api/config — update config from TOML body
-pub async fn handle_api_config_put(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: String,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let incoming: crate::config::Config = match toml::from_str(&body) {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": format!("Invalid TOML: {e}")})),
-            )
-                .into_response();
-        }
-    };
-
-    let current_config = state.config.lock().clone();
-    let new_config = hydrate_config_for_save(incoming, &current_config);
-
-    if let Err(e) = new_config.validate() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({"error": format!("Invalid config: {e}")})),
-        )
-            .into_response();
-    }
-
-    if let Err(e) = new_config.save().await {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to save config: {e}")})),
-        )
-            .into_response();
-    }
-
-    *state.config.lock() = new_config;
-
-    Json(serde_json::json!({"status": "ok"})).into_response()
-}
-
-/// GET /api/tools — list registered tool specs
-pub async fn handle_api_tools(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let tools: Vec<serde_json::Value> = state
-        .tools_registry
-        .iter()
-        .map(|spec| {
-            serde_json::json!({
-                "name": spec.name,
-                "description": spec.description,
-                "parameters": spec.parameters,
-            })
-        })
-        .collect();
-
-    Json(serde_json::json!({"tools": tools})).into_response()
-}
-
-/// GET /api/cron — list cron jobs
-pub async fn handle_api_cron_list(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-    match crate::cron::list_jobs(&config) {
-        Ok(jobs) => {
-            let jobs_json: Vec<serde_json::Value> = jobs
-                .iter()
-                .map(|job| {
-                    serde_json::json!({
-                        "id": job.id,
-                        "name": job.name,
-                        "expression": job.expression,
-                        "command": job.command,
-                        "prompt": job.prompt,
-                        "job_type": job.job_type,
-                        "next_run": job.next_run.to_rfc3339(),
-                        "last_run": job.last_run.map(|t| t.to_rfc3339()),
-                        "last_status": job.last_status,
-                        "last_output": job.last_output,
-                        "enabled": job.enabled,
-                        "delete_after_run": job.delete_after_run,
-                    })
-                })
-                .collect();
-            Json(serde_json::json!({"jobs": jobs_json})).into_response()
-        }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to list cron jobs: {e}")})),
-        )
-            .into_response(),
-    }
-}
-
-/// POST /api/cron — add a new cron job
-pub async fn handle_api_cron_add(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<CronAddBody>,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-    let schedule = crate::cron::Schedule::Cron {
-        expr: body.schedule,
-        tz: None,
-    };
-
-    match crate::cron::add_shell_job(&config, body.name, schedule, &body.command) {
-        Ok(job) => Json(serde_json::json!({
-            "status": "ok",
-            "job": {
-                "id": job.id,
-                "name": job.name,
-                "expression": job.expression,
-                "command": job.command,
-                "next_run": job.next_run.to_rfc3339(),
-                "last_run": job.last_run.map(|t| t.to_rfc3339()),
-                "last_status": job.last_status,
-                "enabled": job.enabled,
-                "delete_after_run": job.delete_after_run,
-            }
-        }))
-        .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to add cron job: {e}")})),
-        )
-            .into_response(),
-    }
-}
-
-/// DELETE /api/cron/:id — remove a cron job
-pub async fn handle_api_cron_delete(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Path(id): Path<String>,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-    match crate::cron::remove_job(&config, &id) {
-        Ok(()) => Json(serde_json::json!({"status": "ok"})).into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": format!("Failed to remove cron job: {e}")})),
-        )
-            .into_response(),
-    }
-}
-
-/// GET /api/integrations — list all integrations with status
-pub async fn handle_api_integrations(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-    let entries = crate::integrations::registry::all_integrations();
-
-    let integrations: Vec<serde_json::Value> = entries
-        .iter()
-        .map(|entry| {
-            let status = (entry.status_fn)(&config);
-            serde_json::json!({
-                "name": entry.name,
-                "description": entry.description,
-                "category": entry.category,
-                "status": status,
-            })
-        })
-        .collect();
-
-    Json(serde_json::json!({"integrations": integrations})).into_response()
-}
-
-/// POST /api/doctor — run diagnostics
-pub async fn handle_api_doctor(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.lock().clone();
-    let results = crate::doctor::diagnose(&config);
-
-    let ok_count = results
-        .iter()
-        .filter(|r| r.severity == crate::doctor::Severity::Ok)
-        .count();
-    let warn_count = results
-        .iter()
-        .filter(|r| r.severity == crate::doctor::Severity::Warn)
-        .count();
-    let error_count = results
-        .iter()
-        .filter(|r| r.severity == crate::doctor::Severity::Error)
-        .count();
-
-    Json(serde_json::json!({
-        "results": results,
-        "summary": {
-            "ok": ok_count,
-            "warnings": warn_count,
-            "errors": error_count,
-        }
-    }))
-    .into_response()
 }
 
 /// GET /api/memory — list or search memory entries
@@ -439,41 +173,147 @@ pub async fn handle_api_memory_delete(
     }
 }
 
-/// GET /api/cost — cost summary
-pub async fn handle_api_cost(
+/// GET /api/memory/graph — memory graph for the Brain Visualizer
+///
+/// Returns all nodes (without content) and pre-computed Jaccard links,
+/// capped at `maxLinksPerNode` (default 5) per source. Scores are
+/// normalized to \[0.0, 1.0\] relative to the result-set maximum.
+pub async fn handle_api_memory_graph(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(params): Query<GraphQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = require_pairing_auth(&state, &headers) {
         return e.into_response();
     }
 
-    if let Some(ref tracker) = state.cost_tracker {
-        match tracker.get_summary() {
-            Ok(summary) => Json(serde_json::json!({"cost": summary})).into_response(),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"error": format!("Cost summary failed: {e}")})),
+    let max_links = params.max_links_per_node.unwrap_or(5);
+
+    let sqlite = match state
+        .mem
+        .as_any()
+        .downcast_ref::<crate::memory::SqliteMemory>()
+    {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::NOT_IMPLEMENTED,
+                Json(serde_json::json!({"error": "Graph requires SQLite memory backend"})),
             )
-                .into_response(),
+                .into_response();
         }
-    } else {
-        Json(serde_json::json!({
-            "cost": {
-                "session_cost_usd": 0.0,
-                "daily_cost_usd": 0.0,
-                "monthly_cost_usd": 0.0,
-                "total_tokens": 0,
-                "request_count": 0,
-                "by_model": {},
+    };
+
+    let conn = sqlite.conn.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = conn.lock();
+
+        // Fetch nodes (without content)
+        let mut stmt = conn.prepare(
+            "SELECT id, key, category, source, tags, confidence, access_count, last_accessed_at
+             FROM memories ORDER BY updated_at DESC",
+        )?;
+
+        let mut nodes = Vec::new();
+        let mut max_score: f64 = 0.0;
+        let raw_rows: Vec<(String, String, String, String, String, f64, u32, Option<String>)> =
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, f64>(5)?,
+                    row.get::<_, u32>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        for row in &raw_rows {
+            if row.5 > max_score {
+                max_score = row.5;
             }
+        }
+        if max_score <= 0.0 {
+            max_score = 1.0;
+        }
+
+        for (id, key, category, source, tags, confidence, access_count, last_accessed_at) in
+            &raw_rows
+        {
+            let normalized = confidence / max_score;
+            let tag_list: Vec<&str> = tags.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+            nodes.push(serde_json::json!({
+                "id": id,
+                "key": key,
+                "category": category,
+                "source": source,
+                "tags": tag_list,
+                "score": confidence,
+                "display_score": (normalized * 100.0).round() / 100.0,
+                "access_count": access_count,
+                "last_accessed_at": last_accessed_at,
+            }));
+        }
+
+        // Fetch links, capped per source node
+        let mut link_stmt = conn.prepare(
+            "SELECT source_id, target_id, similarity FROM memory_links ORDER BY source_id, similarity DESC",
+        )?;
+        let all_links: Vec<(String, String, f64)> = link_stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, f64>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut links = Vec::new();
+        let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for (source_id, target_id, similarity) in &all_links {
+            let count = counts.entry(source_id.as_str()).or_insert(0);
+            if *count >= max_links {
+                continue;
+            }
+            *count += 1;
+            links.push(serde_json::json!({
+                "source_id": source_id,
+                "target_id": target_id,
+                "similarity": similarity,
+            }));
+        }
+
+        Ok(serde_json::json!({
+            "nodes": nodes,
+            "links": links,
         }))
-        .into_response()
+    })
+    .await;
+
+    match result {
+        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Graph query failed: {e}")})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Graph task panicked: {e}")})),
+        )
+            .into_response(),
     }
 }
 
-/// GET /api/cli-tools — discovered CLI tools
-pub async fn handle_api_cli_tools(
+/// GET /api/memory/leaderboard — cached leaderboard JSON from consolidation
+///
+/// Returns the cached leaderboard payload. Returns 503 if the cache is
+/// empty (daemon has not yet run consolidation).
+pub async fn handle_api_memory_leaderboard(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -481,220 +321,248 @@ pub async fn handle_api_cli_tools(
         return e.into_response();
     }
 
-    let tools = crate::tools::cli_discovery::discover_cli_tools(&[], &[]);
-
-    Json(serde_json::json!({"cli_tools": tools})).into_response()
-}
-
-/// GET /api/health — component health snapshot
-pub async fn handle_api_health(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_pairing_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let snapshot = crate::health::snapshot();
-    Json(serde_json::json!({"health": snapshot})).into_response()
-}
-
-fn is_masked_secret(value: &str) -> bool {
-    value == MASKED_SECRET
-}
-
-fn mask_optional_secret(value: &mut Option<String>) {
-    if value.is_some() {
-        *value = Some(MASKED_SECRET.to_string());
-    }
-}
-
-fn mask_required_secret(value: &mut String) {
-    if !value.is_empty() {
-        *value = MASKED_SECRET.to_string();
-    }
-}
-
-fn mask_vec_secrets(values: &mut [String]) {
-    for value in values.iter_mut() {
-        if !value.is_empty() {
-            *value = MASKED_SECRET.to_string();
+    let sqlite = match state
+        .mem
+        .as_any()
+        .downcast_ref::<crate::memory::SqliteMemory>()
+    {
+        Some(s) => s,
+        None => {
+            return (
+                StatusCode::NOT_IMPLEMENTED,
+                Json(serde_json::json!({"error": "Leaderboard requires SQLite memory backend"})),
+            )
+                .into_response();
         }
-    }
-}
+    };
 
-#[allow(clippy::ref_option)]
-fn restore_optional_secret(value: &mut Option<String>, current: &Option<String>) {
-    if value.as_deref().is_some_and(is_masked_secret) {
-        *value = current.clone();
-    }
-}
+    // Build leaderboard from live data: top 50 memories ordered by access_count
+    let conn = sqlite.conn.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, key, category, source, tags, confidence, access_count, last_accessed_at
+             FROM memories ORDER BY access_count DESC, confidence DESC LIMIT 50",
+        )?;
 
-fn restore_required_secret(value: &mut String, current: &str) {
-    if is_masked_secret(value) {
-        *value = current.to_string();
-    }
-}
+        let entries: Vec<serde_json::Value> = stmt
+            .query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0)?,
+                    "key": row.get::<_, String>(1)?,
+                    "category": row.get::<_, String>(2)?,
+                    "source": row.get::<_, String>(3)?,
+                    "tags": row.get::<_, String>(4)?,
+                    "confidence": row.get::<_, f64>(5)?,
+                    "access_count": row.get::<_, u32>(6)?,
+                    "last_accessed_at": row.get::<_, Option<String>>(7)?,
+                }))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
-fn restore_vec_secrets(values: &mut [String], current: &[String]) {
-    for (idx, value) in values.iter_mut().enumerate() {
-        if is_masked_secret(value) {
-            if let Some(existing) = current.get(idx) {
-                *value = existing.clone();
+        Ok(serde_json::json!(entries))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(body)) => {
+            if body.as_array().is_some_and(|a| a.is_empty()) {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({"error": "Leaderboard is empty — no memories yet"})),
+                )
+                    .into_response();
             }
+            Json(body).into_response()
         }
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Leaderboard query failed: {e}")})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Leaderboard task panicked: {e}")})),
+        )
+            .into_response(),
     }
 }
 
-fn mask_sensitive_fields(config: &crate::config::Config) -> crate::config::Config {
-    let mut masked = config.clone();
-
-    mask_optional_secret(&mut masked.api_key);
-    mask_vec_secrets(&mut masked.reliability.api_keys);
-    mask_vec_secrets(&mut masked.gateway.paired_tokens);
-    mask_optional_secret(&mut masked.composio.api_key);
-    mask_optional_secret(&mut masked.browser.computer_use.api_key);
-    mask_optional_secret(&mut masked.web_search.brave_api_key);
-    mask_optional_secret(&mut masked.twitter_browse.cookie_string);
-    mask_optional_secret(&mut masked.storage.provider.config.db_url);
-
-    for agent in masked.agents.values_mut() {
-        mask_optional_secret(&mut agent.api_key);
+/// GET /api/memory/stats — aggregate memory statistics
+///
+/// Returns fact counts by category, total count, and consolidation
+/// backlog size for the Brain Visualizer dashboard widget.
+pub async fn handle_api_memory_stats(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    if let Err(e) = require_pairing_auth(&state, &headers) {
+        return e.into_response();
     }
 
-    if let Some(telegram) = masked.channels_config.telegram.as_mut() {
-        mask_required_secret(&mut telegram.bot_token);
-    }
-    if let Some(discord) = masked.channels_config.discord.as_mut() {
-        mask_required_secret(&mut discord.bot_token);
-    }
-    if let Some(webhook) = masked.channels_config.webhook.as_mut() {
-        mask_optional_secret(&mut webhook.secret);
-    }
-    masked
-}
-
-fn restore_masked_sensitive_fields(
-    incoming: &mut crate::config::Config,
-    current: &crate::config::Config,
-) {
-    restore_optional_secret(&mut incoming.api_key, &current.api_key);
-    restore_vec_secrets(
-        &mut incoming.gateway.paired_tokens,
-        &current.gateway.paired_tokens,
-    );
-    restore_vec_secrets(
-        &mut incoming.reliability.api_keys,
-        &current.reliability.api_keys,
-    );
-    restore_optional_secret(&mut incoming.composio.api_key, &current.composio.api_key);
-    restore_optional_secret(
-        &mut incoming.browser.computer_use.api_key,
-        &current.browser.computer_use.api_key,
-    );
-    restore_optional_secret(
-        &mut incoming.web_search.brave_api_key,
-        &current.web_search.brave_api_key,
-    );
-    restore_optional_secret(
-        &mut incoming.twitter_browse.cookie_string,
-        &current.twitter_browse.cookie_string,
-    );
-    restore_optional_secret(
-        &mut incoming.storage.provider.config.db_url,
-        &current.storage.provider.config.db_url,
-    );
-    for (name, agent) in &mut incoming.agents {
-        if let Some(current_agent) = current.agents.get(name) {
-            restore_optional_secret(&mut agent.api_key, &current_agent.api_key);
+    let sqlite = match state
+        .mem
+        .as_any()
+        .downcast_ref::<crate::memory::SqliteMemory>()
+    {
+        Some(s) => s,
+        None => {
+            // Fallback for non-SQLite backends: use trait methods only
+            let total = state.mem.count().await.unwrap_or(0);
+            return Json(serde_json::json!({
+                "total_facts": total,
+                "categories": { "core": 0, "daily": 0, "conversation": 0 },
+                "last_consolidation": null,
+                "backlog_count": 0,
+            }))
+            .into_response();
         }
+    };
+
+    let conn = sqlite.conn.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
+        let conn = conn.lock();
+
+        let total: u32 =
+            conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?;
+
+        let core: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE category = 'core'",
+            [],
+            |r| r.get(0),
+        )?;
+        let daily: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE category = 'daily'",
+            [],
+            |r| r.get(0),
+        )?;
+        let conversation: u32 = conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE category = 'conversation'",
+            [],
+            |r| r.get(0),
+        )?;
+
+        let backlog_count: u32 =
+            conn.query_row("SELECT COUNT(*) FROM consolidation_backlog", [], |r| {
+                r.get(0)
+            })?;
+
+        Ok(serde_json::json!({
+            "total_facts": total,
+            "categories": {
+                "core": core,
+                "daily": daily,
+                "conversation": conversation,
+            },
+            "last_consolidation": null,
+            "backlog_count": backlog_count,
+        }))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(body)) => Json(body).into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Stats query failed: {e}")})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Stats task panicked: {e}")})),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/memory/detail/:id — full content lookup by memory ID
+///
+/// Returns the complete memory entry including content. Returns 404 if
+/// no memory with the given ID exists.
+pub async fn handle_api_memory_detail(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = require_pairing_auth(&state, &headers) {
+        return e.into_response();
     }
 
-    if let (Some(incoming_ch), Some(current_ch)) = (
-        incoming.channels_config.telegram.as_mut(),
-        current.channels_config.telegram.as_ref(),
-    ) {
-        restore_required_secret(&mut incoming_ch.bot_token, &current_ch.bot_token);
-    }
-    if let (Some(incoming_ch), Some(current_ch)) = (
-        incoming.channels_config.discord.as_mut(),
-        current.channels_config.discord.as_ref(),
-    ) {
-        restore_required_secret(&mut incoming_ch.bot_token, &current_ch.bot_token);
-    }
-    if let (Some(incoming_ch), Some(current_ch)) = (
-        incoming.channels_config.webhook.as_mut(),
-        current.channels_config.webhook.as_ref(),
-    ) {
-        restore_optional_secret(&mut incoming_ch.secret, &current_ch.secret);
+    let sqlite = match state
+        .mem
+        .as_any()
+        .downcast_ref::<crate::memory::SqliteMemory>()
+    {
+        Some(s) => s,
+        None => {
+            // Fallback: try trait get() treating the id as a key
+            return match state.mem.get(&id).await {
+                Ok(Some(entry)) => Json(serde_json::json!(entry)).into_response(),
+                Ok(None) => (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": "Memory not found"})),
+                )
+                    .into_response(),
+                Err(e) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": format!("Memory lookup failed: {e}")})),
+                )
+                    .into_response(),
+            };
+        }
+    };
+
+    let conn = sqlite.conn.clone();
+    let id_clone = id.clone();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<serde_json::Value>> {
+        let conn = conn.lock();
+        let mut stmt = conn.prepare(
+            "SELECT id, key, content, category, created_at, session_id, \
+                    confidence, source, tags, access_count, last_accessed_at, decay_half_life_days \
+             FROM memories WHERE id = ?1",
+        )?;
+
+        let mut rows = stmt.query_map(rusqlite::params![id_clone], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "key": row.get::<_, String>(1)?,
+                "content": row.get::<_, String>(2)?,
+                "category": row.get::<_, String>(3)?,
+                "timestamp": row.get::<_, String>(4)?,
+                "session_id": row.get::<_, Option<String>>(5)?,
+                "confidence": row.get::<_, f64>(6)?,
+                "source": row.get::<_, String>(7)?,
+                "tags": row.get::<_, String>(8)?,
+                "access_count": row.get::<_, u32>(9)?,
+                "last_accessed_at": row.get::<_, Option<String>>(10)?,
+                "decay_half_life_days": row.get::<_, i64>(11)?,
+            }))
+        })?;
+
+        match rows.next() {
+            Some(Ok(entry)) => Ok(Some(entry)),
+            _ => Ok(None),
+        }
+    })
+    .await;
+
+    match result {
+        Ok(Ok(Some(entry))) => Json(entry).into_response(),
+        Ok(Ok(None)) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "Memory not found"})),
+        )
+            .into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Memory detail failed: {e}")})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("Memory detail task panicked: {e}")})),
+        )
+            .into_response(),
     }
 }
 
-fn hydrate_config_for_save(
-    mut incoming: crate::config::Config,
-    current: &crate::config::Config,
-) -> crate::config::Config {
-    restore_masked_sensitive_fields(&mut incoming, current);
-    incoming.config_path = current.config_path.clone();
-    incoming.workspace_dir = current.workspace_dir.clone();
-    incoming
-}
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn masking_keeps_toml_valid_and_preserves_api_keys_type() {
-        let mut cfg = crate::config::Config::default();
-        cfg.api_key = Some("sk-live-123".to_string());
-        cfg.reliability.api_keys = vec!["rk-1".to_string(), "rk-2".to_string()];
-        cfg.gateway.paired_tokens = vec!["pair-token-1".to_string()];
-
-        let masked = mask_sensitive_fields(&cfg);
-        let toml = toml::to_string_pretty(&masked).expect("masked config should serialize");
-        let parsed: crate::config::Config =
-            toml::from_str(&toml).expect("masked config should remain valid TOML for Config");
-
-        assert_eq!(parsed.api_key.as_deref(), Some(MASKED_SECRET));
-        assert_eq!(
-            parsed.reliability.api_keys,
-            vec![MASKED_SECRET.to_string(), MASKED_SECRET.to_string()]
-        );
-        assert_eq!(
-            parsed.gateway.paired_tokens,
-            vec![MASKED_SECRET.to_string()]
-        );
-    }
-
-    #[test]
-    fn hydrate_config_for_save_restores_masked_secrets_and_paths() {
-        let mut current = crate::config::Config::default();
-        current.config_path = std::path::PathBuf::from("/tmp/current/config.toml");
-        current.workspace_dir = std::path::PathBuf::from("/tmp/current/workspace");
-        current.api_key = Some("real-key".to_string());
-        current.reliability.api_keys = vec!["r1".to_string(), "r2".to_string()];
-        current.gateway.paired_tokens = vec!["pair-1".to_string(), "pair-2".to_string()];
-
-        let mut incoming = mask_sensitive_fields(&current);
-        incoming.default_model = Some("gpt-4.1-mini".to_string());
-        incoming.reliability.api_keys = vec![MASKED_SECRET.to_string(), "r2-new".to_string()];
-        incoming.gateway.paired_tokens = vec![MASKED_SECRET.to_string(), "pair-2-new".to_string()];
-
-        let hydrated = hydrate_config_for_save(incoming, &current);
-
-        assert_eq!(hydrated.config_path, current.config_path);
-        assert_eq!(hydrated.workspace_dir, current.workspace_dir);
-        assert_eq!(hydrated.api_key, current.api_key);
-        assert_eq!(hydrated.default_model.as_deref(), Some("gpt-4.1-mini"));
-        assert_eq!(
-            hydrated.reliability.api_keys,
-            vec!["r1".to_string(), "r2-new".to_string()]
-        );
-        assert_eq!(
-            hydrated.gateway.paired_tokens,
-            vec!["pair-1".to_string(), "pair-2-new".to_string()]
-        );
-    }
-}

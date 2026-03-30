@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.util.rememberPowerSaveMode
 
 /**
  * Full-screen WebView pointing at the gateway's React SPA on localhost.
@@ -86,6 +87,7 @@ fun WebDashboardScreen(
         is WebDashboardViewModel.UiState.Content -> {
             val data = currentState.data
             val url = "http://127.0.0.1:${data.port}/_app/"
+            val isPowerSave = rememberPowerSaveMode()
 
             @Suppress("SetJavaScriptEnabled")
             AndroidView(
@@ -108,6 +110,16 @@ fun WebDashboardScreen(
                                     val requestUrl = request?.url?.toString() ?: return true
                                     return !requestUrl.startsWith("http://127.0.0.1")
                                 }
+
+                                override fun onPageFinished(
+                                    view: WebView?,
+                                    url: String?,
+                                ) {
+                                    view?.evaluateJavascript(
+                                        "window.__ZERO_POWER_SAVE = $isPowerSave;",
+                                        null,
+                                    )
+                                }
                             }
 
                         CookieManager.getInstance().apply {
@@ -121,6 +133,12 @@ fun WebDashboardScreen(
 
                         loadUrl(url)
                     }
+                },
+                update = { webView ->
+                    webView.evaluateJavascript(
+                        "window.__ZERO_POWER_SAVE = $isPowerSave;",
+                        null,
+                    )
                 },
             )
         }

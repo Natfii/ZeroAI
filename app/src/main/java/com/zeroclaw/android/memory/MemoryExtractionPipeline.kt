@@ -62,7 +62,7 @@ class MemoryExtractionPipeline(
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     suspend fun process(
         userMessage: String,
-        @Suppress("UnusedParameter") sessionId: String,
+        sessionId: String,
     ): Int {
         val powerState = powerStateProvider()
         if (powerState == PowerState.CRITICAL) return 0
@@ -105,12 +105,18 @@ class MemoryExtractionPipeline(
             if (stored) storedCount++
         }
 
-        // Phase 2 hook: flag message for LLM extraction when nothing was captured
+        // Phase 2: queue interesting unextracted messages for LLM consolidation
         val needsLlmExtraction =
             storedCount == 0 &&
                 InterestingnessFilter.isInteresting(userMessage, heuristicCaptured = false)
         if (needsLlmExtraction) {
-            // Phase 2 will implement the actual flagging mechanism
+            try {
+                com.zeroclaw.ffi.addToConsolidationBacklog(sessionId, userMessage)
+            } catch (
+                @Suppress("TooGenericExceptionCaught") e: Exception,
+            ) {
+                // Non-critical: backlog failure must not disrupt message flow
+            }
         }
 
         return storedCount

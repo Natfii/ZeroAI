@@ -63,6 +63,9 @@ ssh-key = { version = "0.6", features = ["rsa"] }
 rsa = "0.9"
 uuid = { version = "1", features = ["v4"] }
 rand_core = "0.6"
+# Memory consolidation — direct SQLite access for backlog table operations
+rusqlite = { version = "0.37", features = ["bundled"] }
+parking_lot = "0.12"
 
 [features]
 default = ["ghostty-vt"]

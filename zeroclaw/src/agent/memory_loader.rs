@@ -183,6 +183,10 @@ mod tests {
 
     #[async_trait]
     impl Memory for MockMemory {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         async fn store(
             &self,
             _key: &str,
@@ -244,6 +248,10 @@ mod tests {
 
     #[async_trait]
     impl Memory for MockMemoryWithEntries {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         async fn store(
             &self,
             _key: &str,

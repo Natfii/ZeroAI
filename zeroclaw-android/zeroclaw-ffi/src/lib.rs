@@ -17,6 +17,7 @@ uniffi::setup_scaffolding!();
 mod agent_script_host;
 mod auth_profiles;
 mod capability_grants;
+mod consolidation;
 mod cost;
 mod credentials;
 mod cron;
@@ -1669,6 +1670,116 @@ pub fn extract_facts(
         memory_browse::extract_facts_inner(message)
     }))
     .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Consolidation backlog
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Adds a message to the consolidation backlog for later LLM extraction.
+///
+/// Truncates messages exceeding 4096 characters. The backlog is pruned to
+/// a maximum of 200 entries after each insertion.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or the
+/// memory backend is unavailable,
+/// [`FfiError::SpawnError`] on SQLite failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn add_to_consolidation_backlog(
+    session_id: String,
+    message_text: String,
+) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        consolidation::add_to_consolidation_backlog_inner(session_id, message_text)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns the number of pending messages in the consolidation backlog.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or the
+/// memory backend is unavailable,
+/// [`FfiError::SpawnError`] on SQLite failure, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn consolidation_backlog_count() -> Result<u32, FfiError> {
+    catch_unwind(consolidation::consolidation_backlog_count_inner).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Runs LLM startup consolidation on the backlog.
+///
+/// Checks `smart_extraction` config flag, reads backlog messages, sends them
+/// to the configured provider in batches of 30, parses the JSON response, and
+/// stores validated facts. Clears the backlog on success.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::SpawnError`] on provider or storage failures, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn run_startup_consolidation() -> Result<consolidation::FfiConsolidationReport, FfiError> {
+    catch_unwind(consolidation::run_startup_consolidation_inner).unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Leaderboard cache
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Writes a JSON string to the in-memory leaderboard cache.
+///
+/// Called by the Kotlin `ZeroAIDaemonService` after querying the Room DAO.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::StateCorrupted`] if the cache lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn set_leaderboard_cache(json: String) -> Result<(), FfiError> {
+    catch_unwind(AssertUnwindSafe(|| {
+        memory_browse::set_leaderboard_cache_inner(json)
+    }))
+    .unwrap_or_else(|e| {
+        Err(FfiError::InternalPanic {
+            detail: panic_detail(&e),
+        })
+    })
+}
+
+/// Returns the current leaderboard cache JSON string.
+///
+/// Returns `"[]"` if no data has been written yet.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running,
+/// [`FfiError::StateCorrupted`] if the cache lock is poisoned, or
+/// [`FfiError::InternalPanic`] if native code panics.
+#[uniffi::export]
+pub fn get_leaderboard_cache() -> Result<String, FfiError> {
+    catch_unwind(memory_browse::get_leaderboard_cache_inner).unwrap_or_else(|e| {
         Err(FfiError::InternalPanic {
             detail: panic_detail(&e),
         })
