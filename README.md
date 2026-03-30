@@ -35,14 +35,8 @@ long-lived on-device service, exposes tools through a native [Zeroclaw] Rust cor
 - Public collaboration and support are not available as this is a personal project. I just want you all
   along for the journey!
 
-The Rust core under `zeroclaw/` is a stripped and modified descendant of the upstream
-ZeroClaw project:
-
-- [https://github.com/zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)
-
-They deserve credit for the core runtime work. If you like what powers this app, please
-support the upstream project directly.
-
+The Rust core under `zeroclaw/` descends from the upstream
+[ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) project (see Acknowledgements).
 Please do **not** file issues or support requests with ZeroClaw Labs for behavior that
 comes from this downstream Android fork.
 
@@ -184,15 +178,12 @@ The Rust layer owns the agent runtime, tools, config parsing, and execution engi
   <img src="assets/mini-zero-sleeping.svg" alt="Zero sleeping" width="38" />
 </p>
 
-## Upstream ancestry
-
-The `zeroclaw/` Rust core in this repository is a **stripped and modified** version of the upstream project at:
-
-- [https://github.com/zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw)
-
-For the `zeroclaw/` directory, this repo uses the upstream **MIT license option**.
-
 ## Acknowledgements
+
+The `zeroclaw/` Rust core is a **stripped and modified** version of the upstream
+[ZeroClaw](https://github.com/zeroclaw-labs/zeroclaw) project (MIT/Apache-2.0).
+They deserve credit for the core runtime work — if you like what powers this app,
+please support the upstream project directly.
 
 The terminal subsystem's safe Rust FFI wrappers were informed by patterns from
 [libghostty-rs](https://github.com/Uzaaft/libghostty-rs) by Uzair Aftab and
@@ -201,6 +192,11 @@ Specific patterns adopted include the `Object<T>` RAII handle wrapper, structure
 error handling with `OutOfSpace` retry, zero-allocation grapheme extraction,
 `CellContentTag` discrimination, mouse motion deduplication, focus event encoding,
 paste safety validation, and the `sized!` macro for C struct initialization.
+
+Zero's agent persona and system prompt architecture draw from
+[Hermes](https://huggingface.co/NousResearch) by Nous Research — their work on
+structured reasoning, tool-use formatting, and function-calling conventions
+informed how Zero frames its identity and executes tool chains on-device.
 
 ## Why...?
 
