@@ -10,7 +10,6 @@
 pub mod api;
 pub mod sse;
 pub mod static_files;
-pub mod ws;
 
 use crate::config::Config;
 use crate::cost::CostTracker;
@@ -27,7 +26,7 @@ use axum::{
     extract::{ConnectInfo, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Json},
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -603,10 +602,6 @@ pub async fn run_gateway(
         event_tx,
     };
 
-    let config_put_router = Router::new()
-        .route("/api/config", put(api::handle_api_config_put))
-        .layer(RequestBodyLimitLayer::new(1_048_576));
-
     let app = Router::new()
         .route("/health", get(handle_health))
         .route("/metrics", get(handle_metrics))
@@ -615,26 +610,11 @@ pub async fn run_gateway(
         .route("/webhook", post(handle_webhook))
         .route("/api/session", get(api::handle_api_session))
         .route("/api/status", get(api::handle_api_status))
-        .route("/api/config", get(api::handle_api_config_get))
-        .route("/api/tools", get(api::handle_api_tools))
-        .route("/api/cron", get(api::handle_api_cron_list))
-        .route("/api/cron", post(api::handle_api_cron_add))
-        .route("/api/cron/{id}", delete(api::handle_api_cron_delete))
-        .route("/api/integrations", get(api::handle_api_integrations))
-        .route(
-            "/api/doctor",
-            get(api::handle_api_doctor).post(api::handle_api_doctor),
-        )
         .route("/api/memory", get(api::handle_api_memory_list))
         .route("/api/memory", post(api::handle_api_memory_store))
         .route("/api/memory/{key}", delete(api::handle_api_memory_delete))
-        .route("/api/cost", get(api::handle_api_cost))
-        .route("/api/cli-tools", get(api::handle_api_cli_tools))
-        .route("/api/health", get(api::handle_api_health))
         .route("/api/events", get(sse::handle_sse_events))
-        .route("/ws/chat", get(ws::handle_ws_chat))
         .route("/_app/{*path}", get(static_files::handle_static))
-        .merge(config_put_router)
         .with_state(state)
         .layer(RequestBodyLimitLayer::new(MAX_BODY_SIZE))
         .layer(TimeoutLayer::with_status_code(
