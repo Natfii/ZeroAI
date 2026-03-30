@@ -12,7 +12,7 @@ use tempfile::TempDir;
 
 use zeroclaw::memory::heuristic::extract_facts;
 use zeroclaw::memory::scoring::{
-    category_half_life, combined_score, frequency_score, recency_score, should_prune,
+    apply_boosts, category_half_life, combined_score, frequency_score, recency_score, should_prune,
 };
 use zeroclaw::memory::sqlite::SqliteMemory;
 use zeroclaw::memory::traits::{Memory, MemoryCategory};
@@ -223,6 +223,43 @@ fn scoring_recency_and_frequency_sanity() {
     assert!(
         (frequency_score(100) - 1.0).abs() < f64::EPSILON,
         "100 accesses should be capped at 1.0"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// apply_boosts tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn boost_core_recent_frequent() {
+    let now = chrono::Local::now().to_rfc3339();
+    let score = apply_boosts(0.5, &MemoryCategory::Core, Some(&now), 10);
+    // 0.5 * 1.5 * 1.2 * 1.1 = 0.99
+    assert!((score - 0.99).abs() < 0.01, "expected ~0.99, got {score}");
+}
+
+#[test]
+fn boost_core_only() {
+    let score = apply_boosts(0.5, &MemoryCategory::Core, None, 2);
+    // 0.5 * 1.5 = 0.75 (no recency, no frequency boost)
+    assert!((score - 0.75).abs() < 0.01, "expected ~0.75, got {score}");
+}
+
+#[test]
+fn boost_no_boosts_apply() {
+    let old = "2020-01-01T00:00:00+00:00";
+    let score = apply_boosts(0.8, &MemoryCategory::Daily, Some(old), 2);
+    // No boosts: not Core, not recent, count <= 5
+    assert!((score - 0.8).abs() < 0.01, "expected ~0.8, got {score}");
+}
+
+#[test]
+fn boost_preserves_zero() {
+    let now = chrono::Local::now().to_rfc3339();
+    assert_eq!(
+        apply_boosts(0.0, &MemoryCategory::Core, Some(&now), 10),
+        0.0,
+        "zero base score should remain 0.0 after boosts"
     );
 }
 

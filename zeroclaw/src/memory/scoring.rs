@@ -70,6 +70,56 @@ pub fn should_prune(recency: f64, access_count: u32) -> bool {
     recency < 0.05 && access_count < 3
 }
 
+/// Applies category-aware ranking boosts to a base score.
+///
+/// Boosts stack multiplicatively. Returns the raw boosted score without
+/// normalization — callers use it for ranking only. For display, normalize
+/// against the actual max score in the result set.
+///
+/// Boosts applied:
+/// * [`MemoryCategory::Core`] — 1.5×
+/// * Accessed within the last 24 hours — 1.2×
+/// * `access_count > 5` — 1.1×
+/// * Maximum combined multiplier: 1.98× (all three stacked)
+///
+/// # Parameters
+///
+/// * `base_score` — Pre-boost score, typically the output of [`combined_score`].
+/// * `category` — Memory category; only [`MemoryCategory::Core`] receives a boost.
+/// * `last_accessed_at` — RFC 3339 timestamp of last access, or `None` to skip
+///   the recency boost.
+/// * `access_count` — Total number of times this memory has been accessed.
+pub fn apply_boosts(
+    base_score: f64,
+    category: &MemoryCategory,
+    last_accessed_at: Option<&str>,
+    access_count: u32,
+) -> f64 {
+    let mut score = base_score;
+
+    // Core facts: 1.5×
+    if matches!(category, MemoryCategory::Core) {
+        score *= 1.5;
+    }
+
+    // Accessed in last 24h: 1.2×
+    if let Some(ts) = last_accessed_at {
+        if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(ts) {
+            let hours = (chrono::Local::now() - parsed.with_timezone(&chrono::Local)).num_hours();
+            if hours < 24 {
+                score *= 1.2;
+            }
+        }
+    }
+
+    // Frequently accessed (>5): 1.1×
+    if access_count > 5 {
+        score *= 1.1;
+    }
+
+    score
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
