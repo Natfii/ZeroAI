@@ -11,7 +11,7 @@ pub use schema::{
     EstopConfig, GatewayConfig, GuildOverride, HardwareConfig,
     HardwareTransport, HeartbeatConfig, HooksConfig, HttpRequestConfig, IdentityConfig,
     MemoryConfig, MultimodalConfig, ObservabilityConfig,
-    PeripheralBoardConfig, PeripheralsConfig, ProxyConfig, ProxyScope, QdrantConfig,
+    PeripheralBoardConfig, PeripheralsConfig, ProxyConfig, ProxyScope,
     ReliabilityConfig, ResourceLimitsConfig, RoutingConfig, RuntimeConfig,
     SandboxBackend, SandboxConfig, SchedulerConfig, SecretsConfig, SecurityConfig, SkillsConfig,
     SkillsPromptInjectionMode, StorageConfig, StorageProviderConfig, StorageProviderSection, SystemPromptConfig,

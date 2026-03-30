@@ -245,7 +245,7 @@ pub struct Config {
     #[serde(default)]
     pub channels_config: ChannelsConfig,
 
-    /// Memory backend configuration: sqlite, markdown, embeddings (`[memory]`).
+    /// Memory backend configuration: sqlite, embeddings (`[memory]`).
     #[serde(default)]
     pub memory: MemoryConfig,
 
@@ -1858,45 +1858,10 @@ impl Default for StorageProviderConfig {
 ///
 /// Controls conversation memory storage, embeddings, hybrid search, response caching,
 /// and memory snapshot/hydration.
-/// Configuration for Qdrant vector database backend (`[memory.qdrant]`).
-/// Used when `[memory].backend = "qdrant"`.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct QdrantConfig {
-    /// Qdrant server URL (e.g. "http://localhost:6333").
-    /// Falls back to `QDRANT_URL` env var if not set.
-    #[serde(default)]
-    pub url: Option<String>,
-    /// Qdrant collection name for storing memories.
-    /// Falls back to `QDRANT_COLLECTION` env var, or default "zeroclaw_memories".
-    #[serde(default = "default_qdrant_collection")]
-    pub collection: String,
-    /// Optional API key for Qdrant Cloud or secured instances.
-    /// Falls back to `QDRANT_API_KEY` env var if not set.
-    #[serde(default)]
-    pub api_key: Option<String>,
-}
-
-fn default_qdrant_collection() -> String {
-    "zeroclaw_memories".into()
-}
-
-impl Default for QdrantConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            collection: default_qdrant_collection(),
-            api_key: None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct MemoryConfig {
-    /// "sqlite" | "lucid" | "postgres" | "qdrant" | "markdown" | "none" (`none` = explicit no-op memory)
-    ///
-    /// `postgres` requires `[storage.provider.config]` with `db_url` (`dbURL` alias supported).
-    /// `qdrant` uses `[memory.qdrant]` config or `QDRANT_URL` env var.
+    /// "sqlite" | "none" (`none` = explicit no-op memory)
     pub backend: String,
     /// Auto-save user-stated conversation input to memory (assistant output is excluded)
     pub auto_save: bool,
@@ -1963,11 +1928,6 @@ pub struct MemoryConfig {
     /// None = wait indefinitely (default). Recommended max: 300.
     #[serde(default)]
     pub sqlite_open_timeout_secs: Option<u64>,
-
-    /// Configuration for Qdrant vector database backend.
-    /// Only used when `backend = "qdrant"`.
-    #[serde(default)]
-    pub qdrant: QdrantConfig,
 }
 
 fn default_embedding_provider() -> String {
@@ -2037,7 +1997,6 @@ impl Default for MemoryConfig {
             snapshot_on_hygiene: false,
             auto_hydrate: true,
             sqlite_open_timeout_secs: None,
-            qdrant: QdrantConfig::default(),
         }
     }
 }
