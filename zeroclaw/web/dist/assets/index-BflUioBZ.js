@@ -1,8 +1,0 @@
-(function(){const i=document.createElement("link").relList;if(i&&i.supports&&i.supports("modulepreload"))return;for(const e of document.querySelectorAll('link[rel="modulepreload"]'))o(e);new MutationObserver(e=>{for(const t of e)if(t.type==="childList")for(const a of t.addedNodes)a.tagName==="LINK"&&a.rel==="modulepreload"&&o(a)}).observe(document,{childList:!0,subtree:!0});function n(e){const t={};return e.integrity&&(t.integrity=e.integrity),e.referrerPolicy&&(t.referrerPolicy=e.referrerPolicy),e.crossOrigin==="use-credentials"?t.credentials="include":e.crossOrigin==="anonymous"?t.credentials="omit":t.credentials="same-origin",t}function o(e){if(e.ep)return;e.ep=!0;const t=n(e);fetch(e.href,t)}})();function s(){return window.__ZERO_POWER_SAVE===!0?!0:window.matchMedia("(prefers-reduced-motion: reduce)").matches}function c(){return window.matchMedia("(prefers-reduced-motion: reduce)").matches}async function d(){const r=document.getElementById("app");if(!r)return;try{if(!(await fetch("/_app/../api/session")).ok){r.textContent="Not authenticated. Please pair with the app.";return}}catch{r.textContent="Cannot reach gateway.";return}const i=localStorage.getItem("brain-view-mode"),n=c()||s(),o=i??(n?"table":"graph");r.dataset.viewMode=o,r.innerHTML=`<div class="filter-bar" role="toolbar" aria-label="Memory filters">
-    <span style="font-weight:600;margin-right:auto;">Memory Brain</span>
-    <button id="view-toggle" class="close-btn" aria-label="Toggle view mode"
-            style="font-size:14px;min-width:auto;padding:6px 12px;">
-      ${o==="graph"?"Show as Table":"Show as Graph"}
-    </button>
-  </div>
-  <div id="graph-container" style="width:100%;height:100%;"></div>`,console.log("[Brain] initialized, powerSave:",s(),"view:",o)}d();
