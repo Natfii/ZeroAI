@@ -4606,6 +4606,7 @@ default_temperature = 0.7
             transcription: TranscriptionConfig::default(),
             email: None,
             system_prompt: SystemPromptConfig::default(),
+            tty: TtyConfig::default(),
         };
 
         let toml_str = toml::to_string_pretty(&config).unwrap();
@@ -4807,6 +4808,7 @@ tool_dispatcher = "xml"
             transcription: TranscriptionConfig::default(),
             email: None,
             system_prompt: SystemPromptConfig::default(),
+            tty: TtyConfig::default(),
         };
 
         config.save().await.unwrap();

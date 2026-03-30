@@ -176,6 +176,8 @@ impl SqliteMemory {
             )?;
         }
 
+        migrate_memcore_schema(conn)?;
+
         Ok(())
     }
 
@@ -413,6 +415,57 @@ impl SqliteMemory {
 
         Ok(count)
     }
+}
+
+/// Check whether a column already exists on a SQLite table.
+fn column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .map(|rows| rows.filter_map(|r| r.ok()).any(|name| name == column))
+        })
+        .unwrap_or(false)
+}
+
+/// Add MemCore columns to the `memories` table (idempotent).
+///
+/// Six new columns support access tracking, confidence scoring,
+/// source attribution, tagging, and configurable decay half-lives.
+/// After adding columns, existing rows receive category-aware
+/// `decay_half_life_days` defaults.
+pub(crate) fn migrate_memcore_schema(conn: &Connection) -> anyhow::Result<()> {
+    let alters: &[(&str, &str)] = &[
+        ("access_count", "ALTER TABLE memories ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0"),
+        (
+            "last_accessed_at",
+            "ALTER TABLE memories ADD COLUMN last_accessed_at TEXT",
+        ),
+        ("confidence", "ALTER TABLE memories ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0"),
+        ("source", "ALTER TABLE memories ADD COLUMN source TEXT NOT NULL DEFAULT 'agent'"),
+        ("tags", "ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT ''"),
+        (
+            "decay_half_life_days",
+            "ALTER TABLE memories ADD COLUMN decay_half_life_days INTEGER NOT NULL DEFAULT 90",
+        ),
+    ];
+
+    for (col, ddl) in alters {
+        if !column_exists(conn, "memories", col) {
+            conn.execute_batch(ddl)?;
+        }
+    }
+
+    conn.execute_batch(
+        "UPDATE memories SET decay_half_life_days = CASE
+            WHEN category = 'core' THEN 365
+            WHEN category = 'daily' THEN 7
+            WHEN category = 'conversation' THEN 1
+            ELSE 90
+        END
+        WHERE decay_half_life_days = 90 AND source = 'agent';",
+    )?;
+
+    Ok(())
 }
 
 #[async_trait]
@@ -1796,5 +1849,114 @@ mod tests {
         mem.reindex().await.unwrap();
 
         assert_eq!(mem.count().await.unwrap(), 1);
+    }
+
+    /// Helper: create an in-memory DB with the *old* schema (no MemCore columns).
+    fn old_schema_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE memories (
+                id          TEXT PRIMARY KEY,
+                key         TEXT NOT NULL UNIQUE,
+                content     TEXT NOT NULL,
+                category    TEXT NOT NULL DEFAULT 'core',
+                embedding   BLOB,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                session_id  TEXT
+            );",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn migrate_adds_columns() {
+        let conn = old_schema_db();
+        migrate_memcore_schema(&conn).unwrap();
+
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(memories)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for expected in &[
+            "access_count",
+            "last_accessed_at",
+            "confidence",
+            "source",
+            "tags",
+            "decay_half_life_days",
+        ] {
+            assert!(
+                cols.contains(&(*expected).to_string()),
+                "missing column: {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn migrate_idempotent() {
+        let conn = old_schema_db();
+        migrate_memcore_schema(&conn).unwrap();
+        migrate_memcore_schema(&conn).unwrap();
+
+        let cols: Vec<String> = conn
+            .prepare("PRAGMA table_info(memories)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(cols.contains(&"access_count".to_string()));
+    }
+
+    #[test]
+    fn migrate_preserves_data() {
+        let conn = old_schema_db();
+        conn.execute(
+            "INSERT INTO memories (id, key, content, category, created_at, updated_at)
+             VALUES ('id1', 'greeting', 'hello world', 'core', '2026-01-01', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+
+        migrate_memcore_schema(&conn).unwrap();
+
+        let (content, access_count, confidence, source, tags, decay): (
+            String,
+            i64,
+            f64,
+            String,
+            String,
+            i64,
+        ) = conn
+            .query_row(
+                "SELECT content, access_count, confidence, source, tags, decay_half_life_days
+                 FROM memories WHERE key = 'greeting'",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+
+        assert_eq!(content, "hello world");
+        assert_eq!(access_count, 0);
+        assert!((confidence - 1.0).abs() < f64::EPSILON);
+        assert_eq!(source, "agent");
+        assert_eq!(tags, "");
+        assert_eq!(decay, 365, "core category should get 365-day half-life");
     }
 }
