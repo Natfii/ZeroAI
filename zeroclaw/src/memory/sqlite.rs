@@ -551,6 +551,10 @@ pub(crate) fn migrate_memcore_schema(conn: &Connection) -> anyhow::Result<()> {
 
 #[async_trait]
 impl Memory for SqliteMemory {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "sqlite"
     }

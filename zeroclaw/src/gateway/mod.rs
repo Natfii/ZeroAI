@@ -1321,6 +1321,10 @@ mod tests {
 
     #[async_trait]
     impl Memory for MockMemory {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         fn name(&self) -> &str {
             "mock"
         }
@@ -1395,6 +1399,10 @@ mod tests {
 
     #[async_trait]
     impl Memory for TrackingMemory {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         fn name(&self) -> &str {
             "tracking"
         }

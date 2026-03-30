@@ -54,6 +54,9 @@ impl std::fmt::Display for MemoryCategory {
 /// Core memory trait — implement for any persistence backend
 #[async_trait]
 pub trait Memory: Send + Sync {
+    /// Downcast to a concrete type for backend-specific operations.
+    fn as_any(&self) -> &dyn std::any::Any;
+
     /// Backend name
     fn name(&self) -> &str;
 

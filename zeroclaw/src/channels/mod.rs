@@ -4797,6 +4797,10 @@ BTC is currently around $65,000 based on latest tool output."#
 
     #[async_trait::async_trait]
     impl Memory for NoopMemory {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         fn name(&self) -> &str {
             "noop"
         }
@@ -4849,6 +4853,10 @@ BTC is currently around $65,000 based on latest tool output."#
 
     #[async_trait::async_trait]
     impl Memory for RecallMemory {
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
         fn name(&self) -> &str {
             "recall-memory"
         }

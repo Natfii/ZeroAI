@@ -16,6 +16,10 @@ impl NoneMemory {
 
 #[async_trait]
 impl Memory for NoneMemory {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     fn name(&self) -> &str {
         "none"
     }
