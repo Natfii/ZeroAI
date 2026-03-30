@@ -4,6 +4,7 @@
 
 package com.zeroclaw.android.service
 
+import android.util.Log
 import com.zeroclaw.android.model.Agent
 import com.zeroclaw.android.model.ChannelType
 import com.zeroclaw.android.model.ConnectedChannel
@@ -166,9 +167,6 @@ data class AgentTomlEntry(
  * @property securityEstopEnabled Whether the emergency stop mechanism is active.
  * @property securityEstopRequireOtpToResume Whether resuming from e-stop requires OTP.
  * @property securityEstopStateFile File path for e-stop state persistence.
- * @property memoryQdrantUrl Qdrant vector database connection URL.
- * @property memoryQdrantCollection Qdrant collection name for memory storage.
- * @property memoryQdrantApiKey Qdrant API key for authenticated access.
  * @property skillsPromptInjectionMode Skill prompt injection mode: "full" or "compact".
  * @property reliabilityBackoffMs Provider backoff duration in milliseconds.
  * @property reliabilityApiKeysJson JSON object mapping provider names to API keys.
@@ -285,9 +283,6 @@ data class GlobalTomlConfig(
     val securityEstopEnabled: Boolean = false,
     val securityEstopRequireOtpToResume: Boolean = true,
     val securityEstopStateFile: String = "estop-state.json",
-    val memoryQdrantUrl: String = "",
-    val memoryQdrantCollection: String = "zeroclaw_memories",
-    val memoryQdrantApiKey: String = "",
     val skillsPromptInjectionMode: String = "full",
     val reliabilityBackoffMs: Long = DEFAULT_RELIABILITY_BACKOFF_MS,
     val reliabilityApiKeysJson: String = "{}",
@@ -627,7 +622,6 @@ object ConfigTomlBuilder {
             appendSecurityResourcesSection(config)
             appendSecurityAuditSection(config)
             appendSecurityEstopSection(config)
-            appendMemoryQdrantSection(config)
             appendSkillsSection(config)
             appendTtySection(config)
 
@@ -811,9 +805,17 @@ object ConfigTomlBuilder {
      * @param config Configuration to read memory values from.
      */
     private fun StringBuilder.appendMemorySection(config: GlobalTomlConfig) {
+        val validBackend =
+            when (config.memoryBackend) {
+                "sqlite", "none" -> config.memoryBackend
+                else -> {
+                    Log.w("ConfigTomlBuilder", "Unknown memory backend '${config.memoryBackend}', falling back to 'sqlite'")
+                    "sqlite"
+                }
+            }
         appendLine()
         appendLine("[memory]")
-        appendLine("backend = ${tomlString(config.memoryBackend)}")
+        appendLine("backend = ${tomlString(validBackend)}")
         appendLine("auto_save = ${config.memoryAutoSave}")
         appendLine("hygiene_enabled = ${config.memoryHygieneEnabled}")
         appendLine("archive_after_days = ${config.memoryArchiveAfterDays.coerceAtLeast(0)}")
@@ -1276,26 +1278,6 @@ object ConfigTomlBuilder {
         appendLine("enabled = true")
         appendLine("state_file = ${tomlString(config.securityEstopStateFile)}")
         appendLine("require_otp_to_resume = ${config.securityEstopRequireOtpToResume}")
-    }
-
-    /**
-     * Appends the `[memory.qdrant]` TOML section when Qdrant is configured.
-     *
-     * Upstream fields: url, collection, api_key.
-     *
-     * @param config Configuration to read Qdrant memory values from.
-     */
-    private fun StringBuilder.appendMemoryQdrantSection(config: GlobalTomlConfig) {
-        if (config.memoryQdrantUrl.isBlank() && config.memoryQdrantApiKey.isBlank()) return
-        appendLine()
-        appendLine("[memory.qdrant]")
-        if (config.memoryQdrantUrl.isNotBlank()) {
-            appendLine("url = ${tomlString(config.memoryQdrantUrl)}")
-        }
-        appendLine("collection = ${tomlString(config.memoryQdrantCollection)}")
-        if (config.memoryQdrantApiKey.isNotBlank()) {
-            appendLine("api_key = ${tomlString(config.memoryQdrantApiKey)}")
-        }
     }
 
     /**
