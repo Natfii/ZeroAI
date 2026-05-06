@@ -27,7 +27,7 @@ long-lived on-device service, exposes tools through a native [Zeroclaw] Rust cor
 
 ## Project status
 
-- Experimental and actively evolving.
+- Experimental and actively evolving. Releases and commits on paused while I decide on memory, and can do longer term tests with local LLMs. 
 - Built for Android 9+ and validated most heavily on recent Pixel hardware. Other
   devices and OEM builds may need additional validation.
 - Large portions of the project were created with AI-assisted tooling and are still being
