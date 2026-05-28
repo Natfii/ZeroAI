@@ -72,6 +72,30 @@ pub(crate) fn gateway_post(
     })
 }
 
+/// Performs an HTTP PATCH against the gateway and returns the parsed JSON body.
+pub(crate) fn gateway_patch(
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, FfiError> {
+    let port = crate::runtime::gateway_port_inner()?;
+    let handle = crate::runtime::get_or_create_runtime()?;
+    let url = format!("http://127.0.0.1:{port}{path}");
+
+    handle.block_on(async {
+        let client = get_client()?;
+        let response =
+            client
+                .patch(&url)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| FfiError::SpawnError {
+                    detail: format!("gateway PATCH {path} failed: {e}"),
+                })?;
+        parse_response(response, path).await
+    })
+}
+
 /// Performs an HTTP DELETE against the gateway and returns the parsed JSON body.
 pub(crate) fn gateway_delete(path: &str) -> Result<serde_json::Value, FfiError> {
     let port = crate::runtime::gateway_port_inner()?;

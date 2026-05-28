@@ -113,6 +113,9 @@ pub struct CronPatchBody {
     pub clear_tz: Option<bool>,
     pub command: Option<String>,
     pub prompt: Option<String>,
+    /// Toggle the job's enabled flag. `Some(false)` pauses, `Some(true)`
+    /// resumes; `None` leaves it unchanged.
+    pub enabled: Option<bool>,
 }
 
 enum CronTimezonePatch {
@@ -166,13 +169,70 @@ fn parse_timezone_patch(
     }
 }
 
+/// Parses a one-shot delay like `60`, `30s`, `5m`, `2h`, `1d` into a [`chrono::Duration`].
+///
+/// A bare number is interpreted as seconds.
+fn parse_once_delay(raw: &str) -> Result<chrono::Duration, String> {
+    let raw = raw.trim();
+    let (num, mult) = if let Some(v) = raw.strip_suffix('d') {
+        (v, 86_400)
+    } else if let Some(v) = raw.strip_suffix('h') {
+        (v, 3_600)
+    } else if let Some(v) = raw.strip_suffix('m') {
+        (v, 60)
+    } else if let Some(v) = raw.strip_suffix('s') {
+        (v, 1)
+    } else {
+        (raw, 1)
+    };
+    let n: i64 = num
+        .trim()
+        .parse()
+        .map_err(|_| format!("expected a number with optional s/m/h/d suffix, got {raw:?}"))?;
+    Ok(chrono::Duration::seconds(n.saturating_mul(mult)))
+}
+
+/// Builds a runtime [`Schedule`](zeroclaw_runtime::cron::Schedule) from the API
+/// `schedule` string, then validates it.
+///
+/// Recognises three one-shot/interval sentinels in addition to standard cron
+/// expressions, mapping them onto the runtime's typed `At`/`Every` variants:
+/// - `@every <ms>[ms]` → [`Schedule::Every`]
+/// - `@at <rfc3339>` → [`Schedule::At`] (absolute)
+/// - `@once <delay>` → [`Schedule::At`] (now + delay; see [`parse_once_delay`])
+///
+/// Anything else is treated as a `Schedule::Cron` expression.
 fn cron_schedule_from_api(
     expr: String,
     tz: Option<String>,
 ) -> Result<zeroclaw_runtime::cron::Schedule, (StatusCode, Json<serde_json::Value>)> {
-    let schedule = zeroclaw_runtime::cron::Schedule::Cron { expr, tz };
+    use zeroclaw_runtime::cron::Schedule;
+
+    let trimmed = expr.trim();
+    let schedule = if let Some(rest) = trimmed.strip_prefix("@every ") {
+        let ms = rest
+            .trim()
+            .trim_end_matches("ms")
+            .trim()
+            .parse::<u64>()
+            .map_err(|_| bad_request(format!("Invalid @every interval {rest:?} (expected ms)")))?;
+        Schedule::Every { every_ms: ms }
+    } else if let Some(rest) = trimmed.strip_prefix("@at ") {
+        let at = chrono::DateTime::parse_from_rfc3339(rest.trim())
+            .map_err(|e| bad_request(format!("Invalid @at timestamp: {e}")))?
+            .with_timezone(&chrono::Utc);
+        Schedule::At { at }
+    } else if let Some(rest) = trimmed.strip_prefix("@once ") {
+        let delay = parse_once_delay(rest).map_err(|e| bad_request(format!("Invalid @once delay: {e}")))?;
+        Schedule::At {
+            at: chrono::Utc::now() + delay,
+        }
+    } else {
+        Schedule::Cron { expr, tz }
+    };
+
     zeroclaw_runtime::cron::validate_schedule(&schedule, chrono::Utc::now())
-        .map_err(|e| bad_request(format!("Invalid cron schedule: {e}")))?;
+        .map_err(|e| bad_request(format!("Invalid schedule: {e}")))?;
     Ok(schedule)
 }
 
@@ -637,6 +697,7 @@ pub async fn handle_api_cron_patch(
         clear_tz,
         command,
         prompt,
+        enabled,
     } = body;
     let timezone_patch = match parse_timezone_patch(tz, clear_tz) {
         Ok(patch) => patch,
@@ -699,6 +760,7 @@ pub async fn handle_api_cron_patch(
         schedule,
         command: patch_command,
         prompt: patch_prompt,
+        enabled,
         ..zeroclaw_runtime::cron::CronJobPatch::default()
     };
 
@@ -729,6 +791,13 @@ pub async fn handle_api_cron_delete(
     }
 
     let config = state.config.read().clone();
+    if let Err(e) = zeroclaw_runtime::cron::get_job(&config, &id) {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("Cron job not found: {e}")})),
+        )
+            .into_response();
+    }
     match zeroclaw_runtime::cron::remove_job(&config, &id) {
         Ok(()) => Json(serde_json::json!({"status": "ok"})).into_response(),
         Err(e) => (

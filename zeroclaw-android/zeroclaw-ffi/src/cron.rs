@@ -206,101 +206,108 @@ pub(crate) fn get_cron_job_inner(id: String) -> Result<Option<FfiCronJob>, FfiEr
     Ok(jobs.into_iter().find(|j| j.id == id))
 }
 
+/// Resolves the agent alias every cron write must run as.
+///
+/// The gateway's `/api/cron` POST/PATCH bodies require a configured
+/// `agent` alias (there is no implicit default). This mirrors the
+/// daemon's own selection via [`Config::resolved_runtime_agent_alias`]:
+/// prefer the `"default"` agent, else the first enabled agent.
+///
+/// # Errors
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running or no
+/// agent is configured.
+fn resolve_cron_agent() -> Result<String, FfiError> {
+    crate::runtime::with_daemon_config(|c| {
+        c.resolved_runtime_agent_alias().map(str::to_string)
+    })?
+    .ok_or_else(|| FfiError::StateError {
+        detail: "no agent configured; cannot schedule a cron job".to_string(),
+    })
+}
+
+/// Posts a cron-add body (with the resolved agent injected) and parses the result.
+fn post_cron_job(schedule: String, command: String) -> Result<FfiCronJob, FfiError> {
+    let agent = resolve_cron_agent()?;
+    let body = serde_json::json!({
+        "agent": agent,
+        "schedule": schedule,
+        "command": command,
+    });
+    let json = gateway_client::gateway_post("/api/cron", &body)?;
+    Ok(parse_job_json(&json["job"]))
+}
+
 /// Adds a new recurring cron job.
 pub(crate) fn add_cron_job_inner(
     expression: String,
     command: String,
 ) -> Result<FfiCronJob, FfiError> {
-    let body = serde_json::json!({
-        "schedule": expression,
-        "command": command,
-    });
-    let json = gateway_client::gateway_post("/api/cron", &body)?;
-    Ok(parse_job_json(&json["job"]))
+    post_cron_job(expression, command)
 }
 
 /// Adds a one-shot job that fires after the given delay string.
 ///
-/// The gateway does not expose a dedicated one-shot endpoint. We create
-/// a regular job and note that one-shot scheduling is handled internally.
+/// Encodes an `@once <delay>` schedule that the gateway maps to a
+/// self-deleting [`Schedule::At`].
 pub(crate) fn add_one_shot_job_inner(
     delay: String,
     command: String,
 ) -> Result<FfiCronJob, FfiError> {
-    let body = serde_json::json!({
-        "schedule": format!("@once {delay}"),
-        "command": command,
-    });
-    let json = gateway_client::gateway_post("/api/cron", &body)?;
-    Ok(parse_job_json(&json["job"]))
+    post_cron_job(format!("@once {delay}"), command)
 }
 
 /// Adds a one-shot cron job that fires at a specific RFC 3339 timestamp.
 ///
-/// The gateway creates a one-shot job whose next-run time is set to the
-/// given timestamp. Once fired it will self-delete.
+/// Encodes an `@at <rfc3339>` schedule that the gateway maps to a
+/// self-deleting [`Schedule::At`].
 pub(crate) fn add_cron_job_at_inner(
     timestamp_rfc3339: String,
     command: String,
 ) -> Result<FfiCronJob, FfiError> {
-    let body = serde_json::json!({
-        "schedule": format!("@at {timestamp_rfc3339}"),
-        "command": command,
-    });
-    let json = gateway_client::gateway_post("/api/cron", &body)?;
-    Ok(parse_job_json(&json["job"]))
+    post_cron_job(format!("@at {timestamp_rfc3339}"), command)
 }
 
 /// Adds a fixed-interval repeating cron job.
 ///
-/// The `interval_ms` parameter specifies the repeat interval in
-/// milliseconds. The gateway translates this into an `@every` schedule.
+/// Encodes an `@every <ms>ms` schedule that the gateway maps to a
+/// [`Schedule::Every`].
 pub(crate) fn add_cron_job_every_inner(
     interval_ms: u64,
     command: String,
 ) -> Result<FfiCronJob, FfiError> {
-    let body = serde_json::json!({
-        "schedule": format!("@every {interval_ms}ms"),
-        "command": command,
-    });
-    let json = gateway_client::gateway_post("/api/cron", &body)?;
-    Ok(parse_job_json(&json["job"]))
+    post_cron_job(format!("@every {interval_ms}ms"), command)
 }
 
 /// Removes a cron job by its identifier.
+///
+/// A missing job surfaces as the gateway's `404 Not Found`.
 pub(crate) fn remove_cron_job_inner(id: String) -> Result<(), FfiError> {
     let path = format!("/api/cron/{id}");
     let _ = gateway_client::gateway_delete(&path)?;
     Ok(())
 }
 
+/// Toggles a cron job's `enabled` flag via `PATCH /api/cron/{id}`.
+fn patch_cron_enabled(id: &str, enabled: bool) -> Result<(), FfiError> {
+    let agent = resolve_cron_agent()?;
+    let body = serde_json::json!({
+        "agent": agent,
+        "enabled": enabled,
+    });
+    let path = format!("/api/cron/{id}");
+    let _ = gateway_client::gateway_patch(&path, &body)?;
+    Ok(())
+}
+
 /// Pauses a cron job so it will not fire until resumed.
-///
-/// The gateway does not expose a dedicated pause endpoint. This is a
-/// placeholder that returns an error until the upstream API is extended.
 pub(crate) fn pause_cron_job_inner(id: String) -> Result<(), FfiError> {
-    // Verify the daemon is running (gateway_get will check this).
-    let _ = crate::runtime::gateway_port_inner()?;
-    Err(FfiError::StateError {
-        detail: format!(
-            "pause_job not available via gateway API (job {id}); \
-             upstream cron module is pub(crate) in v0.1.6"
-        ),
-    })
+    patch_cron_enabled(&id, false)
 }
 
 /// Resumes a previously paused cron job.
-///
-/// The gateway does not expose a dedicated resume endpoint. This is a
-/// placeholder that returns an error until the upstream API is extended.
 pub(crate) fn resume_cron_job_inner(id: String) -> Result<(), FfiError> {
-    let _ = crate::runtime::gateway_port_inner()?;
-    Err(FfiError::StateError {
-        detail: format!(
-            "resume_job not available via gateway API (job {id}); \
-             upstream cron module is pub(crate) in v0.1.6"
-        ),
-    })
+    patch_cron_enabled(&id, true)
 }
 
 #[cfg(test)]

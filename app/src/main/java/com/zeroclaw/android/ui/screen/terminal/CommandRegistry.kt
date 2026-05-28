@@ -375,18 +375,6 @@ object CommandRegistry {
     private fun requireLong(value: String): Long? = value.toLongOrNull()
 
     /**
-     * Parses a user-supplied argument as a [Double], returning `null` on failure.
-     *
-     * Guards against Rhai injection by ensuring the argument is a valid
-     * floating-point number before it is interpolated as an unquoted
-     * literal into a Rhai expression.
-     *
-     * @param value Raw argument text from the user.
-     * @return The parsed [Double], or `null` if the value is not a valid number.
-     */
-    private fun requireDouble(value: String): Double? = value.toDoubleOrNull()
-
-    /**
      * Validates that a user-supplied path does not escape the application
      * sandbox via parent-directory traversal.
      *
@@ -514,20 +502,9 @@ object CommandRegistry {
                 description = "Show total cost summary",
                 toExpression = { "cost()" },
             ),
-            SlashCommand(
-                name = "budget",
-                description = "Check budget against estimated spend",
-                usage = "<amount>",
-                toExpression = { args ->
-                    val raw = args.firstOrNull() ?: "0.0"
-                    val amount =
-                        requireDouble(raw)
-                            ?: return@SlashCommand rhaiError(
-                                "Invalid budget amount: expected a number",
-                            )
-                    "budget($amount)"
-                },
-            ),
+            // `/budget` hidden for now (revisit): its verdict is correct but the
+            // FfiBudgetStatus output doesn't surface the estimate/projection, so it
+            // reads confusingly. Re-add once the UniFFI enum carries those fields.
             SlashCommand(
                 name = "events",
                 description = "Show recent events",
@@ -611,30 +588,11 @@ object CommandRegistry {
                 description = "List all cron jobs",
                 toExpression = { "cron_list()" },
             ),
-            SlashCommand(
-                name = "skills tools",
-                description = "List tools provided by a skill",
-                usage = "<name>",
-                toExpression = { args ->
-                    "skill_tools(${rhaiString(args.firstOrNull().orEmpty())})"
-                },
-            ),
-            SlashCommand(
-                name = "skills install",
-                description = "Install a skill from a source",
-                usage = "<source>",
-                toExpression = { args ->
-                    "skill_install(${rhaiString(args.firstOrNull().orEmpty())})"
-                },
-            ),
-            SlashCommand(
-                name = "skills remove",
-                description = "Remove an installed skill",
-                usage = "<name>",
-                toExpression = { args ->
-                    "skill_remove(${rhaiString(args.firstOrNull().orEmpty())})"
-                },
-            ),
+            // `/skills install`, `/skills remove`, and `/skills tools` were
+            // cut: install relies on `git clone` (not available on Android),
+            // and the local-skill mutate/inspect commands depend on that dead
+            // sourcing path. The in-app Hub Skills import is the supported
+            // route; only the read-only `/skills` listing remains here.
             SlashCommand(
                 name = "skills",
                 description = "List installed skills",
@@ -821,12 +779,9 @@ object CommandRegistry {
                 usage = "<prompt>",
                 toExpression = { null },
             ),
-            SlashCommand(
-                name = "camera",
-                description = "Capture a photo and send to the AI for analysis",
-                usage = "[prompt]",
-                toExpression = { null },
-            ),
+            // `/camera` hidden for now (revisit): the vision-attach path needs a
+            // vision-capable model + real device. Images can still be sent via the
+            // attach-file (paperclip) control in the Terminal input bar.
             SlashCommand(
                 name = "screenshot",
                 description = "Capture the screen and send to AI for analysis",

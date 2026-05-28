@@ -329,10 +329,17 @@ pub(crate) fn dispatch_common_operation(
         )),
         ScriptOperation::ValidateConfig => {
             let config_toml = string_arg(&args, "config_toml")?;
-            Ok(ScriptValue::String(
-                runtime::validate_config_inner(config_toml)
-                    .map_err(script_host_error("validate_config"))?,
-            ))
+            // `validate_config_inner` keeps its empty-string-on-success
+            // contract (the daemon pre-flight check relies on it); the
+            // REPL maps that to a human-readable line here instead.
+            let raw = runtime::validate_config_inner(config_toml)
+                .map_err(script_host_error("validate_config"))?;
+            let message = if raw.is_empty() {
+                "Config is valid.".to_string()
+            } else {
+                format!("Config invalid: {raw}")
+            };
+            Ok(ScriptValue::String(message))
         }
         ScriptOperation::RunningConfig => Ok(ScriptValue::String(
             runtime::get_running_config_inner().map_err(script_host_error("config"))?,
