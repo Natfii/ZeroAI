@@ -47,6 +47,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.zeroclaw.android.data.MemoryBackendCatalog
 import com.zeroclaw.android.ui.theme.ZeroAITheme
 
 /** Spacing after the title text. */
@@ -75,34 +76,6 @@ private val ChipSpacing = 8.dp
 
 /** Retention period representing "forever" (no expiration). */
 private const val RETENTION_FOREVER = -1
-
-/**
- * Describes a memory backend option for display in the selector.
- *
- * @property id Machine-readable identifier matching upstream TOML `memory.backend`.
- * @property title Human-readable option name.
- * @property description Brief explanation of the backend behaviour.
- */
-private data class BackendOption(
-    val id: String,
-    val title: String,
-    val description: String,
-)
-
-/** Available memory backend options. */
-private val BACKEND_OPTIONS =
-    listOf(
-        BackendOption(
-            id = "sqlite",
-            title = "SQLite",
-            description = "Fast local database. Best for most users.",
-        ),
-        BackendOption(
-            id = "none",
-            title = "None",
-            description = "No persistent memory. Agent starts fresh each session.",
-        ),
-    )
 
 /**
  * Describes an embedding provider option for the dropdown menu.
@@ -195,7 +168,7 @@ fun MemoryConfigFlow(
 
         Spacer(modifier = Modifier.height(DescriptionSpacing))
 
-        BACKEND_OPTIONS.forEach { option ->
+        MemoryBackendCatalog.userSelectable.forEach { option ->
             val isSelected = backend == option.id
 
             BackendOptionCard(
@@ -243,7 +216,7 @@ fun MemoryConfigFlow(
  */
 @Composable
 private fun BackendOptionCard(
-    option: BackendOption,
+    option: MemoryBackendCatalog.Entry,
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -271,7 +244,7 @@ private fun BackendOptionCard(
                 .fillMaxWidth()
                 .semantics(mergeDescendants = true) {
                     contentDescription =
-                        "${option.title}, ${if (isSelected) "selected" else "not selected"}"
+                        "${option.label}, ${if (isSelected) "selected" else "not selected"}"
                     role = Role.RadioButton
                     selected = isSelected
                 },
@@ -280,7 +253,7 @@ private fun BackendOptionCard(
             modifier = Modifier.padding(CardPadding),
         ) {
             Text(
-                text = option.title,
+                text = option.label,
                 style = MaterialTheme.typography.titleMedium,
             )
             Text(

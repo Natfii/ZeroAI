@@ -52,4 +52,15 @@ interface AgentRepository {
      * @param id Unique agent identifier.
      */
     suspend fun toggleEnabled(id: String)
+
+    /**
+     * Observes whether the agent identified by [id] is currently enabled.
+     *
+     * Returns `false` until the row is seeded — callers should treat the
+     * initial value as "no opinion yet" rather than "definitely disabled".
+     *
+     * @param id Agent identifier to watch.
+     * @return Cold [Flow] emitting the enabled flag on every change.
+     */
+    fun isAgentEnabled(id: String): Flow<Boolean>
 }

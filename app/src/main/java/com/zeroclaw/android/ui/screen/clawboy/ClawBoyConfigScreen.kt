@@ -178,7 +178,7 @@ private fun ClawBoyEmptyContent(
         Spacer(Modifier.height(8.dp))
         Text(
             "Load a Pokemon Red (USA/Europe) ROM to get started. " +
-                "Then say \u2018play pokemon\u2019 or \u2018start clawboy\u2019 in any chat.",
+                "Then say \u2018play clawboy\u2019 in any chat to start a session.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

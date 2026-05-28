@@ -65,22 +65,40 @@ object ProviderSlotRegistry {
             ),
         )
 
+    // Slot display order (2026-05-25): local-first. Ollama leads because
+    // it's the only fully-local option (also covers LM Studio / vLLM /
+    // LocalAI via the OpenAI-compat fallback in ModelFetcher). Cloud
+    // APIs follow in alphabetical+popularity order.
+    //
+    // NOTE: baseOrder values are 0, 1, 2, 3, 5, 6 — baseOrder=4 is reserved
+    // by the hidden `claude-code` slot above. Renumber both lists together
+    // if you insert a new slot; the init {} block validates uniqueness but
+    // not contiguity, so a collision would slip through.
     private val slots: List<ProviderSlot> =
         listOf(
             ProviderSlot(
-                slotId = "gemini-api",
-                displayName = "Gemini API",
-                credentialType = SlotCredentialType.API_KEY,
+                slotId = "ollama",
+                displayName = "Ollama / Local",
+                credentialType = SlotCredentialType.URL_KEY,
                 baseOrder = 0,
-                rustProvider = "gemini",
+                rustProvider = "ollama",
                 authProfileProvider = null,
-                providerRegistryId = "google-gemini",
+                providerRegistryId = "ollama",
+            ),
+            ProviderSlot(
+                slotId = "anthropic-api",
+                displayName = "Anthropic API",
+                credentialType = SlotCredentialType.API_KEY,
+                baseOrder = 1,
+                rustProvider = "anthropic",
+                authProfileProvider = null,
+                providerRegistryId = "anthropic",
             ),
             ProviderSlot(
                 slotId = "openai-api",
                 displayName = "OpenAI API",
                 credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 1,
+                baseOrder = 2,
                 rustProvider = "openai",
                 authProfileProvider = null,
                 providerRegistryId = "openai",
@@ -89,75 +107,41 @@ object ProviderSlotRegistry {
                 slotId = "chatgpt",
                 displayName = "ChatGPT",
                 credentialType = SlotCredentialType.OAUTH,
-                baseOrder = 2,
+                baseOrder = 3,
                 rustProvider = "openai",
                 authProfileProvider = "openai-codex",
                 providerRegistryId = "openai",
             ),
             ProviderSlot(
-                slotId = "anthropic-api",
-                displayName = "Anthropic API",
+                slotId = "gemini-api",
+                displayName = "Gemini API",
                 credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 3,
-                rustProvider = "anthropic",
+                baseOrder = 5,
+                rustProvider = "gemini",
                 authProfileProvider = null,
-                providerRegistryId = "anthropic",
+                providerRegistryId = "google-gemini",
             ),
             ProviderSlot(
                 slotId = "openrouter-api",
                 displayName = "OpenRouter API",
                 credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 5,
+                baseOrder = 6,
                 rustProvider = "openrouter",
                 authProfileProvider = null,
                 providerRegistryId = "openrouter",
             ),
-            ProviderSlot(
-                slotId = "deepseek-api",
-                displayName = "DeepSeek API",
-                credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 6,
-                rustProvider = "deepseek",
-                authProfileProvider = null,
-                providerRegistryId = "deepseek",
-            ),
-            ProviderSlot(
-                slotId = "qwen-api",
-                displayName = "Qwen (Alibaba)",
-                credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 7,
-                rustProvider = "qwen",
-                authProfileProvider = null,
-                providerRegistryId = "qwen",
-            ),
-            ProviderSlot(
-                slotId = "xai-api",
-                displayName = "xAI API",
-                credentialType = SlotCredentialType.API_KEY,
-                baseOrder = 8,
-                rustProvider = "xai",
-                authProfileProvider = null,
-                providerRegistryId = "xai",
-            ),
-            ProviderSlot(
-                slotId = "ollama",
-                displayName = "Ollama",
-                credentialType = SlotCredentialType.URL_KEY,
-                baseOrder = 9,
-                rustProvider = "ollama",
-                authProfileProvider = null,
-                providerRegistryId = "ollama",
-            ),
+            // deepseek, qwen, xai slots removed 2026-05-25 (matches ProviderRegistry).
         )
 
     private val byId: Map<String, ProviderSlot> = slots.associateBy { it.slotId }
 
     init {
-        check(slots.map { it.slotId }.distinct().size == slots.size) {
-            "ProviderSlotRegistry contains duplicate slot IDs"
+        val allSlots = slots + hiddenSlots
+        check(allSlots.map { it.slotId }.distinct().size == allSlots.size) {
+            "ProviderSlotRegistry contains duplicate slot IDs (visible+hidden)"
         }
-        check(slots.map { it.baseOrder }.distinct().size == slots.size) {
-            "ProviderSlotRegistry contains duplicate base orders"
+        check(allSlots.map { it.baseOrder }.distinct().size == allSlots.size) {
+            "ProviderSlotRegistry contains duplicate base orders (visible+hidden)"
         }
         check(slots.all { ProviderRegistry.findById(it.providerRegistryId) != null }) {
             "ProviderSlotRegistry contains unknown providerRegistryId values"

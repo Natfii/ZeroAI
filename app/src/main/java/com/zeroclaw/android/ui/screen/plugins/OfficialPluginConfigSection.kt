@@ -72,8 +72,6 @@ fun OfficialPluginConfigSection(
             OfficialPlugins.COMPOSIO -> ComposioConfig(settings, viewModel)
             OfficialPlugins.SHARED_FOLDER -> SharedFolderConfig(settings, viewModel)
             OfficialPlugins.VISION -> VisionConfig(settings, viewModel)
-            OfficialPlugins.TRANSCRIPTION -> TranscriptionConfig(settings, viewModel)
-            OfficialPlugins.QUERY_CLASSIFICATION -> QueryClassificationConfig(settings, viewModel)
         }
     }
 }
@@ -482,82 +480,5 @@ private fun VisionConfig(
         checked = settings.multimodalAllowRemoteFetch,
         onCheckedChange = { viewModel.updateMultimodalAllowRemoteFetch(it) },
         contentDescription = "Allow remote image fetch for vision",
-    )
-}
-
-/**
- * Transcription plugin configuration.
- *
- * Controls the Whisper-compatible API endpoint, model, language, and
- * max duration. Maps to upstream `[transcription]` TOML section.
- */
-@Composable
-private fun TranscriptionConfig(
-    settings: AppSettings,
-    viewModel: SettingsViewModel,
-) {
-    OutlinedTextField(
-        value = settings.transcriptionApiUrl,
-        onValueChange = { viewModel.updateTranscriptionApiUrl(it) },
-        label = { Text("API URL") },
-        supportingText = { Text("Whisper-compatible transcription endpoint") },
-        singleLine = true,
-        enabled = settings.transcriptionEnabled,
-        modifier = Modifier.fillMaxWidth(),
-    )
-
-    OutlinedTextField(
-        value = settings.transcriptionModel,
-        onValueChange = { viewModel.updateTranscriptionModel(it) },
-        label = { Text("Model") },
-        supportingText = { Text("Transcription model name") },
-        singleLine = true,
-        enabled = settings.transcriptionEnabled,
-        modifier = Modifier.fillMaxWidth(),
-    )
-
-    OutlinedTextField(
-        value = settings.transcriptionLanguage,
-        onValueChange = { viewModel.updateTranscriptionLanguage(it) },
-        label = { Text("Language hint") },
-        supportingText = { Text("ISO 639-1 code (e.g. \"en\", \"es\") or blank for auto-detect") },
-        singleLine = true,
-        enabled = settings.transcriptionEnabled,
-        modifier = Modifier.fillMaxWidth(),
-    )
-
-    OutlinedTextField(
-        value = settings.transcriptionMaxDurationSecs.toString(),
-        onValueChange = { v ->
-            v.toLongOrNull()?.let { viewModel.updateTranscriptionMaxDurationSecs(it) }
-        },
-        label = { Text("Max duration (seconds)") },
-        supportingText = { Text("Maximum audio clip length to transcribe") },
-        singleLine = true,
-        enabled = settings.transcriptionEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
-
-/**
- * Query classification plugin configuration.
- *
- * This plugin has no additional configuration beyond the enable toggle
- * (handled by the parent screen). Shows a brief description of the
- * feature.
- */
-@Composable
-private fun QueryClassificationConfig(
-    @Suppress("UNUSED_PARAMETER") settings: AppSettings,
-    @Suppress("UNUSED_PARAMETER") viewModel: SettingsViewModel,
-) {
-    Text(
-        text =
-            "Query classification analyses incoming messages to route them to " +
-                "the most appropriate model. No additional configuration is required.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 4.dp),
     )
 }

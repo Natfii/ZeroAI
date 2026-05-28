@@ -233,8 +233,6 @@ fun providerSlotCardDescription(slot: ProviderSlot): String =
         "anthropic-api" -> "Use a direct Anthropic API key."
         "claude-code" ->
             "Connect your Claude account. Live daemon routing still uses the Anthropic API slot today."
-        "qwen-api" ->
-            "Use a DashScope API key for Qwen models. Choose International, China, or US routing."
         "ollama" -> "Point Zero at your local Ollama server and choose a model."
         else -> slot.displayName
     }
@@ -248,9 +246,6 @@ fun providerSlotSetupDescription(slot: ProviderSlot): String =
         "claude-code" ->
             "Claude login is stored separately from Anthropic API keys. " +
                 "Use the Anthropic API slot for live daemon routing today."
-        "qwen-api" ->
-            "Enter your DashScope API key and pick the regional endpoint. " +
-                "International is the default; China routes traffic through Alibaba Cloud (China)."
         else ->
             when (slot.credentialType) {
                 SlotCredentialType.API_KEY ->

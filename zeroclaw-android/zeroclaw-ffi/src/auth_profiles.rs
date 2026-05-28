@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use zeroclaw::auth_exports::{
+use zeroai::auth_exports::{
     AuthProfile, AuthProfilesData, AuthProfilesStore, AuthService, TokenSet,
     extract_account_email_from_id_token, extract_account_id_from_jwt, profile_id,
     state_dir_from_config,
@@ -207,6 +207,135 @@ fn build_oauth_profile(
     );
     Ok(profile)
 }
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Lists all auth profiles from the daemon's workspace.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on I/O or parse failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_auth_profiles() -> Vec<FfiAuthProfile> = list_auth_profiles_inner
+);
+
+crate::ffi_export!(
+    /// Lists all auth profiles from a standalone app-owned files directory.
+    ///
+    /// Does not require the daemon to be running. Used by Android UI flows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when `data_dir` is invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_auth_profiles_standalone(data_dir: String) -> Vec<FfiAuthProfile> = list_auth_profiles_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Returns the Anthropic bearer token from the standalone auth-profile store.
+    ///
+    /// Anthropic OAuth tokens are long-lived and do not need refresh.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when `data_dir` is invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_anthropic_access_token_standalone(data_dir: String) -> Option<String> = get_anthropic_access_token_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Returns a valid OpenAI access token, refreshing if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when `data_dir` is invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O or token-refresh failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_openai_access_token_standalone(data_dir: String) -> Option<String> = get_valid_openai_access_token_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Returns a valid Gemini access token, refreshing if needed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when `data_dir` is invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O or token-refresh failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_valid_gemini_access_token_standalone(data_dir: String) -> Option<String> = get_valid_gemini_access_token_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Removes an auth profile from the running daemon's workspace.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// the auth-profiles file does not exist, [`crate::FfiError::SpawnError`]
+    /// on I/O, parse, or serialisation failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn remove_auth_profile(provider: String, profile_name: String) -> () = remove_auth_profile_inner
+);
+
+crate::ffi_export!(
+    /// Writes or updates an OAuth profile in the encrypted Rust-owned auth profile store.
+    ///
+    /// Does not require the daemon to be running.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when arguments are invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O or serialisation failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn write_auth_profile(
+        data_dir: String,
+        provider: String,
+        profile_name: String,
+        access_token: String,
+        refresh_token: Option<String>,
+        id_token: Option<String>,
+        expires_at_ms: Option<i64>,
+        scopes: Option<String>,
+    ) -> () = write_auth_profile_inner
+);
+
+crate::ffi_export!(
+    /// Removes an OAuth profile from the encrypted store without requiring the daemon.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::SpawnError`] on I/O or parse failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn remove_auth_profile_standalone(data_dir: String, provider: String, profile_name: String) -> () = remove_auth_profile_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Merges non-secret metadata entries into a standalone auth profile.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when arguments are invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O or persistence failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn merge_auth_profile_metadata_standalone(data_dir: String, provider: String, profile_name: String, metadata_json: String) -> () = merge_auth_profile_metadata_standalone_inner
+);
+
+crate::ffi_export!(
+    /// Returns the stored access token for any provider from the standalone store.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] when `data_dir` is invalid,
+    /// [`crate::FfiError::SpawnError`] on I/O or read failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_access_token_standalone(data_dir: String, provider: String, profile_name: String) -> Option<String> = get_access_token_standalone_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
 
 /// Writes or updates an OAuth profile in the standalone encrypted auth profile store.
 #[allow(clippy::too_many_arguments)]
@@ -462,203 +591,7 @@ pub(crate) fn remove_auth_profile_inner(
         })
 }
 
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_list_profiles_not_running() {
-        let result = list_auth_profiles_inner();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_remove_profile_not_running() {
-        let result = remove_auth_profile_inner("openai".into(), "default".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_standalone_write_encrypts_secrets_and_lists_profiles() {
-        let dir = TempDir::new().unwrap();
-        let data_dir = dir.path().to_str().unwrap().to_string();
-
-        write_auth_profile_inner(
-            data_dir.clone(),
-            "gemini".into(),
-            "default".into(),
-            "access-token-secret".into(),
-            Some("refresh-token-secret".into()),
-            Some("header.payload.signature".into()),
-            Some(1_750_000_000_000),
-            Some("openid email profile".into()),
-        )
-        .unwrap();
-
-        let auth_profiles = list_auth_profiles_standalone_inner(data_dir.clone()).unwrap();
-        assert_eq!(auth_profiles.len(), 1);
-        assert_eq!(auth_profiles[0].provider, "gemini");
-        assert_eq!(auth_profiles[0].profile_name, "default");
-        assert_eq!(
-            auth_profiles[0].scopes.as_deref(),
-            Some("openid email profile")
-        );
-        assert_eq!(auth_profiles[0].metadata_json, "{}");
-
-        let persisted = std::fs::read_to_string(standalone_profiles_path(dir.path())).unwrap();
-        assert!(!persisted.contains("access-token-secret"));
-        assert!(!persisted.contains("refresh-token-secret"));
-        assert!(persisted.contains("enc2:"));
-
-        remove_auth_profile_standalone_inner(data_dir.clone(), "gemini".into(), "default".into())
-            .unwrap();
-        let removed = list_auth_profiles_standalone_inner(data_dir).unwrap();
-        assert!(removed.is_empty());
-    }
-
-    #[test]
-    fn test_standalone_rejects_relative_data_dir() {
-        let result = write_auth_profile_inner(
-            ".".into(),
-            "openai-codex".into(),
-            "default".into(),
-            "secret".into(),
-            None,
-            None,
-            None,
-            None,
-        );
-        assert!(matches!(result, Err(FfiError::InvalidArgument { .. })));
-    }
-
-    #[test]
-    fn test_standalone_rejects_parent_dir_segments() {
-        let dir = TempDir::new().unwrap();
-        let bad = dir
-            .path()
-            .join("..")
-            .join("other")
-            .to_string_lossy()
-            .to_string();
-        let result = list_auth_profiles_standalone_inner(bad);
-        assert!(matches!(result, Err(FfiError::InvalidArgument { .. })));
-    }
-
-    #[test]
-    fn test_standalone_merges_profile_metadata() {
-        let dir = TempDir::new().unwrap();
-        let data_dir = dir.path().to_str().unwrap().to_string();
-
-        write_auth_profile_inner(
-            data_dir.clone(),
-            "gemini".into(),
-            "default".into(),
-            "access-token-secret".into(),
-            Some("refresh-token-secret".into()),
-            None,
-            None,
-            Some("openid profile email".into()),
-        )
-        .unwrap();
-
-        let mut metadata: BTreeMap<String, String> = BTreeMap::new();
-        metadata.insert("google_capability_drive".into(), "enabled".into());
-        metadata.insert("account_label".into(), "user@example.com".into());
-        merge_auth_profile_metadata_standalone_inner(
-            data_dir.clone(),
-            "gemini".into(),
-            "default".into(),
-            serde_json::to_string(&metadata).unwrap(),
-        )
-        .unwrap();
-
-        let profiles = list_auth_profiles_standalone_inner(data_dir.clone()).unwrap();
-        let metadata_json: serde_json::Value =
-            serde_json::from_str(&profiles[0].metadata_json).unwrap();
-        assert_eq!(metadata_json["google_capability_drive"], "enabled");
-        assert_eq!(metadata_json["account_label"], "user@example.com");
-
-        let mut removal: BTreeMap<String, String> = BTreeMap::new();
-        removal.insert("google_capability_drive".into(), String::new());
-        merge_auth_profile_metadata_standalone_inner(
-            data_dir,
-            "gemini".into(),
-            "default".into(),
-            serde_json::to_string(&removal).unwrap(),
-        )
-        .unwrap();
-
-        let profiles_after =
-            list_auth_profiles_standalone_inner(dir.path().to_str().unwrap().to_string()).unwrap();
-        let metadata_after: serde_json::Value =
-            serde_json::from_str(&profiles_after[0].metadata_json).unwrap();
-        assert!(metadata_after.get("google_capability_drive").is_none());
-        assert_eq!(metadata_after["account_label"], "user@example.com");
-    }
-
-    #[test]
-    fn test_standalone_lists_profile_metadata_json() {
-        let dir = TempDir::new().unwrap();
-        let state_dir = dir.path();
-        let runtime = shared_runtime().unwrap();
-        let mut profile = AuthProfile::new_oauth(
-            "gemini",
-            "default",
-            TokenSet {
-                access_token: "access-token-secret".into(),
-                refresh_token: Some("refresh-token-secret".into()),
-                id_token: None,
-                expires_at: None,
-                token_type: Some("Bearer".into()),
-                scope: Some("openid profile email".into()),
-            },
-        );
-        profile
-            .metadata
-            .insert("google_capabilities".into(), "gemini,drive".into());
-        profile
-            .metadata
-            .insert("account_label".into(), "user@example.com".into());
-
-        runtime
-            .block_on(build_store(state_dir).upsert_profile(profile, true))
-            .unwrap();
-
-        let auth_profiles =
-            list_auth_profiles_standalone_inner(state_dir.to_string_lossy().to_string()).unwrap();
-        assert_eq!(auth_profiles.len(), 1);
-        assert_eq!(
-            auth_profiles[0].scopes.as_deref(),
-            Some("openid profile email")
-        );
-
-        let metadata: serde_json::Value =
-            serde_json::from_str(&auth_profiles[0].metadata_json).unwrap();
-        assert_eq!(metadata["google_capabilities"], "gemini,drive");
-        assert_eq!(metadata["account_label"], "user@example.com");
-    }
-
-    #[test]
-    fn test_standalone_valid_gemini_access_token_returns_none_when_profile_missing() {
-        let dir = TempDir::new().unwrap();
-        let data_dir = dir.path().to_str().unwrap().to_string();
-
-        let token = get_valid_gemini_access_token_standalone_inner(data_dir).unwrap();
-
-        assert!(token.is_none());
-    }
-}
+#[path = "auth_profiles_tests.rs"]
+mod tests;

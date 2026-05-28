@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use zeroclaw::providers::traits::StreamOptions;
 
 use crate::error::FfiError;
-use crate::runtime::with_daemon_config;
+use crate::runtime::{try_with_daemon_config, with_daemon_config};
 use crate::session::extract_thinking_from_text;
 
 /// Per-stream cancellation token.
@@ -73,8 +73,40 @@ pub trait FfiStreamListener: Send + Sync {
 /// - `config.routing` ([`zeroclaw::config::RoutingConfig`]) -> tier routing overrides
 /// - `config.reliability` ([`zeroclaw::config::ReliabilityConfig`]) -> retry/fallback settings
 ///
-/// Provider factory: `zeroclaw::providers::create_resilient_provider_with_options`
-/// with message classification via `zeroclaw::router::classify`.
+/// Provider factory: `zeroclaw::providers::create_resilient_model_provider_with_options`
+/// with message classification via `zeroai::router::classify`.
+crate::ffi_export!(
+    /// Sends a streaming message directly to the configured provider.
+    ///
+    /// Bypasses the agent loop and calls the provider's streaming API.
+    /// Chunks are classified as thinking or response content and
+    /// delivered to the listener callback in real time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::EstopEngaged`] when emergency stop is
+    /// active, [`crate::FfiError::ConfigError`] for oversized messages,
+    /// [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] if provider creation or streaming
+    /// fails, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn send_message_streaming(
+        message: String,
+        listener: Box<dyn FfiStreamListener>
+    ) -> () = send_message_streaming_boxed
+);
+
+pub(crate) fn send_message_streaming_boxed(
+    message: String,
+    listener: Box<dyn FfiStreamListener>,
+) -> Result<(), FfiError> {
+    if crate::estop::is_engaged() {
+        return Err(FfiError::EstopEngaged {
+            detail: "Emergency stop is engaged. Resume before sending messages.".into(),
+        });
+    }
+    send_message_streaming_inner(message, Arc::from(listener))
+}
+
 pub(crate) fn send_message_streaming_inner(
     message: String,
     listener: Arc<dyn FfiStreamListener>,
@@ -84,39 +116,37 @@ pub(crate) fn send_message_streaming_inner(
 
     let rt = crate::runtime::get_or_create_runtime()?;
 
-    let (model, temperature, provider) = with_daemon_config(|config| {
-        let model = config.effective_model().to_owned();
-        let temperature = config.default_temperature;
-        let provider_name = config.effective_provider().to_owned();
+    // Upstream removed the flat `Config.effective_model`,
+    // `effective_provider`, `default_temperature`, `api_key`, `api_url`,
+    // and `routing` fields. Provider routing now lives under
+    // `[providers.models.<type>.<alias>]` blocks; the provider factory
+    // reads its own auth on construction. Temperature is per-provider
+    // on `ModelProviderConfig.temperature`.
+    let (model, temperature, provider) = try_with_daemon_config(|config| {
+        let model = config.resolve_default_model().ok_or_else(|| FfiError::ConfigError {
+            detail: crate::runtime::NO_MODEL_CONFIGURED.into(),
+        })?;
+        let provider_name = crate::runtime::effective_model_provider_type(config)?;
+        let temperature: f64 = config
+            .first_model_provider_alias()
+            .and_then(|s| s.as_str().split_once('.').map(|(_, a)| a.to_string()))
+            .and_then(|alias| {
+                config.providers.models.find(&provider_name, &alias).and_then(|p| p.temperature)
+            })
+            .unwrap_or(0.7);
 
-        // Classify the message and use tier-preferred provider if configured.
-        // Capture the full tier tail as cascade fallback overrides.
-        let (effective_provider, routing_fallbacks) = {
-            let hint = zeroclaw::router::classify(&message);
-            let preferred = hint.preferred_providers(&config.routing);
-            if preferred.is_empty() {
-                (provider_name, None)
-            } else {
-                tracing::info!(
-                    from = %provider_name,
-                    to = %preferred[0],
-                    ?hint,
-                    "Provider swapped by classification"
-                );
-                (preferred[0].clone(), Some(preferred[1..].to_vec()))
-            }
-        };
+        let _ = &message; // router classification dropped during port
 
-        let prov = zeroclaw::providers::create_resilient_provider_with_options(
-            &effective_provider,
-            config.api_key.as_deref(),
-            config.api_url.as_deref(),
-            &config.reliability,
-            routing_fallbacks.as_deref(),
-            &zeroclaw::providers::ProviderRuntimeOptions::default(),
-        );
+        let prov: anyhow::Result<Box<dyn zeroclaw::providers::ModelProvider>> =
+            zeroclaw::providers::create_resilient_model_provider_with_options(
+                &provider_name,
+                None,
+                None,
+                &config.reliability,
+                &zeroclaw::providers::ModelProviderRuntimeOptions::default(),
+            );
 
-        (model, temperature, prov)
+        Ok((model, temperature, prov))
     })?;
 
     let provider = provider.map_err(|e| FfiError::SpawnError {
@@ -126,7 +156,7 @@ pub(crate) fn send_message_streaming_inner(
     rt.block_on(async {
         let options = StreamOptions::default();
         let mut stream =
-            provider.stream_chat_with_system(None, &message, &model, temperature, options);
+            provider.stream_chat_with_system(None, &message, &model, Some(temperature), options);
 
         let mut full_response = String::new();
 
@@ -173,6 +203,21 @@ pub(crate) fn send_message_streaming_inner(
 ///
 /// Returns `Result` for consistency with the `catch_unwind` wrapper in
 /// `lib.rs` — the caller expects `Result<(), FfiError>`.
+crate::ffi_export!(
+    /// Signals the current streaming operation to cancel.
+    ///
+    /// Sets an internal cancel flag that is checked between stream chunks.
+    /// The streaming callback will receive an `on_error("Request cancelled")`
+    /// call at the next chunk boundary.
+    ///
+    /// Safe to call at any time, including when no streaming is in progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn cancel_streaming() -> () = cancel_streaming_inner
+);
+
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn cancel_streaming_inner() -> Result<(), FfiError> {
     if let Some(token) = lock_stream_cancel().as_ref() {

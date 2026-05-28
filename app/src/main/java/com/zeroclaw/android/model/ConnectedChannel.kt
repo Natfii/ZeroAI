@@ -61,11 +61,17 @@ data class ChannelFieldSpec(
  * @property displayName Human-readable name shown in the UI.
  * @property tomlKey Key used in the `[channels_config.<key>]` TOML section.
  * @property fields Ordered list of configuration field specifications.
+ * @property usesProgressiveStreaming When true, the daemon should emit
+ *   draft updates (stream_mode = "partial") so the model's reasoning
+ *   preamble doesn't leak into the channel as one final dump. Set on
+ *   every interactive chat surface; future non-chat channels (webhook,
+ *   cron-triggered, …) leave this false.
  */
 enum class ChannelType(
     val displayName: String,
     val tomlKey: String,
     val fields: List<ChannelFieldSpec>,
+    val usesProgressiveStreaming: Boolean = false,
 ) {
     /** Telegram Bot API channel. */
     TELEGRAM(
@@ -86,6 +92,7 @@ enum class ChannelType(
                     inputType = FieldInputType.LIST,
                 ),
             ),
+        usesProgressiveStreaming = true,
     ),
 
     /** Discord Bot channel. */
@@ -102,6 +109,7 @@ enum class ChannelType(
                     inputType = FieldInputType.SECRET,
                 ),
             ),
+        usesProgressiveStreaming = true,
     ),
 }
 

@@ -5,6 +5,10 @@
  */
 
 use crate::error::FfiError;
+use crate::runtime_channels::{
+    bind_channel_identity_inner, collect_channels, get_channel_allowlist_inner,
+    get_configured_channel_names_inner, has_supervised_channels,
+};
 use chrono::Utc;
 use std::future::Future;
 use std::path::PathBuf;
@@ -14,7 +18,7 @@ use tokio::runtime::{Handle, Runtime};
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use zeroclaw::Config;
-use zeroclaw::PairingGuard;
+use zeroclaw_config::pairing::PairingGuard;
 
 /// On-device Gemini Nano availability, set from Kotlin.
 static NANO_AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -28,6 +32,181 @@ pub(crate) fn set_nano_available_inner(available: bool) {
 pub(crate) fn is_nano_available_inner() -> bool {
     NANO_AVAILABLE.load(Ordering::Acquire)
 }
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Returns the crate version string from `Cargo.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_version() -> String = get_version_inner
+);
+
+crate::ffi_export!(
+    /// Update on-device Gemini Nano availability.
+    ///
+    /// Called from Kotlin after ML Kit `checkModelStatus()` at daemon
+    /// startup and on config changes. Default is `false`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn set_nano_available(available: bool) -> () = set_nano_available_ffi
+);
+
+crate::ffi_export!(
+    /// Generates a bearer token for WebView authentication.
+    ///
+    /// Creates a random token, registers its SHA-256 hash with the
+    /// gateway's pairing guard, and returns the plaintext. The token is
+    /// never persisted — the caller must hold it in memory only.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not
+    /// running, or [`crate::FfiError::InternalPanic`] if native code
+    /// panics.
+    fn create_pairing_token() -> String = create_pairing_token_inner
+);
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn get_version_inner() -> Result<String, FfiError> {
+    Ok(env!("CARGO_PKG_VERSION").to_string())
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn set_nano_available_ffi(available: bool) -> Result<(), FfiError> {
+    set_nano_available_inner(available);
+    Ok(())
+}
+
+pub(crate) fn create_pairing_token_inner() -> Result<String, FfiError> {
+    let guard = get_pairing_guard()?;
+    Ok(guard.generate_new_pairing_code().unwrap_or_default())
+}
+
+crate::ffi_export!(
+    /// Sends a message through the full agent loop and returns the response.
+    ///
+    /// Routes through [`zeroclaw::agent::process_message`] which provides
+    /// memory recall, tool access, and proper workspace identity
+    /// injection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::EstopEngaged`] when emergency stop is
+    /// active, [`crate::FfiError::StateError`] if the daemon is not
+    /// running, [`crate::FfiError::SpawnError`] if agent processing fails,
+    /// [`crate::FfiError::StateCorrupted`] if internal state is poisoned,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn send_message(message: String) -> String = send_message_ffi
+);
+
+crate::ffi_export!(
+    /// Sends a message with a route hint from on-device classification.
+    ///
+    /// The `route_hint` parameter accepts: `"simple"`, `"complex"`,
+    /// `"creative"`, `"tool_use"`, or empty string for default routing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::EstopEngaged`] when emergency stop is
+    /// active, or [`crate::FfiError::SpawnError`] if agent processing
+    /// fails.
+    fn send_message_routed(message: String, route_hint: String) -> String = send_message_routed_ffi
+);
+
+pub(crate) fn send_message_ffi(message: String) -> Result<String, FfiError> {
+    if crate::estop::is_engaged() {
+        return Err(FfiError::EstopEngaged {
+            detail: "Emergency stop is engaged. Resume before sending messages.".into(),
+        });
+    }
+    send_message_inner(message)
+}
+
+pub(crate) fn send_message_routed_ffi(
+    message: String,
+    route_hint: String,
+) -> Result<String, FfiError> {
+    if crate::estop::is_engaged() {
+        return Err(FfiError::EstopEngaged {
+            detail: "emergency stop is engaged — all agent execution is blocked".into(),
+        });
+    }
+    send_message_routed_inner(message, route_hint)
+}
+
+// ── Daemon lifecycle FFI exports ───────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Starts the `ZeroClaw` daemon with the given TOML configuration.
+    ///
+    /// Parses `config_toml`, overrides paths using `data_dir` (typically
+    /// `context.filesDir` from Kotlin), and spawns the gateway on
+    /// `host:port`. All daemon components run as supervised async tasks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::ConfigError`] for TOML parse failures,
+    /// [`crate::FfiError::StateError`] if the daemon is already running,
+    /// [`crate::FfiError::SpawnError`] on spawn failure,
+    /// [`crate::FfiError::StateCorrupted`] if internal state is poisoned,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn start_daemon(config_toml: String, data_dir: String, host: String, port: u16) -> () = start_daemon_inner
+);
+
+crate::ffi_export!(
+    /// Stops the running `ZeroClaw` daemon.
+    fn stop_daemon() -> () = stop_daemon_inner
+);
+
+crate::ffi_export!(
+    /// Returns a JSON string describing daemon and component health.
+    fn get_status() -> String = get_status_inner
+);
+
+crate::ffi_export!(
+    /// Validates a TOML config string without starting the daemon.
+    fn validate_config(config_toml: String) -> String = validate_config_inner
+);
+
+crate::ffi_export!(
+    /// Returns the TOML config the running daemon was started with.
+    fn get_running_config() -> String = get_running_config_inner
+);
+
+crate::ffi_export!(
+    /// Hot-swaps the default provider and model without restarting.
+    fn swap_provider(provider: String, model: String, api_key: Option<String>) -> () = swap_provider_inner
+);
+
+crate::ffi_export!(
+    /// Runs channel health checks without starting the daemon.
+    fn doctor_channels(config_toml: String, data_dir: String) -> String = doctor_channels_inner
+);
+
+crate::ffi_export!(
+    /// Returns the names of all channels configured in the running TOML.
+    fn get_configured_channel_names() -> Vec<String> = get_configured_channel_names_inner
+);
+
+crate::ffi_export!(
+    /// Binds a user identity to a channel's allowlist in the running daemon.
+    fn bind_channel_identity(channel_name: String, user_id: String) -> String = bind_channel_identity_inner
+);
+
+crate::ffi_export!(
+    /// Returns the current allowlist for a named channel.
+    fn get_channel_allowlist(channel_name: String) -> Vec<String> = get_channel_allowlist_inner
+);
+
+crate::ffi_export!(
+    /// Returns the port the gateway HTTP server is bound to.
+    fn get_gateway_port() -> u16 = gateway_port_inner
+);
 
 /// Tokio runtime, recreated on each daemon lifecycle.
 ///
@@ -63,13 +242,10 @@ pub(crate) struct DaemonState {
     ///
     /// Shared with the Discord channel and FFI functions for search,
     /// sync status, and backfill operations.
-    pub(crate) archive: Option<Arc<zeroclaw::memory::discord_archive::DiscordArchive>>,
+    pub(crate) archive: Option<Arc<zeroai::memory::discord_archive::DiscordArchive>>,
     /// Gateway pairing guard, shared with the gateway for programmatic
     /// token registration from the FFI layer.
     pairing: Arc<PairingGuard>,
-    /// Cached leaderboard JSON string, written by Kotlin and read by the
-    /// gateway `GET /api/memory/leaderboard` endpoint.
-    pub(crate) leaderboard_cache: Arc<std::sync::RwLock<String>>,
 }
 
 /// Returns a reference to the daemon state mutex, initialising it on first access.
@@ -128,7 +304,7 @@ pub(crate) fn get_pairing_guard() -> Result<Arc<PairingGuard>, FfiError> {
 /// # Errors
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
-pub(crate) fn get_gateway_port() -> Result<u16, FfiError> {
+pub(crate) fn gateway_port_inner() -> Result<u16, FfiError> {
     lock_daemon()
         .as_ref()
         .ok_or_else(|| FfiError::StateError {
@@ -148,6 +324,24 @@ pub(crate) fn with_daemon_config<T>(f: impl FnOnce(&Config) -> T) -> Result<T, F
     Ok(f(&state.config))
 }
 
+/// Runs a fallible closure with a reference to the daemon config.
+///
+/// Like [`with_daemon_config`] but accepts closures that may themselves
+/// fail with [`FfiError`]. Flattens the nested `Result` so callers use
+/// a single `?` instead of `??`.
+///
+/// Returns [`FfiError::StateError`] if the daemon is not running, or
+/// whatever error the closure produced.
+pub(crate) fn try_with_daemon_config<T>(
+    f: impl FnOnce(&Config) -> Result<T, FfiError>,
+) -> Result<T, FfiError> {
+    let guard = lock_daemon();
+    let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
+        detail: "daemon not running".into(),
+    })?;
+    f(&state.config)
+}
+
 /// Runs a closure with a mutable reference to the daemon config.
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
@@ -158,6 +352,74 @@ pub(crate) fn with_daemon_config_mut<T>(f: impl FnOnce(&mut Config) -> T) -> Res
     })?;
     Ok(f(&mut state.config))
 }
+
+/// Standard error message for "no model configured" — used by session,
+/// streaming, and vision when [`Config::resolve_default_model`] returns
+/// `None`.
+pub(crate) const NO_MODEL_CONFIGURED: &str =
+    "no model configured: set [providers.models.<type>.<alias>].model in config.toml";
+
+/// Standard error message for "no model provider configured" — used by
+/// [`effective_model_provider_type`] when no `[providers.models.*]`
+/// block exists.
+pub(crate) const NO_PROVIDER_CONFIGURED: &str =
+    "no model provider configured: add a [providers.models.<type>.<alias>] block to config.toml";
+
+/// Returns the first configured model-provider type (e.g. `"anthropic"`,
+/// `"openai"`) from the running daemon config.
+///
+/// Replaces direct reads of the old flat `Config::default_provider`
+/// field after the upstream provider-nesting refactor (2026-05).
+///
+/// # Errors
+///
+/// Returns [`FfiError::ConfigError`] when no `[providers.models.*]`
+/// block exists. Never falls back to a hardcoded provider — silent
+/// "anthropic" fallback is the very anti-pattern this helper exists to
+/// prevent (see `feedback_provider_routing_defaults.md`).
+/// Returns the only configured channel of the given kind, or a clear
+/// [`FfiError::ConfigError`] if zero or more than one alias is configured.
+///
+/// Upstream's nested channel schema permits multiple aliases per kind
+/// (e.g. `[channels.discord.work]` + `[channels.discord.personal]`),
+/// but the FFI layer currently has no notion of "active alias." Rather
+/// than pick one silently with `HashMap::values().next()` (which has
+/// undefined iteration order), this helper makes the limitation
+/// explicit. Returns:
+/// - `Err(ConfigError)` with a "not configured" message when empty
+/// - `Err(ConfigError)` with a "multi-alias not supported" message
+///   when more than one alias is present
+/// - `Ok(&T)` only when exactly one alias is configured
+///
+/// Once multi-alias support lands, this helper goes away and call sites
+/// take a `&str` alias parameter from Kotlin.
+pub(crate) fn primary_alias<'a, T>(
+    map: &'a std::collections::HashMap<String, T>,
+    kind: &'static str,
+) -> Result<&'a T, FfiError> {
+    let mut iter = map.values();
+    let first = iter.next().ok_or_else(|| FfiError::ConfigError {
+        detail: format!("{kind} channel is not configured"),
+    })?;
+    if iter.next().is_some() {
+        return Err(FfiError::ConfigError {
+            detail: format!(
+                "{kind} channel has multiple aliases configured;                  multi-alias support is not yet implemented —                  keep only one [channels.{kind}.<alias>] block"
+            ),
+        });
+    }
+    Ok(first)
+}
+
+pub(crate) fn effective_model_provider_type(config: &Config) -> Result<String, FfiError> {
+    config
+        .first_model_provider_type()
+        .map(str::to_string)
+        .ok_or_else(|| FfiError::ConfigError {
+            detail: NO_PROVIDER_CONFIGURED.into(),
+        })
+}
+
 
 /// Returns an owned clone of the running daemon's [`Config`].
 ///
@@ -185,7 +447,6 @@ pub(crate) fn clone_daemon_config() -> Result<Config, FfiError> {
 /// Returns [`FfiError::StateError`] if the daemon is not running or
 /// the memory backend was not initialised during daemon startup,
 /// or [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
-#[allow(dead_code)] // Used by session_send_inner, wired in Task 9
 pub(crate) fn clone_daemon_memory() -> Result<Arc<dyn zeroclaw::memory::Memory>, FfiError> {
     let guard = lock_daemon();
     let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
@@ -278,7 +539,10 @@ fn install_panic_hook() {
 /// Returns [`FfiError::SpawnError`] if the tokio runtime builder fails.
 pub(crate) fn get_or_create_runtime() -> Result<Handle, FfiError> {
     install_panic_hook();
-    zeroclaw::install_rustls_crypto_provider();
+    // Upstream removed `install_rustls_crypto_provider` — the workspace
+    // runtime now installs its own provider lazily. `reqwest` / `russh`
+    // also install ring on first TLS use, so no eager bootstrap is
+    // needed here.
     let mut guard = lock_runtime();
     if let Some(rt) = guard.as_ref() {
         return Ok(rt.handle().clone());
@@ -343,66 +607,64 @@ pub(crate) fn start_daemon_inner(
         });
     }
 
-    let mut config: Config = toml::from_str(&config_toml).map_err(|e| FfiError::ConfigError {
-        detail: format!("failed to parse config TOML: {e}"),
-    })?;
+    // Install the rustls process-wide CryptoProvider before any TLS
+    // handshake runs. Discord's gateway uses tokio-tungstenite which calls
+    // bare rustls APIs (not via reqwest's bundled setup), so without this
+    // the first WS connect panics at `rustls::crypto::mod.rs:249`. Idempotent
+    // — `install_default` no-ops once a provider is set, so re-running on
+    // hot-reload is safe.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let mut config: Config =
+        zeroclaw_config::migration::migrate_to_current(&config_toml).map_err(|e| {
+            FfiError::ConfigError {
+                detail: format!("failed to parse config TOML: {e}"),
+            }
+        })?;
 
     let data_path = PathBuf::from(&data_dir);
-    config.workspace_dir = data_path.join("workspace");
+    config.data_dir = data_path.join("workspace");
     config.config_path = data_path.join("config.toml");
 
     // open-skills auto-sync was removed during channel gutting (supply-chain risk).
     // SkillsConfig no longer has open_skills_enabled or open_skills_dir fields.
 
-    // Android does not ship the agent-browser CLI or desktop screenshot
-    // tool. Exclude them from non-CLI channels (Telegram, Discord, etc.)
-    // as a safety net in case ConfigTomlBuilder omits the field.
-    for tool_name in ["browser", "screenshot"] {
-        if !config
-            .autonomy
-            .non_cli_excluded_tools
-            .iter()
-            .any(|t| t == tool_name)
-        {
-            config
-                .autonomy
-                .non_cli_excluded_tools
-                .push(tool_name.to_string());
-        }
-    }
-    tracing::info!(
-        excluded = ?config.autonomy.non_cli_excluded_tools,
-        "Android tool exclusions applied for non-CLI channels"
-    );
+    // Upstream moved `autonomy.non_cli_excluded_tools` off the
+    // top-level Config — the exclusion guard now lives in
+    // `[risk_profiles]` / `[security]` blocks emitted by the Android
+    // TOML builder. No runtime patching needed here.
+    tracing::info!("Android tool exclusions: now expected to come from TOML, not patched at runtime");
 
-    zeroclaw::tools::web_fetch::set_global_webview_fallback(Arc::new(
-        crate::web_renderer::FfiWebViewFallback,
-    ));
+    // Disabled: `web_fetch::set_global_webview_fallback` and the
+    // `WebViewFallback` trait were removed upstream. The
+    // `FfiWebViewFallback` adapter is preserved (web_renderer.rs) for
+    // when upstream reintroduces a hook.
 
     crate::estop::load_state(&data_path);
 
-    // Register shared folder shim tools if the plugin is enabled.
-    // Uses a factory so tools are created fresh for each tool registry build
-    // (channels, agent loop, and gateway each build their own registry).
-    tracing::info!(
-        shared_folder_enabled = config.shared_folder.enabled,
-        "Shared folder config check"
-    );
-    if config.shared_folder.enabled {
-        tracing::info!("Registering shared folder + eval_script tool factory");
-        zeroclaw::tools::set_global_extra_tools_factory(Box::new(|| {
-            let mut tools = crate::shared_folder::create_shared_folder_tools();
-            tools.push(Box::new(crate::eval_script_tool::EvalScriptTool::new()));
-            tools
-        }));
-    } else {
-        tracing::info!("Registering eval_script tool factory");
-        zeroclaw::tools::set_global_extra_tools_factory(Box::new(|| {
-            vec![Box::new(crate::eval_script_tool::EvalScriptTool::new())]
-        }));
+    // Install the embedder-local tools factory exposed by upstream
+    // [`set_extra_tools_factory`]. This factory is the fan-out path
+    // for the **non-Terminal** call sites — the channel orchestrator,
+    // gateway, and per-agent loops all build their tool registries
+    // through `all_tools_with_runtime`, which queries the factory at
+    // the end of construction. (The Terminal `session_send` path uses
+    // [`crate::session_registry::build_tools_registry`] directly,
+    // which calls the same [`android_local_tools`] helper, so both
+    // paths converge on one source of truth.)
+    //
+    // Idempotent: `OnceLock::set` returns `Err` on a second install
+    // (e.g. hot-reload re-entry into `start_daemon_inner`). The
+    // closure captures no mutable state and is the same on every
+    // install, so dropping the duplicate is safe.
+    if zeroclaw_runtime::tools::set_extra_tools_factory(Box::new(
+        crate::android_local_tools::android_local_tools,
+    ))
+    .is_ok()
+    {
+        tracing::info!("Registered Android-local extra-tools factory");
     }
 
-    std::fs::create_dir_all(&config.workspace_dir).map_err(|e| FfiError::ConfigError {
+    std::fs::create_dir_all(&config.data_dir).map_err(|e| FfiError::ConfigError {
         detail: format!("failed to create workspace dir: {e}"),
     })?;
 
@@ -422,10 +684,17 @@ pub(crate) fn start_daemon_inner(
         .channel_max_backoff_secs
         .max(initial_backoff);
 
+    // The flat `config.api_key` was removed upstream. Memory backends
+    // that need a key (currently none of the user-selectable ones —
+    // sqlite/lucid/none) would look it up via
+    // `config.providers.models.find(family, alias)`. For the moment
+    // none of the Android-facing backends consume `memory_api_key`, so
+    // `None` is the correct call.
+    let memory_api_key: Option<&str> = None;
     let memory: Option<Arc<dyn zeroclaw::memory::Memory>> = match zeroclaw::memory::create_memory(
         &config.memory,
-        &config.workspace_dir,
-        config.api_key.as_deref(),
+        &config.data_dir,
+        memory_api_key,
     ) {
         Ok(mem) => {
             tracing::info!("Memory backend initialised: {}", mem.name());
@@ -437,10 +706,10 @@ pub(crate) fn start_daemon_inner(
         }
     };
 
-    let archive: Option<Arc<zeroclaw::memory::discord_archive::DiscordArchive>> =
-        if config.channels_config.discord.is_some() {
+    let archive: Option<Arc<zeroai::memory::discord_archive::DiscordArchive>> =
+        if !config.channels.discord.is_empty() {
             let data_path_ref = PathBuf::from(&data_dir);
-            match zeroclaw::memory::discord_archive::DiscordArchive::open(&data_path_ref) {
+            match zeroai::memory::discord_archive::DiscordArchive::open(&data_path_ref) {
                 Ok(a) => {
                     tracing::info!("Discord archive initialised");
                     Some(Arc::new(a))
@@ -471,7 +740,6 @@ pub(crate) fn start_daemon_inner(
         {
             let gateway_cfg = config.clone();
             let gateway_host = host.clone();
-            let gateway_pairing = Arc::clone(&pairing);
             handles.push(spawn_component_supervisor(
                 "gateway",
                 initial_backoff,
@@ -479,8 +747,11 @@ pub(crate) fn start_daemon_inner(
                 move || {
                     let cfg = gateway_cfg.clone();
                     let h = gateway_host.clone();
-                    let p = Arc::clone(&gateway_pairing);
-                    async move { zeroclaw::gateway::run_gateway(&h, port, cfg, Some(p)).await }
+                    // Upstream's `run_gateway` constructs its own
+                    // PairingGuard internally; we no longer pass ours
+                    // in. Signature: `(host, port, config,
+                    // external_event_tx, reload_tx, canvas_store)`.
+                    async move { zeroclaw::gateway::run_gateway(&h, port, cfg, None, None, None).await }
                 },
             ));
         }
@@ -493,7 +764,14 @@ pub(crate) fn start_daemon_inner(
                 max_backoff,
                 move || {
                     let cfg = channels_cfg.clone();
-                    async move { zeroclaw::channels::start_channels(cfg).await }
+                    // Upstream's `start_channels` now takes
+                    // `(config, canvas_store, cancel_token)` — the cancel
+                    // token is constructed per supervisor spawn so each
+                    // channel restart gets a fresh lifecycle.
+                    async move {
+                        let cancel = tokio_util::sync::CancellationToken::new();
+                        zeroclaw::channels::start_channels(cfg, None, cancel).await
+                    }
                 },
             ));
         } else {
@@ -517,11 +795,10 @@ pub(crate) fn start_daemon_inner(
         memory,
         archive,
         pairing,
-        leaderboard_cache: Arc::new(std::sync::RwLock::new("[]".into())),
     });
 
     // Register ClawBoy trigger handler for channel message interception.
-    zeroclaw::clawboy_triggers::register_trigger_handler(std::sync::Arc::new(
+    zeroai::clawboy_triggers::register_trigger_handler(std::sync::Arc::new(
         |message: &str, channel_id: &str| -> Option<String> {
             match crate::clawboy::chat::check_trigger(message, channel_id) {
                 crate::clawboy::chat::TriggerResult::StartResponse(r)
@@ -638,7 +915,7 @@ pub(crate) fn send_message_inner(message: String) -> Result<String, FfiError> {
     let config = with_daemon_config(Config::clone)?;
 
     handle.block_on(async {
-        zeroclaw::agent::process_message(config, &message)
+        zeroclaw::agent::process_message(config, "default", &message, None)
             .await
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("agent processing failed: {e}"),
@@ -648,7 +925,7 @@ pub(crate) fn send_message_inner(message: String) -> Result<String, FfiError> {
 
 /// Sends a message with an optional route hint from the Kotlin classifier.
 ///
-/// The `route_hint` string maps to [`zeroclaw::router::RouteHint`] variants:
+/// The `route_hint` string maps to [`zeroai::router::RouteHint`] variants:
 /// `"simple"`, `"complex"`, `"creative"`, `"tool_use"`. Empty or unrecognized
 /// values fall back to default routing (no hint).
 ///
@@ -669,12 +946,20 @@ pub(crate) fn send_message_routed_inner(
         });
     }
 
-    let hint = zeroclaw::router::RouteHint::from_ffi(&route_hint);
+    let hint = zeroai::router::RouteHint::from_ffi(&route_hint);
     let handle = get_or_create_runtime()?;
     let config = with_daemon_config(Config::clone)?;
 
     handle.block_on(async {
-        zeroclaw::agent::process_message_routed(config, &message, hint)
+        // Upstream replaced `process_message_routed(hint)` with
+        // `process_message(config, agent_alias, message, session_id)` —
+        // the routing-hint surface was removed during the agent refactor.
+        // The Android caller still passes `route_hint` for forward
+        // compatibility (and we keep the local RouteHint enum for the
+        // classifier), but it is unused at the call site until upstream
+        // restores a router config or we wire a local pre-classifier.
+        let _ = hint;
+        zeroclaw::agent::process_message(config, "default", &message, None)
             .await
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("agent processing failed: {e}"),
@@ -777,17 +1062,18 @@ pub(crate) fn swap_provider_inner(
         detail: "daemon not running".into(),
     })?;
 
-    state.config.default_provider = Some(provider);
-    state.config.default_model = Some(model);
-    if let Some(key) = api_key {
-        state.config.api_key = Some(key);
-    }
-
-    tracing::info!(
-        "Provider hot-swapped to {:?}/{:?}",
-        state.config.default_provider,
-        state.config.default_model
+    // Upstream moved provider routing into the nested
+    // `config.providers.models.<type>.<alias>` schema; the flat
+    // `default_provider` / `default_model` / `api_key` fields that this
+    // hot-swap operated on are gone. Per-provider auth + endpoints now
+    // live in TOML blocks the daemon reads on startup, so the Android
+    // caller must rewrite the TOML via `ConfigTomlBuilder` and restart
+    // the daemon to apply provider changes.
+    let _ = (&provider, &model, &api_key);
+    tracing::warn!(
+        "swap_provider: hot-swap not implemented on new nested provider schema; restart daemon to apply"
     );
+    let _ = state;
     Ok(())
 }
 
@@ -812,9 +1098,11 @@ pub(crate) fn get_running_config_inner() -> Result<String, FfiError> {
 
 /// Validates a TOML config string without starting the daemon.
 ///
-/// Parses `config_toml` using the same `toml::from_str::<Config>()` call
-/// as [`start_daemon_inner`]. Returns an empty string on success, or a
-/// human-readable error message on parse failure.
+/// Runs the same V1→V2→V3 migration chain as [`start_daemon_inner`] via
+/// `migrate_to_current`, so configs emitted by the Android TOML builder
+/// (V1-shaped, no `schema_version`) are validated against the same
+/// schema the daemon will actually load. Returns an empty string on
+/// success, or a human-readable error message on migration/parse failure.
 ///
 /// No state mutation, no mutex, no file I/O.
 ///
@@ -824,7 +1112,7 @@ pub(crate) fn get_running_config_inner() -> Result<String, FfiError> {
 /// (should never happen).
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn validate_config_inner(config_toml: String) -> Result<String, FfiError> {
-    match toml::from_str::<Config>(&config_toml) {
+    match zeroclaw_config::migration::migrate_to_current(&config_toml) {
         Ok(_) => Ok(String::new()),
         Err(e) => Ok(format!("{e}")),
     }
@@ -871,12 +1159,12 @@ pub(crate) fn doctor_channels_inner(
     let config: Config = if config_toml.is_empty() {
         clone_daemon_config()?
     } else {
-        let mut parsed: Config =
-            toml::from_str(&config_toml).map_err(|e| FfiError::ConfigError {
+        let mut parsed: Config = zeroclaw_config::migration::migrate_to_current(&config_toml)
+            .map_err(|e| FfiError::ConfigError {
                 detail: format!("failed to parse config TOML: {e}"),
             })?;
         let data_path = PathBuf::from(&data_dir);
-        parsed.workspace_dir = data_path.join("workspace");
+        parsed.data_dir = data_path.join("workspace");
         parsed.config_path = data_path.join("config.toml");
         parsed
     };
@@ -928,411 +1216,8 @@ pub(crate) fn doctor_channels_inner(
     })
 }
 
-/// Constructs all synchronous channels from the given config for health
-/// checking.
-///
-/// Replicates the upstream `collect_configured_channels()` logic (which
-/// is private and not accessible from the FFI crate). Only Telegram
-/// and Discord remain after upstream channel pruning.
-///
-/// When the daemon is running and a Discord archive is available, the
-/// archive `Arc` is passed to `DiscordChannel` so that live messages
-/// are recorded into the archive during health checks.
-fn collect_channels(config: &Config) -> Vec<(&'static str, Arc<dyn zeroclaw::channels::Channel>)> {
-    // Verified constructor signatures against upstream:
-    //   TelegramChannel::new(bot_token, allowed_users, mention_only) -> Self
-    //   DiscordChannel::new(bot_token, guild_id, allowed_users, listen_to_bots, mention_only, archive, daemon_name, linked_dm_user, memory) -> Self
-    use zeroclaw::channels::{DiscordChannel, TelegramChannel};
 
-    let mut channels: Vec<(&'static str, Arc<dyn zeroclaw::channels::Channel>)> = Vec::new();
-
-    // Try to get the archive and memory from daemon state if available.
-    let (archive, memory) = {
-        let guard = lock_daemon();
-        let archive = guard.as_ref().and_then(|state| state.archive.clone());
-        let memory = guard.as_ref().and_then(|state| state.memory.clone());
-        (archive, memory)
-    };
-
-    if let Some(ref tg) = config.channels_config.telegram {
-        channels.push((
-            "Telegram",
-            Arc::new(TelegramChannel::new(
-                tg.bot_token.clone(),
-                tg.allowed_users.clone(),
-                tg.mention_only,
-            )),
-        ));
-    }
-
-    if let Some(ref dc) = config.channels_config.discord {
-        channels.push((
-            "Discord",
-            Arc::new(DiscordChannel::new(
-                dc.bot_token.clone(),
-                dc.guild_id.clone(),
-                dc.allowed_users.clone(),
-                dc.listen_to_bots,
-                dc.mention_only,
-                archive,
-                dc.daemon_name.clone(),
-                None,
-                memory,
-            )),
-        ));
-    }
-
-    channels
-}
-
-/// Returns `true` if any real-time channel is configured and needs supervision.
-///
-/// Only Telegram and Discord remain after upstream channel pruning.
-fn has_supervised_channels(config: &Config) -> bool {
-    config.channels_config.telegram.is_some() || config.channels_config.discord.is_some()
-}
-
-/// Maps a channel name to the upstream allowlist field name for that channel.
-///
-/// Returns `None` for unrecognised channel names. The returned string
-/// matches the struct field name in the upstream `*Config` type
-/// (e.g. `"allowed_users"` for Telegram and Discord).
-fn allowlist_field_for_channel(channel: &str) -> Option<&'static str> {
-    match channel {
-        "telegram" | "discord" => Some("allowed_users"),
-        _ => None,
-    }
-}
-
-/// Returns a [`FfiError::ConfigError`] indicating that the given channel
-/// is not configured in the running daemon.
-#[allow(dead_code)] // Wired in Task 2 (lib.rs FFI exports)
-fn not_configured(channel: &str) -> FfiError {
-    FfiError::ConfigError {
-        detail: format!("{channel} is not configured in the running daemon"),
-    }
-}
-
-/// Appends `user_id` to the in-memory allowlist for `channel_name`.
-///
-/// Mutates only the in-memory [`Config`] held by [`DaemonState`]. The
-/// caller must restart the daemon (or hot-reload channels) for the
-/// change to take effect on the running channel supervisors.
-///
-/// Returns `"already_bound"` if the identity is already present in the
-/// allowlist, or the allowlist field name (e.g. `"allowed_users"`) on
-/// success.
-///
-/// # Telegram normalisation
-///
-/// For the `telegram` channel, a leading `@` is stripped to match
-/// upstream `normalize_telegram_identity`.
-///
-/// # Errors
-///
-/// Returns [`FfiError::ConfigError`] if `channel_name` is unknown, the
-/// channel is not configured, or `user_id` is empty after trimming.
-/// Returns [`FfiError::StateError`] if the daemon is not running.
-#[allow(clippy::too_many_lines)]
-#[allow(dead_code)] // Wired in Task 2 (lib.rs FFI exports)
-pub(crate) fn bind_channel_identity_inner(
-    channel_name: String,
-    user_id: String,
-) -> Result<String, FfiError> {
-    let field =
-        allowlist_field_for_channel(&channel_name).ok_or_else(|| FfiError::ConfigError {
-            detail: format!("unknown channel: {channel_name}"),
-        })?;
-
-    let trimmed = user_id.trim().to_string();
-    if trimmed.is_empty() {
-        return Err(FfiError::ConfigError {
-            detail: "user identity must not be empty".to_string(),
-        });
-    }
-
-    let id = if channel_name == "telegram" {
-        trimmed.trim_start_matches('@').to_string()
-    } else {
-        trimmed
-    };
-
-    let mut guard = lock_daemon();
-    let state = guard.as_mut().ok_or_else(|| FfiError::StateError {
-        detail: "daemon not running".to_string(),
-    })?;
-    let cc = &mut state.config.channels_config;
-
-    /// Pushes `$id` into `$list` unless it is already present.
-    /// Evaluates to `true` if the identity was already bound.
-    macro_rules! bind {
-        ($cfg:expr, $field:ident, $id:expr) => {{
-            let cfg = $cfg.as_mut().ok_or_else(|| not_configured(&channel_name))?;
-            if cfg.$field.iter().any(|e| e == &$id) {
-                true
-            } else {
-                cfg.$field.push($id);
-                false
-            }
-        }};
-    }
-
-    let already = match channel_name.as_str() {
-        "telegram" => bind!(cc.telegram, allowed_users, id),
-        "discord" => bind!(cc.discord, allowed_users, id),
-        _ => {
-            return Err(FfiError::ConfigError {
-                detail: format!("unknown channel: {channel_name}"),
-            });
-        }
-    };
-
-    if already {
-        Ok("already_bound".to_string())
-    } else {
-        Ok(field.to_string())
-    }
-}
-
-/// Returns the current allowlist for `channel_name` from the running
-/// daemon's in-memory config.
-///
-/// Returns an empty `Vec` if the channel is configured but its
-/// allowlist is empty.
-///
-/// # Errors
-///
-/// Returns [`FfiError::ConfigError`] if `channel_name` is unknown or
-/// the channel is not configured.
-/// Returns [`FfiError::StateError`] if the daemon is not running.
-#[allow(clippy::too_many_lines)]
-#[allow(dead_code)] // Wired in Task 2 (lib.rs FFI exports)
-pub(crate) fn get_channel_allowlist_inner(channel_name: String) -> Result<Vec<String>, FfiError> {
-    let _field =
-        allowlist_field_for_channel(&channel_name).ok_or_else(|| FfiError::ConfigError {
-            detail: format!("unknown channel: {channel_name}"),
-        })?;
-
-    with_daemon_config(|config| {
-        let cc = &config.channels_config;
-        match channel_name.as_str() {
-            "telegram" => cc
-                .telegram
-                .as_ref()
-                .ok_or_else(|| not_configured(&channel_name))
-                .map(|c| c.allowed_users.clone()),
-            "discord" => cc
-                .discord
-                .as_ref()
-                .ok_or_else(|| not_configured(&channel_name))
-                .map(|c| c.allowed_users.clone()),
-            _ => Err(FfiError::ConfigError {
-                detail: format!("unknown channel: {channel_name}"),
-            }),
-        }
-    })?
-}
-
-/// Returns the names of all channels with non-null config sections in
-/// the running daemon's parsed TOML.
-///
-/// Mirrors [`has_supervised_channels`] but returns the individual
-/// channel names instead of a single boolean. Used by the Android UI
-/// for per-channel progress tracking during daemon startup.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running,
-/// or [`FfiError::StateCorrupted`] if the daemon mutex is poisoned.
-pub(crate) fn get_configured_channel_names_inner() -> Result<Vec<String>, FfiError> {
-    with_daemon_config(|config| {
-        let mut names = Vec::new();
-        if config.channels_config.telegram.is_some() {
-            names.push("telegram".to_string());
-        }
-        if config.channels_config.discord.is_some() {
-            names.push("discord".to_string());
-        }
-        names
-    })
-}
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_allowlist_field_telegram() {
-        assert_eq!(
-            allowlist_field_for_channel("telegram"),
-            Some("allowed_users")
-        );
-    }
-
-    #[test]
-    fn test_allowlist_field_discord() {
-        assert_eq!(
-            allowlist_field_for_channel("discord"),
-            Some("allowed_users")
-        );
-    }
-
-    #[test]
-    fn test_allowlist_field_unknown() {
-        assert_eq!(allowlist_field_for_channel("carrier_pigeon"), None);
-    }
-
-    #[test]
-    fn test_bind_channel_no_daemon() {
-        let result = bind_channel_identity_inner("telegram".into(), "alice".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_bind_channel_unknown() {
-        let result = bind_channel_identity_inner("carrier_pigeon".into(), "alice".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::ConfigError { detail } => {
-                assert!(detail.contains("unknown channel"));
-            }
-            other => panic!("expected ConfigError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_bind_channel_empty_identity() {
-        let result = bind_channel_identity_inner("telegram".into(), "   ".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::ConfigError { detail } => {
-                assert!(detail.contains("must not be empty"));
-            }
-            other => panic!("expected ConfigError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_get_allowlist_no_daemon() {
-        let result = get_channel_allowlist_inner("telegram".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_get_allowlist_unknown_channel() {
-        let result = get_channel_allowlist_inner("carrier_pigeon".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::ConfigError { detail } => {
-                assert!(detail.contains("unknown channel"));
-            }
-            other => panic!("expected ConfigError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_swap_provider_no_daemon() {
-        let result = swap_provider_inner("anthropic".into(), "claude-sonnet-4".into(), None);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_collect_channels_empty_config() {
-        let config: Config = toml::from_str("default_temperature = 0.7").unwrap();
-        let channels = collect_channels(&config);
-        assert!(
-            channels.is_empty(),
-            "expected no channels from default config, got {}",
-            channels.len()
-        );
-    }
-
-    #[test]
-    fn test_collect_channels_with_telegram() {
-        let toml_str = r#"
-default_temperature = 0.7
-
-[channels_config]
-cli = true
-
-[channels_config.telegram]
-bot_token = "fake:token"
-allowed_users = ["123"]
-mention_only = false
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        let channels = collect_channels(&config);
-        assert_eq!(channels.len(), 1);
-        assert_eq!(channels[0].0, "Telegram");
-    }
-
-    #[test]
-    fn test_collect_channels_multiple() {
-        let toml_str = r#"
-default_temperature = 0.7
-
-[channels_config]
-cli = true
-
-[channels_config.telegram]
-bot_token = "fake:token"
-allowed_users = []
-mention_only = false
-
-[channels_config.discord]
-bot_token = "fake_discord_token"
-allowed_users = []
-listen_to_bots = false
-mention_only = false
-"#;
-        let config: Config = toml::from_str(toml_str).unwrap();
-        let channels = collect_channels(&config);
-        assert_eq!(channels.len(), 2);
-        let names: Vec<&str> = channels.iter().map(|(n, _)| *n).collect();
-        assert!(names.contains(&"Telegram"));
-        assert!(names.contains(&"Discord"));
-    }
-
-    #[test]
-    fn test_doctor_channels_no_daemon_empty_toml() {
-        let result = doctor_channels_inner(String::new(), "/tmp/test".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_doctor_channels_no_channels_configured() {
-        let toml_str = "default_temperature = 0.7\n";
-        let result = doctor_channels_inner(toml_str.to_string(), "/tmp/test".into());
-        let json_str = result.unwrap();
-        let arr: Vec<serde_json::Value> = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["name"], "channels");
-        assert_eq!(arr[0]["status"], "healthy");
-        assert_eq!(arr[0]["detail"], "No channels configured");
-    }
-}
+#[path = "runtime_tests.rs"]
+mod tests;

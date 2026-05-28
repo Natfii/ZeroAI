@@ -39,6 +39,42 @@ const SUBDIRS: [&str; 5] = ["sessions", "memory", "state", "cron", "skills"];
 ///
 /// Returns [`FfiError::ConfigError`] if directory creation or file
 /// writing fails due to I/O errors.
+crate::ffi_export!(
+    /// Scaffolds the `ZeroAI` workspace directory with identity files.
+    ///
+    /// Writes `IDENTITY.md`, `MEMORIES.md`, and `INSTRUCTIONS.md` into
+    /// `workspace_path`, applying defaults for any empty argument.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::ConfigError`] if directory creation or
+    /// file writing fails, or [`crate::FfiError::InternalPanic`] if
+    /// native code panics.
+    fn scaffold_workspace(
+        workspace_path: String,
+        agent_name: String,
+        user_name: String,
+        timezone: String,
+        communication_style: String
+    ) -> () = scaffold_workspace_ffi
+);
+
+pub(crate) fn scaffold_workspace_ffi(
+    workspace_path: String,
+    agent_name: String,
+    user_name: String,
+    timezone: String,
+    communication_style: String,
+) -> Result<(), FfiError> {
+    create_workspace(
+        &workspace_path,
+        &agent_name,
+        &user_name,
+        &timezone,
+        &communication_style,
+    )
+}
+
 pub(crate) fn create_workspace(
     workspace_path: &str,
     agent_name: &str,

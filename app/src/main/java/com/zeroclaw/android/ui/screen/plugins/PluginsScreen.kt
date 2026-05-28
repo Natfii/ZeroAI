@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -59,6 +58,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.model.OfficialPlugins
 import com.zeroclaw.android.model.Plugin
 import com.zeroclaw.android.ui.component.CategoryBadge
 import com.zeroclaw.android.ui.component.EmptyState
@@ -178,7 +178,6 @@ fun PluginsScreen(
                 edgeMargin = 0.dp,
             )
         },
-        onRestoreDefaults = pluginsViewModel::restoreDefaults,
         modifier = modifier,
     )
 }
@@ -196,7 +195,6 @@ fun PluginsScreen(
  * @param onToggle Callback when a plugin's enable switch is toggled.
  * @param skillsTabContent Slot for the skills tab content.
  * @param appsTabContent Slot for the apps tab content.
- * @param onRestoreDefaults Callback to reset official plugins to defaults.
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
@@ -211,7 +209,6 @@ internal fun PluginsContent(
     onToggle: (String) -> Unit,
     skillsTabContent: @Composable () -> Unit,
     appsTabContent: @Composable () -> Unit,
-    onRestoreDefaults: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
@@ -265,19 +262,6 @@ internal fun PluginsContent(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = onRestoreDefaults,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription =
-                                    "Restore official plugins to defaults"
-                            },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.RestartAlt,
-                            contentDescription = null,
-                        )
-                    }
                     IconButton(
                         onClick = onSyncNow,
                         enabled = state.syncState !is SyncUiState.Syncing,
@@ -517,20 +501,33 @@ private fun PluginListItem(
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
-            if (plugin.isInstalled) {
-                Switch(
-                    checked = plugin.isEnabled,
-                    onCheckedChange = { onToggle() },
-                    modifier =
-                        Modifier.semantics {
-                            contentDescription =
-                                "${plugin.name} ${if (plugin.isEnabled) "enabled" else "disabled"}"
-                        },
-                )
-            } else {
-                FilledTonalButton(onClick = onInstall) {
-                    Text("Install")
-                }
+            // Vision is always-on by design: there is no
+            // `AppSettings.visionEnabled` field for it to bind to, and
+            // `reconcileOfficialPlugins` hardcodes its Room row to
+            // enabled. Rendering an interactive switch would visually
+            // toggle and then silently revert on the next Hub open,
+            // which is misleading. Surface "Always on" instead so the
+            // operator sees the actual semantics.
+            val isPermanentlyOn = plugin.id == OfficialPlugins.VISION
+            when {
+                !plugin.isInstalled ->
+                    FilledTonalButton(onClick = onInstall) { Text("Install") }
+                isPermanentlyOn ->
+                    Text(
+                        text = "Always on",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                else ->
+                    Switch(
+                        checked = plugin.isEnabled,
+                        onCheckedChange = { onToggle() },
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    "${plugin.name} ${if (plugin.isEnabled) "enabled" else "disabled"}"
+                            },
+                    )
             }
         }
     }

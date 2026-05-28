@@ -21,8 +21,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -59,6 +61,8 @@ data class AgentsState(
  * Fixed-slot Agents catalog screen.
  *
  * @param onNavigateToDetail Callback to navigate to a slot detail screen.
+ * @param onNavigateToOnDeviceLarge Callback to navigate to the on-device
+ *   large model setup screen.
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param agentsViewModel The [AgentsViewModel] for slot state.
  * @param modifier Modifier applied to the root layout.
@@ -66,12 +70,14 @@ data class AgentsState(
 @Composable
 fun AgentsScreen(
     onNavigateToDetail: (String) -> Unit,
+    onNavigateToOnDeviceLarge: () -> Unit,
     edgeMargin: Dp,
     agentsViewModel: AgentsViewModel = viewModel(),
     modifier: Modifier = Modifier,
 ) {
     val slots by agentsViewModel.slots.collectAsStateWithLifecycle()
     val searchQuery by agentsViewModel.searchQuery.collectAsStateWithLifecycle()
+    val onDeviceLargeEnabled by agentsViewModel.onDeviceLargeEnabled.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         agentsViewModel.refreshConnections()
@@ -81,8 +87,11 @@ fun AgentsScreen(
         state = AgentsState(slots = slots, searchQuery = searchQuery),
         edgeMargin = edgeMargin,
         onNavigateToDetail = onNavigateToDetail,
+        onNavigateToOnDeviceLarge = onNavigateToOnDeviceLarge,
         onSearchChange = agentsViewModel::updateSearch,
         onToggleSlot = agentsViewModel::toggleSlot,
+        onToggleOnDeviceLarge = agentsViewModel::toggleOnDeviceLarge,
+        onDeviceLargeEnabled = onDeviceLargeEnabled,
         modifier = modifier,
     )
 }
@@ -93,17 +102,27 @@ fun AgentsScreen(
  * @param state Current screen state snapshot.
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param onNavigateToDetail Callback to navigate to slot detail.
+ * @param onNavigateToOnDeviceLarge Callback to open the on-device large
+ *   model setup screen.
  * @param onSearchChange Callback when the search query changes.
  * @param onToggleSlot Callback to toggle a slot by its stable ID.
+ * @param onToggleOnDeviceLarge Callback to flip the on-device agent's
+ *   enabled state.
+ * @param onDeviceLargeEnabled Whether the on-device large agent is
+ *   currently the active agent.
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
+@Suppress("LongParameterList")
 internal fun AgentsContent(
     state: AgentsState,
     edgeMargin: Dp,
     onNavigateToDetail: (String) -> Unit,
+    onNavigateToOnDeviceLarge: () -> Unit,
     onSearchChange: (String) -> Unit,
     onToggleSlot: (String) -> Unit,
+    onToggleOnDeviceLarge: () -> Unit,
+    onDeviceLargeEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(modifier = modifier) { innerPadding ->
@@ -120,7 +139,7 @@ internal fun AgentsContent(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Manage provider routes and Google account connections.",
+                    text = "Manage provider routes and connected logins.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -131,6 +150,12 @@ internal fun AgentsContent(
                     label = { Text("Search providers") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                OnDeviceLargeModelCard(
+                    enabled = onDeviceLargeEnabled,
+                    onClick = onNavigateToOnDeviceLarge,
+                    onToggle = onToggleOnDeviceLarge,
                 )
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -249,9 +274,75 @@ private fun agentSlotProviderIconId(slot: AgentSlotItem): String =
         "openai-api", "chatgpt" -> "openai"
         "anthropic-api", "claude-code" -> "anthropic"
         "ollama" -> "ollama"
-        "xai-api" -> "xai"
         "openrouter-api" -> "openrouter"
-        "deepseek-api" -> "deepseek"
-        "qwen-api" -> "qwen"
         else -> slot.providerName
     }
+
+/**
+ * Card linking to the on-device large model setup screen.
+ *
+ * Visual parity with the cloud slot cards: tapping the card opens the
+ * detail screen, the trailing [Switch] flips the on-device agent's
+ * enabled state with the same mutual-exclusion semantics as the slot
+ * toggles (`AgentDao.toggleExclusive`).
+ *
+ * @param enabled Whether the on-device large agent is currently active.
+ * @param onClick Callback when the card is tapped.
+ * @param onToggle Callback when the enable switch flips.
+ */
+@Composable
+private fun OnDeviceLargeModelCard(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .defaultMinSize(minHeight = 48.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Memory,
+                contentDescription = null,
+                tint =
+                    if (enabled) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "On-device large model",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "LiteRT-LM · Gemma 4 / Phi-4",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = if (enabled) "Active agent" else "Tap to set up",
+                    style = MaterialTheme.typography.bodySmall,
+                    color =
+                        if (enabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Switch(checked = enabled, onCheckedChange = { onToggle() })
+        }
+    }
+}

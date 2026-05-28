@@ -188,6 +188,7 @@ fun TerminalScreen(
 ) {
     val state by terminalViewModel.state.collectAsStateWithLifecycle()
     val streamingState by terminalViewModel.streamingState.collectAsStateWithLifecycle()
+    val onDeviceWarmupLabel by terminalViewModel.onDeviceWarmupLabel.collectAsStateWithLifecycle()
     val showCamera by terminalViewModel.showCamera.collectAsStateWithLifecycle()
     val cameraPrompt by terminalViewModel.cameraPrompt.collectAsStateWithLifecycle()
     val voiceState by terminalViewModel.voiceState.collectAsStateWithLifecycle()
@@ -291,6 +292,7 @@ fun TerminalScreen(
                 TerminalContent(
                     state = state,
                     streamingState = streamingState,
+                    onDeviceWarmupLabel = onDeviceWarmupLabel,
                     isDaemonRunning = isDaemonRunning,
                     voiceState = voiceState,
                     speakRepliesEnabled = speakRepliesEnabled,
@@ -404,10 +406,12 @@ fun TerminalScreen(
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param modifier Modifier applied to the root layout.
  */
+@Suppress("OutdatedDocumentation")
 @Composable
 internal fun TerminalContent(
     state: TerminalState,
     streamingState: StreamingState,
+    onDeviceWarmupLabel: String? = null,
     isDaemonRunning: Boolean = false,
     voiceState: VoiceState = VoiceState.Idle,
     speakRepliesEnabled: Boolean = false,
@@ -538,6 +542,17 @@ internal fun TerminalContent(
                     item(key = "spinner", contentType = "spinner") {
                         BrailleSpinner(
                             label = "Thinking\u2026",
+                            modifier =
+                                Modifier.padding(
+                                    horizontal = AUTOCOMPLETE_ITEM_H_PAD_DP.dp,
+                                    vertical = SMALL_SPACING_DP.dp,
+                                ),
+                        )
+                    }
+                } else if (onDeviceWarmupLabel != null) {
+                    item(key = "ondevice-warmup", contentType = "warmup") {
+                        BrailleSpinner(
+                            label = onDeviceWarmupLabel,
                             modifier =
                                 Modifier.padding(
                                     horizontal = AUTOCOMPLETE_ITEM_H_PAD_DP.dp,

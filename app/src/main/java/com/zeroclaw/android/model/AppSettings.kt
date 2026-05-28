@@ -85,15 +85,9 @@ package com.zeroclaw.android.model
  * @property webSearchGoogleCx Google Custom Search Engine ID (required when provider is "google").
  * @property webSearchMaxResults Maximum number of search results (1-10).
  * @property webSearchTimeoutSecs Request timeout in seconds for web search.
- * @property twitterBrowseEnabled Whether the Twitter/X browse tool is active.
- * @property twitterBrowseCookieString Cookie string containing authenticated `ct0` and `auth_token`.
+ * @property twitterBrowseEnabled Whether the Twitter/X read-only tool is active.
  * @property twitterBrowseMaxItems Maximum timeline or search items returned per request (1-50).
  * @property twitterBrowseTimeoutSecs Request timeout in seconds for Twitter/X browsing.
- * @property transcriptionEnabled Whether audio transcription is active.
- * @property transcriptionApiUrl Transcription API endpoint URL.
- * @property transcriptionModel Transcription model name.
- * @property transcriptionLanguage ISO language code hint for transcription.
- * @property transcriptionMaxDurationSecs Maximum audio duration in seconds.
  * @property multimodalMaxImages Maximum images allowed per multimodal request (1-16).
  * @property multimodalMaxImageSizeMb Maximum image size in MB for multimodal input (1-20).
  * @property multimodalAllowRemoteFetch Whether the agent can fetch remote image URLs for vision.
@@ -118,10 +112,17 @@ package com.zeroclaw.android.model
  * @property memoryQdrantCollection Qdrant collection name.
  * @property memoryQdrantApiKey Qdrant API key.
  * @property embeddingRoutesJson JSON array of embedding route objects.
- * @property queryClassificationEnabled Whether automatic query classification is active.
  * @property skillsOpenSkillsEnabled Whether the open-skills community repository is enabled.
  * @property skillsOpenSkillsDir Custom directory for open-skills repository. Empty uses default.
- * @property skillsPromptInjectionMode Skill prompt injection mode: "full" or "compact".
+ * @property skillsPromptInjectionMode Skill prompt injection mode: "compact" (default,
+ *   embeds skill names/descriptions/tools but loads instruction body on demand via
+ *   `read_skill(name)`) or "full" (embeds entire SKILL.md content for every skill on
+ *   every turn). Compact is the global default because the full body of every skill
+ *   ships on every prompt, which (a) bloats token usage on cloud providers, (b) often
+ *   exceeds context limits on smaller local models, and (c) carries tool-usage examples
+ *   in plain-quote shell syntax that misleads strict-format models like Gemma 4 (FC
+ *   parser rejects plain `"..."` — wants `<|"|>...<|"|>` instead). Compact-mode
+ *   on-demand loading preserves capability without the upfront cost.
  * @property proxyEnabled Whether proxy configuration is active.
  * @property proxyHttpProxy HTTP proxy URL.
  * @property proxyHttpsProxy HTTPS proxy URL.
@@ -223,14 +224,8 @@ data class AppSettings(
     val webSearchMaxResults: Long = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     val webSearchTimeoutSecs: Long = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
     val twitterBrowseEnabled: Boolean = false,
-    val twitterBrowseCookieString: String = "",
     val twitterBrowseMaxItems: Long = DEFAULT_TWITTER_BROWSE_MAX_ITEMS,
     val twitterBrowseTimeoutSecs: Long = DEFAULT_TWITTER_BROWSE_TIMEOUT_SECS,
-    val transcriptionEnabled: Boolean = false,
-    val transcriptionApiUrl: String = DEFAULT_TRANSCRIPTION_API_URL,
-    val transcriptionModel: String = DEFAULT_TRANSCRIPTION_MODEL,
-    val transcriptionLanguage: String = "",
-    val transcriptionMaxDurationSecs: Long = DEFAULT_TRANSCRIPTION_MAX_DURATION_SECS,
     val multimodalMaxImages: Int = DEFAULT_MULTIMODAL_MAX_IMAGES,
     val multimodalMaxImageSizeMb: Int = DEFAULT_MULTIMODAL_MAX_IMAGE_SIZE_MB,
     val multimodalAllowRemoteFetch: Boolean = false,
@@ -255,10 +250,9 @@ data class AppSettings(
     val memoryQdrantCollection: String = DEFAULT_QDRANT_COLLECTION,
     val memoryQdrantApiKey: String = "",
     val embeddingRoutesJson: String = "[]",
-    val queryClassificationEnabled: Boolean = false,
     val skillsOpenSkillsEnabled: Boolean = false,
     val skillsOpenSkillsDir: String = "",
-    val skillsPromptInjectionMode: String = "full",
+    val skillsPromptInjectionMode: String = "compact",
     val proxyEnabled: Boolean = false,
     val proxyHttpProxy: String = "",
     val proxyHttpsProxy: String = "",
@@ -416,16 +410,6 @@ data class AppSettings(
 
         /** Default Twitter/X browse timeout in seconds. */
         const val DEFAULT_TWITTER_BROWSE_TIMEOUT_SECS = 30L
-
-        /** Default transcription API URL (Groq Whisper). */
-        const val DEFAULT_TRANSCRIPTION_API_URL =
-            "https://api.groq.com/openai/v1/audio/transcriptions"
-
-        /** Default transcription model. */
-        const val DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
-
-        /** Default max transcription duration in seconds. */
-        const val DEFAULT_TRANSCRIPTION_MAX_DURATION_SECS = 120L
 
         /** Default max images per multimodal request. */
         const val DEFAULT_MULTIMODAL_MAX_IMAGES = 4

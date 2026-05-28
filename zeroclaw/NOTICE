@@ -1,19 +1,38 @@
-ZeroClaw Rust Core
+ZeroClaw
 Copyright 2025 ZeroClaw Labs
-Copyright 2026 Zeroclaw Labs
 
-This directory includes a stripped and modified version of the upstream ZeroClaw project:
+This product includes software developed at ZeroClaw Labs (https://github.com/zeroclaw-labs).
+
+Official Repository
+===================
+
+The only official ZeroClaw repository is:
 https://github.com/zeroclaw-labs/zeroclaw
+
+Any other repository claiming to be ZeroClaw is unauthorized.
+See TRADEMARK.md for the full trademark policy.
 
 License
 =======
 
-The upstream project is offered under MIT OR Apache-2.0.
-For the `zeroclaw/` directory in this repository, the MIT license option is used.
-See LICENSE-MIT.
+This software is available under a dual-license model:
 
-Original upstream notices and attribution remain with their respective authors.
-Local modifications in this repository are attributed in the repository history.
+  1. MIT License — see LICENSE-MIT
+  2. Apache License 2.0 — see LICENSE-APACHE
+
+You may use either license. Contributors grant rights under both.
+See CLA.md for the contributor license agreement.
+
+Contributors
+============
+
+This NOTICE file is maintained by repository automation.
+For the latest contributor list, see the repository contributors page:
+https://github.com/zeroclaw-labs/zeroclaw/graphs/contributors
+
+All contributors retain copyright ownership of their contributions.
+Contributions are permanently attributed in the repository commit history.
+Patent rights are protected for all contributors under Apache License 2.0.
 
 Third-Party Dependencies
 ========================
@@ -22,3 +41,18 @@ This project uses third-party libraries and components,
 each licensed under their respective terms.
 
 See Cargo.lock for a complete dependency list.
+
+Verifiable Intent Specification
+================================
+
+The src/verifiable_intent/ module is a Rust-native reimplementation based on
+the Verifiable Intent open specification and reference implementation:
+
+  Project:  Verifiable Intent (VI)
+  Author:   agent-intent
+  Source:   https://github.com/agent-intent/verifiable-intent
+  License:  Apache License, Version 2.0
+
+This implementation follows the VI specification design (SD-JWT layered
+credentials, constraint model, three-layer chain). No source code was copied
+from the reference implementation.

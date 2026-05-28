@@ -2,14 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
-    <meta http-equiv="Content-Security-Policy"
-          content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'" />
-    <title>ZeroAI — Memory Brain</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/png" href="/_app/zeroclaw-trans.png" />
+    <link
+      rel="alternate"
+      type="application/rss+xml"
+      title="ZeroClaw Blog RSS Feed"
+      href="/blog/rss.xml"
+    />
+    <link
+      rel="alternate"
+      type="application/atom+xml"
+      title="ZeroClaw Blog Atom Feed"
+      href="/blog/atom.xml"
+    />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" />
+    <title>ZeroClaw</title>
   </head>
-  <body class="bg-[#0a0e1a] text-white min-h-screen">
-    <div id="app"></div>
-    <script type="module" src="/src/main.ts"></script>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

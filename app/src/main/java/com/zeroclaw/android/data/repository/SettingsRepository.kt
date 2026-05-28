@@ -504,30 +504,11 @@ interface SettingsRepository {
     suspend fun setWebSearchTimeoutSecs(secs: Long)
 
     /**
-     * Returns the cached Twitter browse handle, if any.
-     */
-    fun getTwitterBrowseHandle(): String?
-
-    /**
-     * Caches the Twitter browse handle.
+     * Toggles the Twitter/X read-only tool.
      *
-     * @param handle The Twitter handle to cache, or null to clear.
-     */
-    suspend fun setTwitterBrowseHandle(handle: String?)
-
-    /**
-     * Toggles the Twitter/X browse tool.
-     *
-     * @param enabled Whether twitter browsing is active.
+     * @param enabled Whether twitter reading is active.
      */
     suspend fun setTwitterBrowseEnabled(enabled: Boolean)
-
-    /**
-     * Updates the authenticated Twitter/X cookie string.
-     *
-     * @param cookieString Cookie string containing `ct0` and `auth_token`.
-     */
-    suspend fun setTwitterBrowseCookieString(cookieString: String)
 
     /**
      * Updates the Twitter/X browse max items.
@@ -542,41 +523,6 @@ interface SettingsRepository {
      * @param secs Request timeout in seconds.
      */
     suspend fun setTwitterBrowseTimeoutSecs(secs: Long)
-
-    /**
-     * Toggles audio transcription.
-     *
-     * @param enabled Whether transcription is active.
-     */
-    suspend fun setTranscriptionEnabled(enabled: Boolean)
-
-    /**
-     * Updates the transcription API endpoint URL.
-     *
-     * @param url API endpoint URL string.
-     */
-    suspend fun setTranscriptionApiUrl(url: String)
-
-    /**
-     * Updates the transcription model name.
-     *
-     * @param model Model identifier (e.g. "whisper-large-v3-turbo").
-     */
-    suspend fun setTranscriptionModel(model: String)
-
-    /**
-     * Updates the ISO language code hint for transcription.
-     *
-     * @param language ISO 639-1 language code (e.g. "en", "es").
-     */
-    suspend fun setTranscriptionLanguage(language: String)
-
-    /**
-     * Updates the maximum audio duration for transcription.
-     *
-     * @param secs Maximum duration in seconds.
-     */
-    suspend fun setTranscriptionMaxDurationSecs(secs: Long)
 
     /**
      * Updates the maximum number of images per multimodal request.
@@ -619,13 +565,6 @@ interface SettingsRepository {
      * @param key API key string.
      */
     suspend fun setMemoryQdrantApiKey(key: String)
-
-    /**
-     * Toggles automatic query classification.
-     *
-     * @param enabled Whether query classification is active.
-     */
-    suspend fun setQueryClassificationEnabled(enabled: Boolean)
 
     /**
      * Toggles the open-skills community repository.

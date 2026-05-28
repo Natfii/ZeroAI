@@ -1,5 +1,5 @@
 [workspace]
-members = ["zeroclaw-ffi"]
+members = ["zeroclaw-ffi", "zeroai"]
 resolver = "2"
 
 [workspace.package]

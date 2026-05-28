@@ -30,7 +30,9 @@ import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.model.TerminalEntry
 import com.zeroclaw.android.model.VoiceState
 import com.zeroclaw.android.service.AgentNotificationBridge
+import com.zeroclaw.android.service.ImageDispatch
 import com.zeroclaw.android.service.LocationBridge
+import com.zeroclaw.android.service.NanoFallback
 import com.zeroclaw.android.service.OnDeviceImageDescriberBridge
 import com.zeroclaw.android.service.OnDeviceInferenceBridge
 import com.zeroclaw.android.service.OnDeviceProofreaderBridge
@@ -40,6 +42,9 @@ import com.zeroclaw.android.service.ScreenCaptureBridge
 import com.zeroclaw.android.service.SlotAwareAgentConfig
 import com.zeroclaw.android.service.VoiceBridge
 import com.zeroclaw.android.service.ZeroAIDaemonService
+import com.zeroclaw.android.service.captionedPrompt
+import com.zeroclaw.android.service.decideImageDispatch
+import com.zeroclaw.android.service.ensureNanoReady
 import com.zeroclaw.android.tailscale.PeerMatchResult
 import com.zeroclaw.android.tailscale.PeerMessageRouter
 import com.zeroclaw.android.tailscale.PeerRouteEntry
@@ -474,6 +479,10 @@ class TerminalViewModel(
     @Volatile
     private var sessionReady = false
 
+    /** Last surfaced reason [sessionStart] failed; used to make UI errors actionable. */
+    @Volatile
+    private var lastSessionStartError: String? = null
+
     /** Observable terminal state combining persisted entries with transient UI state. */
     val state: StateFlow<TerminalState> =
         combine(
@@ -498,6 +507,25 @@ class TerminalViewModel(
 
     /** Observable streaming state for the live agent session. */
     val streamingState: StateFlow<StreamingState> = _streamingState.asStateFlow()
+
+    /**
+     * Label shown by the Terminal's warmup card while the on-device
+     * large model engine is being loaded into GPU memory. Non-null
+     * exactly when [com.zeroclaw.android.service.ondevice.OnDeviceInferenceState.Loading]
+     * is the manager's current state; null otherwise so the card
+     * disappears as soon as the engine is ready or fails.
+     */
+    val onDeviceWarmupLabel: StateFlow<String?> =
+        app.onDeviceInferenceManager.state
+            .map { state ->
+                (state as? com.zeroclaw.android.service.ondevice.OnDeviceInferenceState.Loading)
+                    ?.let { "Warming up ${it.model.displayName}…" }
+            }.stateIn(
+                viewModelScope,
+                kotlinx.coroutines.flow.SharingStarted
+                    .WhileSubscribed(5000),
+                null,
+            )
 
     /** Whether the camera preview sheet should be shown. */
     val showCamera: StateFlow<Boolean> = _showCamera.asStateFlow()
@@ -630,24 +658,29 @@ class TerminalViewModel(
      * in a non-running state, the old session is destroyed and a fresh one
      * is started so it picks up the latest provider/model config.
      */
-    @Suppress("TooGenericExceptionCaught")
+    @Suppress("TooGenericExceptionCaught", "CognitiveComplexMethod")
     private fun observeDaemonRestarts() {
         viewModelScope.launch {
             var wasRunning = app.daemonBridge.serviceState.value == ServiceState.RUNNING
             app.daemonBridge.serviceState.collect { state ->
                 val isRunning = state == ServiceState.RUNNING
-                if (isRunning && !wasRunning && sessionReady) {
-                    logRepository.append(
-                        LogSeverity.DEBUG,
-                        TAG,
-                        "Daemon restarted — re-creating agent session",
-                    )
-                    try {
-                        withContext(Dispatchers.IO) { sessionDestroy() }
-                    } catch (_: Exception) {
-                        // session may not exist
+                val daemonJustStarted = isRunning && !wasRunning
+                if (daemonJustStarted) {
+                    val reason =
+                        if (sessionReady) {
+                            "Daemon restarted — re-creating agent session"
+                        } else {
+                            "Daemon started — initialising agent session"
+                        }
+                    logRepository.append(LogSeverity.DEBUG, TAG, reason)
+                    if (sessionReady) {
+                        try {
+                            withContext(Dispatchers.IO) { sessionDestroy() }
+                        } catch (_: Exception) {
+                            // session may not exist
+                        }
+                        sessionReady = false
                     }
-                    sessionReady = false
                     try {
                         withContext(Dispatchers.IO) { sessionStart() }
                         sessionReady = true
@@ -655,7 +688,7 @@ class TerminalViewModel(
                         logRepository.append(
                             LogSeverity.WARN,
                             TAG,
-                            "Session re-init after restart failed: ${e.message}",
+                            "Session init after daemon start failed: ${e.message}",
                         )
                     }
                 }
@@ -679,12 +712,15 @@ class TerminalViewModel(
         return try {
             sessionStart()
             sessionReady = true
+            lastSessionStartError = null
             true
         } catch (e: Exception) {
+            val sanitized = ErrorSanitizer.sanitizeForUi(e)
+            lastSessionStartError = sanitized
             logRepository.append(
                 LogSeverity.WARN,
                 TAG,
-                "Session retry failed: ${e.message}",
+                "Session retry failed: $sanitized",
             )
             false
         }
@@ -2222,7 +2258,7 @@ class TerminalViewModel(
      * @param displayText The original user input shown in the scrollback.
      * @param escapedText The Rhai-escaped message text (unused for agent path).
      */
-    @Suppress("UnusedParameter")
+    @Suppress("UnusedParameter", "LongMethod", "CognitiveComplexMethod")
     private fun executeChatMessage(
         displayText: String,
         escapedText: String,
@@ -2251,12 +2287,43 @@ class TerminalViewModel(
             val chatProviderConfigured = isChatProviderConfigured()
             if (handleManagedAuthFallback(chatProviderConfigured)) return@launch
 
+            val daemonRunning =
+                app.daemonBridge.serviceState.value == ServiceState.RUNNING
+
             val decision =
                 decideDefaultChatRouting(
+                    daemonRunning = daemonRunning,
                     hasConfiguredCloudProvider = chatProviderConfigured,
                     query = displayText,
                     hasImageAttachment = false,
                 )
+
+            val onDeviceState = app.onDeviceInferenceManager.state.value
+            if (onDeviceState is com.zeroclaw.android.service.ondevice.OnDeviceInferenceState.Loading) {
+                repository.append(
+                    content =
+                        "Engine is warming up (${onDeviceState.model.displayName}). " +
+                            "Send again in a few seconds.",
+                    entryType = ENTRY_TYPE_SYSTEM,
+                )
+                return@launch
+            }
+            val onDeviceActive = app.onDeviceInferenceManager.isLocalActive()
+            if (onDeviceActive && daemonRunning) {
+                // Route through the daemon's agent loop so tool calls
+                // fire through the existing Rust Tool trait. The daemon
+                // already configured `custom-openai` at localhost so the
+                // local engine receives the prompt — but the loop owns
+                // memory, tool dispatch, etc., giving on-device parity
+                // with cloud agents.
+                logRepository.append(
+                    LogSeverity.DEBUG,
+                    TAG,
+                    "Routing on-device prompt through daemon agent loop",
+                )
+                executeAgentTurn(displayText, images)
+                return@launch
+            }
 
             if (decision is RoutingDecision.Local) {
                 logRepository.append(LogSeverity.DEBUG, TAG, "Routing to Nano: ${decision.reason}")
@@ -2320,7 +2387,12 @@ class TerminalViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     check(ensureSession()) {
-                        "No active session — is the daemon running?"
+                        val cause = lastSessionStartError
+                        if (cause.isNullOrBlank()) {
+                            "Could not start agent session — check daemon status and provider config."
+                        } else {
+                            "Could not start agent session: $cause"
+                        }
                     }
                     sessionSend(
                         message,
@@ -2423,12 +2495,41 @@ class TerminalViewModel(
     }
 
     /**
+     * Lazy [NanoFallback] coordinator backed by the existing image
+     * describer bridge. Forwards scrollback writes through [repository]
+     * and warnings through [logRepository] so the helper stays free of
+     * ViewModel state.
+     */
+    private val nanoFallback: NanoFallback by lazy {
+        NanoFallback(
+            describer = imageDescriberBridge,
+            appendCaption = { caption ->
+                repository.append(
+                    content =
+                        tagProvider(
+                            ProviderIconRegistry.NANO_PROVIDER,
+                            "\uD83D\uDCF7 $caption",
+                        ),
+                    entryType = ENTRY_TYPE_RESPONSE,
+                )
+            },
+            warnFailure = { message ->
+                logRepository.append(
+                    LogSeverity.WARN,
+                    TAG,
+                    "Nano image description failed: $message",
+                )
+            },
+        )
+    }
+
+    /**
      * Routes an image through smart description and vision-aware dispatch.
      *
-     * Always runs an on-device Nano description first. Then checks whether
-     * the cloud provider supports vision via [getProviderSupportsVision].
-     * If vision is supported, the image is forwarded to the cloud with the
-     * original prompt. If not, only the Nano description is shown.
+     * Delegates the actual decision to [decideImageDispatch] after
+     * running an on-device Nano description, then translates the chosen
+     * [ImageDispatch] variant into the appropriate agent-turn call (or a
+     * scrollback message when no cloud dispatch is possible).
      *
      * @param prompt The user's text prompt accompanying the image.
      * @param image The processed image to describe and optionally forward.
@@ -2440,31 +2541,7 @@ class TerminalViewModel(
     ) {
         loadingState.value = true
         try {
-            val bytes = android.util.Base64.decode(image.base64Data, android.util.Base64.DEFAULT)
-            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            if (bitmap != null) {
-                val descBuilder = StringBuilder()
-                imageDescriberBridge
-                    .describe(bitmap)
-                    .catch { e ->
-                        logRepository.append(
-                            LogSeverity.WARN,
-                            TAG,
-                            "Nano image description failed: ${e.message}",
-                        )
-                    }.collect { chunk -> descBuilder.append(chunk) }
-
-                if (descBuilder.isNotEmpty()) {
-                    repository.append(
-                        content =
-                            tagProvider(
-                                ProviderIconRegistry.NANO_PROVIDER,
-                                "\uD83D\uDCF7 ${descBuilder.toString().trim()}",
-                            ),
-                        entryType = ENTRY_TYPE_RESPONSE,
-                    )
-                }
-            }
+            val caption = nanoFallback.describeForScrollback(image)
 
             val cloudSupportsVision =
                 try {
@@ -2472,9 +2549,44 @@ class TerminalViewModel(
                 } catch (_: Exception) {
                     false
                 }
+            // When the on-device-large agent is the active route we
+            // treat it as a configured (non-vision-yet) text endpoint
+            // so the captioned prompt gets forwarded via the daemon
+            // → localhost LiteRT-LM. Without this branch a Discord
+            // image with on-device active landed on CaptionOnly and
+            // the user only saw the Nano description.
+            val cloudConfigured =
+                isChatProviderConfigured() || app.onDeviceInferenceManager.isLocalActive()
 
-            if (cloudSupportsVision && isChatProviderConfigured()) {
-                executeAgentTurn(prompt, listOf(image))
+            val dispatch =
+                decideImageDispatch(
+                    prompt = prompt,
+                    caption = caption,
+                    cloudSupportsVision = cloudSupportsVision,
+                    cloudConfigured = cloudConfigured,
+                    image = image,
+                )
+            when (dispatch) {
+                is ImageDispatch.VisionCloud ->
+                    executeAgentTurn(dispatch.prompt, listOf(dispatch.image))
+                is ImageDispatch.TextCloud ->
+                    executeAgentTurn(captionedPrompt(dispatch.prompt, dispatch.caption))
+                ImageDispatch.CaptionOnly ->
+                    // Surface the Nano caption ourselves here because
+                    // there's no downstream agent reply to do it for
+                    // us. For agent-bound paths above, the caption
+                    // ships inside the prompt and the agent's
+                    // response is what the user should see — writing
+                    // the Nano caption too would just produce a
+                    // confusing double-print of the same text.
+                    nanoFallback.showCaptionInScrollback(caption)
+                ImageDispatch.NoDispatch ->
+                    repository.append(
+                        content =
+                            "Couldn't describe the image and no cloud provider is " +
+                                "configured to handle the prompt.",
+                        entryType = ENTRY_TYPE_ERROR,
+                    )
             }
         } catch (e: Exception) {
             repository.append(
@@ -2749,14 +2861,35 @@ class TerminalViewModel(
     }
 
     /**
-     * Executes a general-purpose Nano prompt through multi-turn chat.
+     * Confirms an on-device Nano model is ready for a chat turn,
+     * driving the AICore download path via [ensureNanoReady] and
+     * routing all of its scrollback callbacks through [repository]
+     * and [logRepository].
      *
-     * Uses [OnDeviceInferenceBridge.sendChatMessage] for multi-turn
-     * conversation history, falling back to single-shot if the prompt
-     * is empty (lists chat status).
-     *
-     * @param prompt The user's raw prompt text.
+     * @return `true` when the caller can proceed to send a prompt,
+     *   `false` after a user-visible error has already been appended.
      */
+    private suspend fun ensureNanoReadyForChat(): Boolean =
+        ensureNanoReady(
+            status = onDeviceBridge.checkModelStatus(),
+            onSystemMessage = { msg ->
+                repository.append(
+                    content = tagProvider(ProviderIconRegistry.NANO_PROVIDER, msg),
+                    entryType = ENTRY_TYPE_SYSTEM,
+                )
+            },
+            onError = { msg ->
+                repository.append(content = msg, entryType = ENTRY_TYPE_ERROR)
+            },
+            onProgress = { bytes, total ->
+                logRepository.append(
+                    LogSeverity.DEBUG,
+                    TAG,
+                    "Nano download progress: $bytes/$total",
+                )
+            },
+        )
+
     @Suppress("TooGenericExceptionCaught")
     private suspend fun executeNanoGeneral(prompt: String) {
         if (prompt.isBlank()) {
@@ -2773,6 +2906,9 @@ class TerminalViewModel(
             )
             return
         }
+
+        if (!ensureNanoReadyForChat()) return
+
         try {
             val builder = StringBuilder()
             var errorHandled = false
@@ -3902,28 +4038,36 @@ class TerminalViewModel(
         /**
          * Chooses the default route for a plain-text terminal message.
          *
-         * When a cloud provider is configured, freeform chat should prefer the
-         * live daemon session; users can still opt into on-device inference
-         * explicitly with `/nano`. When no chat provider is ready, the local
-         * Nano classifier remains available as a fallback.
+         * Daemon state is the primary gate: when the daemon is not running,
+         * the cloud path is unavailable regardless of provider configuration
+         * and the message routes locally to on-device Nano. When the daemon
+         * IS running and a cloud provider is configured, freeform chat goes
+         * through the live session. Users can still opt into on-device
+         * inference explicitly with `/nano`.
          *
-         * @param hasConfiguredCloudProvider Whether a daemon-backed chat provider is ready.
+         * @param daemonRunning Whether the daemon foreground service is up.
+         * @param hasConfiguredCloudProvider Whether a chat provider has a
+         *   matching slot/key entry in settings.
          * @param query Raw user message.
          * @param hasImageAttachment Whether the message includes image attachments.
          * @return Routing decision for the default terminal send path.
          */
         internal fun decideDefaultChatRouting(
+            daemonRunning: Boolean,
             hasConfiguredCloudProvider: Boolean,
             query: String,
             hasImageAttachment: Boolean = false,
         ): RoutingDecision =
-            if (hasConfiguredCloudProvider) {
-                RoutingDecision.Cloud(reason = "configured cloud provider available")
-            } else {
-                QueryClassifier.classify(
-                    query = query,
-                    hasImageAttachment = hasImageAttachment,
-                )
+            when {
+                !daemonRunning ->
+                    RoutingDecision.Local(reason = "daemon not running — using on-device Nano")
+                hasConfiguredCloudProvider ->
+                    RoutingDecision.Cloud(reason = "daemon running with configured cloud provider")
+                else ->
+                    QueryClassifier.classify(
+                        query = query,
+                        hasImageAttachment = hasImageAttachment,
+                    )
             }
 
         /**

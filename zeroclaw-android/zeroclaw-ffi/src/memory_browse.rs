@@ -42,7 +42,7 @@ pub struct FfiMemoryEntryScored {
 
 /// Assembled working context for system prompt injection.
 ///
-/// Maps to the upstream [`zeroclaw::memory::working_context::WorkingContext`]
+/// Maps to the upstream [`zeroai::memory::working_context::WorkingContext`]
 /// for transfer across the FFI boundary.
 ///
 /// Note: `estimated_tokens` uses saturating cast from internal `usize`.
@@ -71,7 +71,7 @@ pub struct FfiMaintenanceReport {
 
 /// A fact extracted by heuristic pattern matching.
 ///
-/// Maps to the upstream [`zeroclaw::memory::heuristic::ExtractedFact`]
+/// Maps to the upstream [`zeroai::memory::heuristic::ExtractedFact`]
 /// for transfer across the FFI boundary.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FfiExtractedFact {
@@ -140,6 +140,137 @@ fn parse_category(cat: &str) -> zeroclaw::memory::MemoryCategory {
 /// Returns [`FfiError::StateError`] if the daemon is not running or
 /// the memory backend is not available, or [`FfiError::SpawnError`]
 /// on backend access failure.
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Lists memory entries, optionally filtered by category and/or session.
+    ///
+    /// Categories: `"core"`, `"daily"`, `"conversation"`, or any custom
+    /// category name. Pass `None` for all categories. When `session_id`
+    /// is provided, only entries from that session are returned.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_memories(
+        category: Option<String>,
+        limit: u32,
+        session_id: Option<String>,
+    ) -> Vec<FfiMemoryEntry> = list_memories_inner
+);
+
+crate::ffi_export!(
+    /// Searches memory entries by keyword query, optionally scoped to a session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn recall_memory(
+        query: String,
+        limit: u32,
+        session_id: Option<String>,
+    ) -> Vec<FfiMemoryEntry> = recall_memory_inner
+);
+
+crate::ffi_export!(
+    /// Deletes a memory entry by key.
+    ///
+    /// Returns `true` if the entry was found and deleted, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn forget_memory(key: String) -> bool = forget_memory_inner
+);
+
+crate::ffi_export!(
+    /// Returns the total number of memory entries.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn memory_count() -> u32 = memory_count_inner
+);
+
+crate::ffi_export!(
+    /// Stores a memory entry with full scoring metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if confidence is out of range,
+    /// source is not a recognised value, or decay half-life is zero.
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn store_memory_with_metadata(
+        key: String,
+        content: String,
+        category: String,
+        confidence: f64,
+        source: String,
+        tags: String,
+        decay_half_life_days: u32,
+    ) -> () = store_memory_with_metadata_inner
+);
+
+crate::ffi_export!(
+    /// Searches memory entries by query, returning scored results with metadata.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn recall_memory_scored(
+        query: String,
+        limit: u32,
+        session_id: Option<String>,
+    ) -> Vec<FfiMemoryEntryScored> = recall_memory_scored_inner
+);
+
+crate::ffi_export!(
+    /// Assembles working context for system prompt injection.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// memory is unavailable, [`crate::FfiError::SpawnError`] on backend failure,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn assemble_context(
+        message: String,
+        session_id: String,
+        token_budget: u32,
+    ) -> FfiWorkingContext = assemble_context_inner
+);
+
+crate::ffi_export!(
+    /// Runs daily memory maintenance (pruning and merging).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn run_memory_maintenance() -> FfiMaintenanceReport = run_memory_maintenance_inner
+);
+
+crate::ffi_export!(
+    /// Extracts facts from a user message using heuristic pattern matching.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn extract_facts(message: String) -> Vec<FfiExtractedFact> = extract_facts_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 pub(crate) fn list_memories_inner(
     category: Option<String>,
     limit: u32,
@@ -174,7 +305,7 @@ pub(crate) fn recall_memory_inner(
 ) -> Result<Vec<FfiMemoryEntry>, FfiError> {
     crate::runtime::with_memory(|memory, handle| {
         let entries = handle
-            .block_on(memory.recall(&query, limit as usize, session_id.as_deref()))
+            .block_on(memory.recall(&query, limit as usize, session_id.as_deref(), None, None))
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("memory recall failed: {e}"),
             })?;
@@ -204,7 +335,7 @@ pub(crate) fn forget_memory_inner(key: String) -> Result<bool, FfiError> {
     })?;
 
     if deleted
-        && let Ok(workspace) = crate::runtime::with_daemon_config(|c| c.workspace_dir.clone())
+        && let Ok(workspace) = crate::runtime::with_daemon_config(|c| c.data_dir.clone())
         && let Err(e) = zeroclaw::memory::snapshot::export_snapshot(&workspace)
     {
         tracing::warn!("snapshot re-export after forget failed: {e}");
@@ -276,6 +407,14 @@ pub(crate) fn store_memory_with_metadata_inner(
 
     let cat = parse_category(&category);
 
+    // Upstream trimmed `store_with_metadata` to (key, content,
+    // category, session_id, namespace, importance) — `source`, `tags`,
+    // and `decay_half_life_days` are no longer carried by the trait.
+    // We still validate them above so the Android caller gets the same
+    // surface-level guarantees, but they are not forwarded to the
+    // backend until upstream restores per-entry metadata.
+    let _unused_metadata = (&source, &tags, decay_half_life_days);
+
     crate::runtime::with_memory(|memory, handle| {
         handle
             .block_on(memory.store_with_metadata(
@@ -283,10 +422,8 @@ pub(crate) fn store_memory_with_metadata_inner(
                 &content,
                 cat,
                 None,
-                confidence,
-                &source,
-                &tags,
-                decay_half_life_days,
+                None,
+                Some(confidence),
             ))
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("store_with_metadata failed: {e}"),
@@ -311,7 +448,7 @@ pub(crate) fn recall_memory_scored_inner(
 ) -> Result<Vec<FfiMemoryEntryScored>, FfiError> {
     crate::runtime::with_memory(|memory, handle| {
         let entries = handle
-            .block_on(memory.recall(&query, limit as usize, session_id.as_deref()))
+            .block_on(memory.recall(&query, limit as usize, session_id.as_deref(), None, None))
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("memory recall_scored failed: {e}"),
             })?;
@@ -337,7 +474,7 @@ pub(crate) fn recall_memory_scored_inner(
 ///
 /// Creates a [`TokenBudget`] from the total budget using the cloud
 /// profile split (36%/36%/28%), then delegates to
-/// [`assemble_working_context`](zeroclaw::memory::working_context::assemble_working_context).
+/// [`assemble_working_context`](zeroai::memory::working_context::assemble_working_context).
 ///
 /// # Errors
 ///
@@ -348,7 +485,7 @@ pub(crate) fn assemble_context_inner(
     session_id: String,
     token_budget: u32,
 ) -> Result<FfiWorkingContext, FfiError> {
-    use zeroclaw::memory::working_context::{TokenBudget, assemble_working_context};
+    use zeroai::memory::working_context::{TokenBudget, assemble_working_context};
 
     let total = token_budget as usize;
     let budget = if total == 0 {
@@ -382,9 +519,10 @@ pub(crate) fn assemble_context_inner(
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
 pub(crate) fn run_memory_maintenance_inner() -> Result<FfiMaintenanceReport, FfiError> {
-    // TODO: Wire to consolidation module once consolidation.rs is implemented.
-    // Will call consolidation::prune_stale() and consolidation::merge_duplicates()
-    // via with_memory(), returning actual counts.
+    // Stubbed until a consolidation module exists. The intended flow
+    // is to call `consolidation::prune_stale()` and
+    // `consolidation::merge_duplicates()` via `with_memory()` and
+    // return the actual counts.
     Ok(FfiMaintenanceReport {
         pruned_count: 0,
         merged_count: 0,
@@ -393,7 +531,7 @@ pub(crate) fn run_memory_maintenance_inner() -> Result<FfiMaintenanceReport, Ffi
 
 /// Extracts facts from a user message using heuristic pattern matching.
 ///
-/// Delegates to [`zeroclaw::memory::heuristic::extract_facts`] which runs
+/// Delegates to [`zeroai::memory::heuristic::extract_facts`] which runs
 /// 8 regex rules in ~50us per message with zero network cost.
 ///
 /// # Errors
@@ -401,7 +539,7 @@ pub(crate) fn run_memory_maintenance_inner() -> Result<FfiMaintenanceReport, Ffi
 /// Returns [`FfiError::InternalPanic`] only if the regex engine panics
 /// (should not happen with compiled rules).
 pub(crate) fn extract_facts_inner(message: String) -> Result<Vec<FfiExtractedFact>, FfiError> {
-    let facts = zeroclaw::memory::heuristic::extract_facts(&message);
+    let facts = zeroai::memory::heuristic::extract_facts(&message);
     Ok(facts
         .into_iter()
         .map(|f| FfiExtractedFact {
@@ -414,178 +552,7 @@ pub(crate) fn extract_facts_inner(message: String) -> Result<Vec<FfiExtractedFac
         .collect())
 }
 
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_list_memories_not_running() {
-        let result = list_memories_inner(None, 100, None);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_list_memories_with_session_not_running() {
-        let result = list_memories_inner(Some("core".into()), 50, Some("session-abc".into()));
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_recall_memory_not_running() {
-        let result = recall_memory_inner("test query".into(), 10, None);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_recall_memory_with_session_not_running() {
-        let result = recall_memory_inner("test query".into(), 10, Some("session-xyz".into()));
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_forget_memory_not_running() {
-        let result = forget_memory_inner("test-key".into());
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_memory_count_not_running() {
-        let result = memory_count_inner();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_category_core() {
-        assert!(matches!(
-            parse_category("core"),
-            zeroclaw::memory::MemoryCategory::Core
-        ));
-    }
-
-    #[test]
-    fn test_parse_category_daily() {
-        assert!(matches!(
-            parse_category("daily"),
-            zeroclaw::memory::MemoryCategory::Daily
-        ));
-    }
-
-    #[test]
-    fn test_parse_category_conversation() {
-        assert!(matches!(
-            parse_category("conversation"),
-            zeroclaw::memory::MemoryCategory::Conversation
-        ));
-    }
-
-    #[test]
-    fn test_parse_category_custom() {
-        let cat = parse_category("project_notes");
-        assert!(matches!(
-            cat,
-            zeroclaw::memory::MemoryCategory::Custom(ref s) if s == "project_notes"
-        ));
-    }
-
-    #[test]
-    fn test_to_ffi_conversion() {
-        let entry = zeroclaw::memory::MemoryEntry {
-            id: "id-1".into(),
-            key: "favourite_lang".into(),
-            content: "Rust".into(),
-            category: zeroclaw::memory::MemoryCategory::Core,
-            timestamp: "2026-02-18T12:00:00Z".into(),
-            session_id: Some("session-1".into()),
-            score: Some(0.95),
-        };
-
-        let ffi = to_ffi(&entry);
-        assert_eq!(ffi.id, "id-1");
-        assert_eq!(ffi.key, "favourite_lang");
-        assert_eq!(ffi.content, "Rust");
-        assert_eq!(ffi.category, "core");
-        assert_eq!(ffi.timestamp, "2026-02-18T12:00:00Z");
-        assert_eq!(ffi.score, Some(0.95));
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Leaderboard cache
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Writes a JSON string to the in-memory leaderboard cache.
-///
-/// Called by the Kotlin `ZeroAIDaemonService` after querying the Room DAO.
-/// The gateway `/api/memory/leaderboard` endpoint reads this cache.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running or
-/// the cache lock is poisoned.
-pub(crate) fn set_leaderboard_cache_inner(json: String) -> Result<(), FfiError> {
-    let guard = crate::runtime::lock_daemon();
-    let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
-        detail: "daemon not running".into(),
-    })?;
-    let mut cache = state.leaderboard_cache.write().map_err(|_| FfiError::StateCorrupted {
-        detail: "leaderboard cache lock poisoned".into(),
-    })?;
-    *cache = json;
-    Ok(())
-}
-
-/// Reads the current leaderboard cache JSON string.
-///
-/// Returns `"[]"` if no data has been written yet.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running or
-/// the cache lock is poisoned.
-pub(crate) fn get_leaderboard_cache_inner() -> Result<String, FfiError> {
-    let guard = crate::runtime::lock_daemon();
-    let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
-        detail: "daemon not running".into(),
-    })?;
-    let cache = state.leaderboard_cache.read().map_err(|_| FfiError::StateCorrupted {
-        detail: "leaderboard cache lock poisoned".into(),
-    })?;
-    Ok(cache.clone())
-}
+#[path = "memory_browse_tests.rs"]
+mod tests;

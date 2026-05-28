@@ -7,6 +7,7 @@ package com.zeroclaw.android.ui.screen.twitter
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,14 +17,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -31,9 +31,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -42,6 +39,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.model.AppSettings
 import kotlin.math.roundToInt
 
 private const val MIN_MAX_ITEMS = 1
@@ -50,10 +48,11 @@ private const val MIN_TIMEOUT = 1
 private const val MAX_TIMEOUT = 60
 
 /**
- * Configuration screen for the Twitter/X browse tool.
+ * Configuration screen for the Twitter/X read tool.
  *
- * Displays connection status, account info, enable/disable toggle,
- * and configuration sliders for max items and timeout.
+ * Read-only by design: the tool hits X's public syndication endpoint
+ * ([TwitterReadProfileTool] in `zeroclaw-ffi/src/twitter_browse_tool.rs`)
+ * which does not require auth. No sign-in flow.
  *
  * @param onNavigateBack Called when the user navigates back.
  * @param viewModel The [TwitterConfigViewModel] managing screen state.
@@ -64,19 +63,7 @@ fun TwitterConfigScreen(
     onNavigateBack: () -> Unit,
     viewModel: TwitterConfigViewModel = viewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var showLoginSheet by remember { mutableStateOf(false) }
-
-    if (showLoginSheet) {
-        TwitterLoginSheet(
-            onCookiesExtracted = { cookies ->
-                viewModel.onCookiesExtracted(cookies)
-                showLoginSheet = false
-            },
-            onDismiss = { showLoginSheet = false },
-        )
-        return
-    }
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -93,54 +80,92 @@ fun TwitterConfigScreen(
             )
         },
     ) { innerPadding ->
-        when (val state = uiState) {
-            is TwitterConfigViewModel.UiState.Loading -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
+        val state = settings
+        if (state == null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator()
             }
-            is TwitterConfigViewModel.UiState.Empty -> {
-                // Convention compliance
-            }
-            is TwitterConfigViewModel.UiState.Error -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(state.message, style = MaterialTheme.typography.bodyLarge)
-                        Spacer(Modifier.height(16.dp))
-                        Button(onClick = state.retry) { Text("Retry") }
-                    }
-                }
-            }
-            is TwitterConfigViewModel.UiState.Content -> {
-                TwitterConfigContent(
-                    state = state,
-                    onConnect = { showLoginSheet = true },
-                    onDisconnect = viewModel::disconnect,
-                    onSetEnabled = viewModel::setEnabled,
-                    onSetMaxItems = viewModel::setMaxItems,
-                    onSetTimeoutSecs = viewModel::setTimeoutSecs,
-                    modifier = Modifier.padding(innerPadding),
-                )
-            }
+        } else {
+            TwitterConfigContent(
+                settings = state,
+                onSetEnabled = viewModel::setEnabled,
+                onSetMaxItems = viewModel::setMaxItems,
+                onSetTimeoutSecs = viewModel::setTimeoutSecs,
+                modifier = Modifier.padding(innerPadding),
+            )
+        }
+    }
+}
+
+/**
+ * Light "what this is / what it can't do" card shown at the top of the
+ * X / Twitter config screen. Read-only by design so the user isn't
+ * surprised when search / DMs / posting aren't here.
+ */
+@Composable
+private fun ReadOnlyExplainerCard(modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "Read-only profile timelines",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                "When enabled, your AI can pull the most recent public " +
+                    "tweets from any X account you ask about. Useful for " +
+                    "summaries, mentions, or following someone's posts " +
+                    "without leaving chat.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Limits:",
+                style = MaterialTheme.typography.labelLarge,
+            )
+            BulletLine("Public profiles only — protected accounts return nothing.")
+            BulletLine("About 20 most-recent tweets per request; no backfill.")
+            BulletLine("No search, no DMs, no posting, no follow graph.")
+            BulletLine(
+                "Uses X's syndication endpoint (the one that powers " +
+                    "embedded tweets). It's undocumented — X can rate-limit " +
+                    "or break it without notice.",
+            )
         }
     }
 }
 
 @Composable
+private fun BulletLine(text: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Text(
+            "•  ",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+@Composable
 private fun TwitterConfigContent(
-    state: TwitterConfigViewModel.UiState.Content,
-    onConnect: () -> Unit,
-    onDisconnect: () -> Unit,
+    settings: AppSettings,
     onSetEnabled: (Boolean) -> Unit,
     onSetMaxItems: (Int) -> Unit,
     onSetTimeoutSecs: (Int) -> Unit,
@@ -154,74 +179,58 @@ private fun TwitterConfigContent(
                 .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        if (!state.connected) {
-            Text(
-                "Let your AI companion browse X/Twitter in read-only mode",
-                style = MaterialTheme.typography.bodyLarge,
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = onConnect,
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-            ) {
-                Text("Connect X")
-            }
-        } else {
-            Text(
-                text =
-                    if (state.handle != null && !state.handle.all { it.isDigit() }) {
-                        "Connected as @${state.handle}"
+        ReadOnlyExplainerCard()
+
+        val enabled = settings.twitterBrowseEnabled
+        val enabledDesc = if (enabled) "enabled" else "disabled"
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Enable X reading",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    if (enabled) {
+                        "Tool is active. Ask me about any X handle."
                     } else {
-                        "Connected"
+                        "Off. Turn on to let me read X profiles."
                     },
-                style = MaterialTheme.typography.titleMedium,
-            )
-            val enabledDesc = if (state.enabled) "enabled" else "disabled"
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             Switch(
-                checked = state.enabled,
+                checked = enabled,
                 onCheckedChange = onSetEnabled,
                 modifier =
                     Modifier.semantics {
-                        contentDescription = "X browsing"
+                        contentDescription = "X reading"
                         stateDescription = enabledDesc
                     },
             )
-            Text(
-                text = if (state.enabled) "Read-only browsing active" else "Browsing disabled",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                "Max items per request: ${state.maxItems}",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Slider(
-                value = state.maxItems.toFloat(),
-                onValueChange = { onSetMaxItems(it.roundToInt()) },
-                valueRange = MIN_MAX_ITEMS.toFloat()..MAX_MAX_ITEMS.toFloat(),
-                steps = MAX_MAX_ITEMS - MIN_MAX_ITEMS - 1,
-            )
-            Text(
-                "Timeout: ${state.timeoutSecs} seconds",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Slider(
-                value = state.timeoutSecs.toFloat(),
-                onValueChange = { onSetTimeoutSecs(it.roundToInt()) },
-                valueRange = MIN_TIMEOUT.toFloat()..MAX_TIMEOUT.toFloat(),
-                steps = MAX_TIMEOUT - MIN_TIMEOUT - 1,
-            )
-            Spacer(Modifier.height(16.dp))
-            OutlinedButton(
-                onClick = onDisconnect,
-                modifier = Modifier.fillMaxWidth(),
-                colors =
-                    ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error,
-                    ),
-            ) { Text("Disconnect") }
         }
+
+        val maxItems = settings.twitterBrowseMaxItems.toInt()
+        Text(
+            "Max tweets per request: $maxItems",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = maxItems.toFloat(),
+            onValueChange = { onSetMaxItems(it.roundToInt()) },
+            valueRange = MIN_MAX_ITEMS.toFloat()..MAX_MAX_ITEMS.toFloat(),
+            steps = MAX_MAX_ITEMS - MIN_MAX_ITEMS - 1,
+        )
+
+        val timeoutSecs = settings.twitterBrowseTimeoutSecs.toInt()
+        Text(
+            "Request timeout: $timeoutSecs seconds",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(
+            value = timeoutSecs.toFloat(),
+            onValueChange = { onSetTimeoutSecs(it.roundToInt()) },
+            valueRange = MIN_TIMEOUT.toFloat()..MAX_TIMEOUT.toFloat(),
+            steps = MAX_TIMEOUT - MIN_TIMEOUT - 1,
+        )
     }
 }

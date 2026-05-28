@@ -10,9 +10,122 @@
 //! load so that future format changes can be migrated gracefully.
 
 use crate::FfiError;
+use crate::session;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use zeroclaw::providers::ChatMessage;
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Saves the active session's conversation history to a JSON file.
+    ///
+    /// Serializes the current in-memory conversation transcript (including
+    /// the system prompt) to a versioned JSON envelope at `path`. Creates
+    /// parent directories if they do not exist. The file can later be
+    /// restored with `restore_session_state`. Intended for use by the
+    /// Android lifecycle layer to persist state before the OS kills the
+    /// foreground service process.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if no session is active,
+    /// [`crate::FfiError::ConfigError`] on I/O or serialization failures,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn save_session_state(session_id: String, path: String) -> () = save_session_state_inner
+);
+
+crate::ffi_export!(
+    /// Restores a session's conversation history from a JSON file.
+    ///
+    /// Loads the persisted transcript and seeds it into the active
+    /// session via `session_seed`. The system prompt from the active
+    /// session is preserved, replacing any stale prompt in the file.
+    /// Returns `true` if state was restored, `false` if the file does
+    /// not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if no session is active,
+    /// [`crate::FfiError::ConfigError`] on parse or I/O failures, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn restore_session_state(session_id: String, path: String) -> bool = restore_session_state_inner
+);
+
+crate::ffi_export!(
+    /// Lists session IDs that have persisted state files in a directory.
+    ///
+    /// Scans `dir` for `.json` files and returns their stems as session
+    /// identifiers. If the directory does not exist, returns an empty
+    /// list. Does NOT require the daemon or a session to be running.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::ConfigError`] if the directory exists
+    /// but cannot be read, or [`crate::FfiError::InternalPanic`] if
+    /// native code panics.
+    fn list_persisted_sessions(dir: String) -> Vec<String> = list_persisted_sessions_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
+pub(crate) fn save_session_state_inner(
+    _session_id: String,
+    path: String,
+) -> Result<(), FfiError> {
+    let history: Vec<ChatMessage> = session::session_history_inner()?
+        .iter()
+        .map(|m| {
+            #[allow(clippy::match_same_arms)]
+            match m.role.as_str() {
+                "system" => ChatMessage::system(&m.content),
+                "user" => ChatMessage::user(&m.content),
+                "assistant" => ChatMessage::assistant(&m.content),
+                "tool" => ChatMessage::tool(&m.content),
+                _ => ChatMessage::user(&m.content),
+            }
+        })
+        .collect();
+    save_interactive_session_history(&PathBuf::from(&path), &history)
+}
+
+pub(crate) fn restore_session_state_inner(
+    _session_id: String,
+    path: String,
+) -> Result<bool, FfiError> {
+    let file_path = PathBuf::from(&path);
+    if !file_path.exists() {
+        return Ok(false);
+    }
+
+    let current_history = session::session_history_inner()?;
+    let system_prompt = current_history
+        .iter()
+        .find(|m| m.role == "system")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+
+    let history = load_interactive_session_history(&file_path, &system_prompt)?;
+
+    let seed_messages: Vec<session::SessionMessage> = history
+        .iter()
+        .filter(|m| m.role != "system")
+        .map(|m| session::SessionMessage {
+            role: m.role.clone(),
+            content: m.content.clone(),
+        })
+        .collect();
+
+    if !seed_messages.is_empty() {
+        session::session_seed_inner(seed_messages)?;
+    }
+
+    Ok(true)
+}
+
+pub(crate) fn list_persisted_sessions_inner(dir: String) -> Result<Vec<String>, FfiError> {
+    list_persisted_sessions_at(&PathBuf::from(&dir))
+}
 
 /// Current schema version written by [`save_interactive_session_history`].
 const CURRENT_VERSION: u32 = 1;
@@ -132,7 +245,7 @@ pub(crate) fn save_interactive_session_history(
 ///
 /// Returns [`FfiError::ConfigError`] if the directory exists but cannot
 /// be read.
-pub(crate) fn list_persisted_sessions(dir: &Path) -> Result<Vec<String>, FfiError> {
+pub(crate) fn list_persisted_sessions_at(dir: &Path) -> Result<Vec<String>, FfiError> {
     if !dir.exists() {
         return Ok(Vec::new());
     }

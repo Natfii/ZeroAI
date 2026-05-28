@@ -43,11 +43,60 @@ fn lock_resolver() -> std::sync::MutexGuard<'static, Option<Arc<dyn FfiCredentia
     })
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Unregisters the current credential resolver and clears the cache.
+    ///
+    /// After this call, credential resolution falls back to environment
+    /// variables and config-file overrides.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn unregister_credential_resolver() -> () = unregister_credential_resolver_inner
+);
+
+crate::ffi_export!(
+    /// Clears the per-provider credential cache.
+    ///
+    /// The next credential resolution for each provider will re-invoke
+    /// the Kotlin callback. Useful after the user adds or rotates an
+    /// API key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn clear_credential_cache() -> () = clear_credential_cache_inner
+);
+
+crate::ffi_export!(
+    /// Registers a Kotlin-side credential resolver callback.
+    ///
+    /// When registered, the Rust engine resolves per-provider API keys
+    /// by invoking this callback instead of reading environment
+    /// variables. Only one resolver can be registered at a time.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn register_credential_resolver(
+        resolver: Box<dyn FfiCredentialResolver>
+    ) -> () = register_credential_resolver_boxed
+);
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn register_credential_resolver_boxed(
+    resolver: Box<dyn FfiCredentialResolver>,
+) -> Result<(), FfiError> {
+    register_credential_resolver_inner(Arc::from(resolver))
+}
+
 /// Registers a Kotlin-side credential resolver.
 ///
 /// Only one resolver can be registered at a time. A new resolver replaces
 /// the previous one and clears the credential cache. Also wires into the
-/// core crate's [`zeroclaw::ffi_credential_hook`] so that
+/// core crate's [`zeroai::ffi_credential_hook`] so that
 /// `resolve_provider_credential` can reach this callback.
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn register_credential_resolver_inner(
@@ -58,7 +107,7 @@ pub(crate) fn register_credential_resolver_inner(
 
     // Wire the core crate hook so `resolve_provider_credential` can
     // reach this callback without depending on `zeroclaw-ffi`.
-    zeroclaw::ffi_credential_hook::register(Box::new(move |provider| {
+    zeroai::ffi_credential_hook::register(Box::new(move |provider| {
         resolve_credential_via_callback(provider)
     }));
 
@@ -78,7 +127,7 @@ pub(crate) fn unregister_credential_resolver_inner() -> Result<(), FfiError> {
     let mut slot = lock_resolver();
     *slot = None;
 
-    zeroclaw::ffi_credential_hook::unregister();
+    zeroai::ffi_credential_hook::unregister();
 
     if let Ok(mut cache) = CACHE.write() {
         cache.clear();

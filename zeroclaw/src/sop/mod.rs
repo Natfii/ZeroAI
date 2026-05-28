@@ -1,475 +1,132 @@
-pub mod audit;
-pub mod condition;
-pub mod dispatch;
-pub mod engine;
-#[cfg(feature = "ampersona-gates")]
-pub mod gates;
-pub mod metrics;
-pub mod types;
-
-pub use audit::SopAuditLogger;
-pub use engine::SopEngine;
-#[cfg(feature = "ampersona-gates")]
-pub use gates::GateEvalState;
-pub use metrics::SopMetricsCollector;
 #[allow(unused_imports)]
-pub use types::{
-    Sop, SopEvent, SopExecutionMode, SopPriority, SopRun, SopRunAction, SopRunStatus, SopStep,
-    SopStepResult, SopStepStatus, SopTrigger, SopTriggerSource,
-};
+pub use zeroclaw_runtime::sop::*;
 
 use anyhow::Result;
-use std::path::{Path, PathBuf};
-use tracing::warn;
 
-use types::{SopManifest, SopMeta};
-
-/// Return the default SOPs directory: `<workspace>/sops`.
-fn sops_dir(workspace_dir: &Path) -> PathBuf {
-    workspace_dir.join("sops")
-}
-
-/// Resolve the SOPs directory from config, falling back to workspace default.
-pub fn resolve_sops_dir(workspace_dir: &Path, config_dir: Option<&str>) -> PathBuf {
-    match config_dir {
-        Some(dir) if !dir.is_empty() => {
-            let expanded = shellexpand::tilde(dir);
-            PathBuf::from(expanded.as_ref())
-        }
-        _ => sops_dir(workspace_dir),
-    }
-}
-
-/// Load all SOPs from the configured directory.
-pub fn load_sops(
-    workspace_dir: &Path,
-    config_dir: Option<&str>,
-    default_execution_mode: SopExecutionMode,
-) -> Vec<Sop> {
-    let dir = resolve_sops_dir(workspace_dir, config_dir);
-    load_sops_from_directory(&dir, default_execution_mode)
-}
-
-/// Load SOPs from a specific directory. Each subdirectory may contain
-/// `SOP.toml` (metadata + triggers) and `SOP.md` (procedure steps).
-fn load_sops_from_directory(sops_dir: &Path, default_execution_mode: SopExecutionMode) -> Vec<Sop> {
-    if !sops_dir.exists() {
-        return Vec::new();
-    }
-
-    let mut sops = Vec::new();
-
-    let Ok(entries) = std::fs::read_dir(sops_dir) else {
-        return sops;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-
-        let toml_path = path.join("SOP.toml");
-        if !toml_path.exists() {
-            continue;
-        }
-
-        match load_sop(&path, default_execution_mode) {
-            Ok(sop) => sops.push(sop),
-            Err(e) => {
-                warn!("Failed to load SOP from {}: {e}", path.display());
-            }
-        }
-    }
-
-    sops.sort_by(|a, b| a.name.cmp(&b.name));
-    sops
-}
-
-/// Load a single SOP from a directory containing SOP.toml and optionally SOP.md.
-fn load_sop(sop_dir: &Path, default_execution_mode: SopExecutionMode) -> Result<Sop> {
-    let toml_path = sop_dir.join("SOP.toml");
-    let toml_content = std::fs::read_to_string(&toml_path)?;
-    let manifest: SopManifest = toml::from_str(&toml_content)?;
-
-    let md_path = sop_dir.join("SOP.md");
-    let steps = if md_path.exists() {
-        let md_content = std::fs::read_to_string(&md_path)?;
-        parse_steps(&md_content)
-    } else {
-        Vec::new()
-    };
-
-    let SopMeta {
-        name,
-        description,
-        version,
-        priority,
-        execution_mode,
-        cooldown_secs,
-        max_concurrent,
-    } = manifest.sop;
-
-    Ok(Sop {
-        name,
-        description,
-        version,
-        priority,
-        execution_mode: execution_mode.unwrap_or(default_execution_mode),
-        triggers: manifest.triggers,
-        steps,
-        cooldown_secs,
-        max_concurrent,
-        location: Some(sop_dir.to_path_buf()),
-    })
-}
-
-/// Parse procedure steps from SOP.md content.
-///
-/// Expects a `## Steps` heading followed by numbered items (`1.`, `2.`, …).
-/// Each item's first bold text (`**...**`) is the step title; the rest is body.
-/// Sub-bullets `- tools:` and `- requires_confirmation: true` are parsed.
-pub fn parse_steps(md: &str) -> Vec<SopStep> {
-    let mut steps = Vec::new();
-    let mut in_steps_section = false;
-    let mut current_number: Option<u32> = None;
-    let mut current_title = String::new();
-    let mut current_body = String::new();
-    let mut current_tools: Vec<String> = Vec::new();
-    let mut current_requires_confirmation = false;
-
-    for line in md.lines() {
-        let trimmed = line.trim();
-
-        if trimmed.starts_with("## ") {
-            if trimmed.eq_ignore_ascii_case("## steps") || trimmed.eq_ignore_ascii_case("## Steps")
-            {
-                in_steps_section = true;
-                continue;
-            }
-            if in_steps_section {
-                flush_step(
-                    &mut steps,
-                    &mut current_number,
-                    &mut current_title,
-                    &mut current_body,
-                    &mut current_tools,
-                    &mut current_requires_confirmation,
-                );
-                in_steps_section = false;
-            }
-            continue;
-        }
-
-        if !in_steps_section {
-            continue;
-        }
-
-        if let Some(rest) = parse_numbered_item(trimmed) {
-            flush_step(
-                &mut steps,
-                &mut current_number,
-                &mut current_title,
-                &mut current_body,
-                &mut current_tools,
-                &mut current_requires_confirmation,
-            );
-
-            let step_num = u32::try_from(steps.len())
-                .unwrap_or(u32::MAX)
-                .saturating_add(1);
-            current_number = Some(step_num);
-
-            if let Some((title, body)) = extract_bold_title(rest) {
-                current_title = title;
-                current_body = body;
-            } else {
-                current_title = rest.to_string();
-                current_body = String::new();
-            }
-            current_tools = Vec::new();
-            current_requires_confirmation = false;
-            continue;
-        }
-
-        if current_number.is_some() && trimmed.starts_with("- ") {
-            let bullet = trimmed.trim_start_matches("- ").trim();
-            if let Some(tools_str) = bullet.strip_prefix("tools:") {
-                current_tools = tools_str
-                    .split(',')
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-            } else if bullet.starts_with("requires_confirmation:") {
-                if let Some(val) = bullet.strip_prefix("requires_confirmation:") {
-                    current_requires_confirmation = val.trim().eq_ignore_ascii_case("true");
-                }
-            } else {
-                if !current_body.is_empty() {
-                    current_body.push('\n');
-                }
-                current_body.push_str(trimmed);
-            }
-            continue;
-        }
-
-        if current_number.is_some() && !trimmed.is_empty() {
-            if !current_body.is_empty() {
-                current_body.push('\n');
-            }
-            current_body.push_str(trimmed);
-        }
-    }
-
-    flush_step(
-        &mut steps,
-        &mut current_number,
-        &mut current_title,
-        &mut current_body,
-        &mut current_tools,
-        &mut current_requires_confirmation,
-    );
-
-    steps
-}
-
-/// Flush accumulated step state into the steps vector.
-fn flush_step(
-    steps: &mut Vec<SopStep>,
-    number: &mut Option<u32>,
-    title: &mut String,
-    body: &mut String,
-    tools: &mut Vec<String>,
-    requires_confirmation: &mut bool,
-) {
-    if let Some(n) = number.take() {
-        steps.push(SopStep {
-            number: n,
-            title: std::mem::take(title),
-            body: body.trim().to_string(),
-            suggested_tools: std::mem::take(tools),
-            requires_confirmation: *requires_confirmation,
-        });
-        *body = String::new();
-        *requires_confirmation = false;
-    }
-}
-
-/// Try to parse `N. rest` from a line, returning `rest` if successful.
-fn parse_numbered_item(line: &str) -> Option<&str> {
-    let dot_pos = line.find(". ")?;
-    let prefix = &line[..dot_pos];
-    if prefix.chars().all(|c| c.is_ascii_digit()) && !prefix.is_empty() {
-        Some(line[dot_pos + 2..].trim())
-    } else {
-        None
-    }
-}
-
-/// Extract `**title**` from the beginning of text, returning (title, rest).
-fn extract_bold_title(text: &str) -> Option<(String, String)> {
-    let start = text.find("**")?;
-    let after_start = start + 2;
-    let end = text[after_start..].find("**")?;
-    let title = text[after_start..after_start + end].to_string();
-
-    let rest_start = after_start + end + 2;
-    let rest = text[rest_start..].trim();
-    let rest = rest
-        .strip_prefix("—")
-        .or_else(|| rest.strip_prefix("–"))
-        .or_else(|| rest.strip_prefix("-"))
-        .unwrap_or(rest)
-        .trim();
-
-    Some((title, rest.to_string()))
-}
-
-/// Validate a loaded SOP and return a list of warnings.
-pub fn validate_sop(sop: &Sop) -> Vec<String> {
-    let mut warnings = Vec::new();
-
-    if sop.name.is_empty() {
-        warnings.push("SOP name is empty".into());
-    }
-    if sop.description.is_empty() {
-        warnings.push("SOP description is empty".into());
-    }
-    if sop.triggers.is_empty() {
-        warnings.push("SOP has no triggers defined".into());
-    }
-    if sop.steps.is_empty() {
-        warnings.push("SOP has no steps (missing or empty SOP.md)".into());
-    }
-
-    for (i, step) in sop.steps.iter().enumerate() {
-        let expected = u32::try_from(i).unwrap_or(u32::MAX).saturating_add(1);
-        if step.number != expected {
-            warnings.push(format!(
-                "Step numbering gap: expected {expected}, got {}",
-                step.number
-            ));
-        }
-        if step.title.is_empty() {
-            warnings.push(format!("Step {} has an empty title", step.number));
-        }
-    }
-
-    warnings
-}
-
-/// Handle the `sop` CLI subcommand.
 pub fn handle_command(command: crate::SopCommands, config: &crate::config::Config) -> Result<()> {
-    let sops_dir_override = config.sop.sops_dir.as_deref();
+    let workspace_dir = &config.data_dir;
+    let default_mode = parse_execution_mode(&config.sop.default_execution_mode);
+    let sops = load_sops(workspace_dir, config.sop.sops_dir.as_deref(), default_mode);
 
     match command {
         crate::SopCommands::List => {
-            let sops = load_sops(
-                &config.workspace_dir,
-                sops_dir_override,
-                config.sop.default_execution_mode,
-            );
             if sops.is_empty() {
                 println!("No SOPs found.");
                 println!();
-                println!("  Create one: mkdir -p ~/.zeroclaw/workspace/sops/my-sop");
-                println!("              # Add SOP.toml and SOP.md");
-                println!();
-                println!(
-                    "  SOPs directory: {}",
-                    resolve_sops_dir(&config.workspace_dir, sops_dir_override).display()
-                );
+                println!("  Create one: mkdir -p <workspace>/sops/my-sop");
+                println!("              then add SOP.toml and SOP.md");
             } else {
-                println!("SOPs ({}):", sops.len());
+                println!("Loaded SOPs ({}):", sops.len());
                 println!();
                 for sop in &sops {
-                    let triggers: Vec<String> =
-                        sop.triggers.iter().map(ToString::to_string).collect();
                     println!(
-                        "  {} {} [{}] — {}",
+                        "  {} v{} [{}] — {}",
                         console::style(&sop.name).white().bold(),
-                        console::style(format!("v{}", sop.version)).dim(),
-                        console::style(&sop.priority).cyan(),
-                        sop.description
+                        sop.version,
+                        sop.priority,
+                        sop.description,
                     );
                     println!(
                         "    Mode: {}  Steps: {}  Triggers: {}",
                         sop.execution_mode,
                         sop.steps.len(),
-                        triggers.join(", ")
+                        sop.triggers
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>()
+                            .join(", "),
                     );
-                    if sop.cooldown_secs > 0 {
-                        println!("    Cooldown: {}s", sop.cooldown_secs);
-                    }
                 }
             }
             println!();
             Ok(())
         }
-
         crate::SopCommands::Validate { name } => {
-            let sops = load_sops(
-                &config.workspace_dir,
-                sops_dir_override,
-                config.sop.default_execution_mode,
-            );
-            let matching: Vec<&Sop> = if let Some(ref name) = name {
-                sops.iter().filter(|s| s.name == *name).collect()
-            } else {
-                sops.iter().collect()
+            let targets: Vec<_> = match &name {
+                Some(n) => sops.iter().filter(|s| s.name == *n).collect(),
+                None => sops.iter().collect(),
             };
 
-            if matching.is_empty() {
-                if let Some(name) = name {
-                    anyhow::bail!("SOP not found: {name}");
+            if targets.is_empty() {
+                if let Some(n) = &name {
+                    anyhow::bail!("SOP not found: {n}");
                 }
-                println!("No SOPs to validate.");
+                println!("No SOPs found to validate.");
                 return Ok(());
             }
 
             let mut any_warnings = false;
-            for sop in &matching {
+            for sop in &targets {
                 let warnings = validate_sop(sop);
                 if warnings.is_empty() {
-                    println!(
-                        "  {} {} — valid",
-                        console::style("✓").green().bold(),
-                        sop.name
-                    );
+                    println!("  ✅ {} — valid", sop.name);
                 } else {
                     any_warnings = true;
-                    println!(
-                        "  {} {} — {} warning(s):",
-                        console::style("!").yellow().bold(),
-                        sop.name,
-                        warnings.len()
-                    );
+                    println!("  ⚠️  {} — {} warning(s):", sop.name, warnings.len());
                     for w in &warnings {
-                        println!("      {w}");
+                        println!("       - {w}");
                     }
                 }
             }
-            println!();
-
-            if any_warnings {
-                anyhow::bail!("Validation completed with warnings");
+            if !any_warnings {
+                println!();
+                println!("All SOPs passed validation.");
             }
             Ok(())
         }
-
         crate::SopCommands::Show { name } => {
-            let sops = load_sops(
-                &config.workspace_dir,
-                sops_dir_override,
-                config.sop.default_execution_mode,
-            );
-            let sop = sops
-                .iter()
-                .find(|s| s.name == name)
-                .ok_or_else(|| anyhow::anyhow!("SOP not found: {name}"))?;
+            let sop = sops.iter().find(|s| s.name == name).ok_or_else(|| {
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({"sop": name})),
+                    "sop show: name not found in loaded SOPs"
+                );
+                anyhow::Error::msg(format!("SOP not found: {name}"))
+            })?;
 
             println!(
                 "{} v{}",
                 console::style(&sop.name).white().bold(),
                 sop.version
             );
-            println!("{}", sop.description);
+            println!("  {}", sop.description);
             println!();
-            println!("Priority:       {}", sop.priority);
-            println!("Execution mode: {}", sop.execution_mode);
-            println!("Cooldown:       {}s", sop.cooldown_secs);
-            println!("Max concurrent: {}", sop.max_concurrent);
+            println!("  Priority:       {}", sop.priority);
+            println!("  Execution mode: {}", sop.execution_mode);
+            println!("  Deterministic:  {}", sop.deterministic);
+            println!("  Cooldown:       {}s", sop.cooldown_secs);
+            println!("  Max concurrent: {}", sop.max_concurrent);
+            if let Some(loc) = &sop.location {
+                println!("  Location:       {}", loc.display());
+            }
             println!();
-
-            if !sop.triggers.is_empty() {
-                println!("Triggers:");
-                for trigger in &sop.triggers {
-                    println!("  - {trigger}");
-                }
-                println!();
+            println!("  Triggers:");
+            for trigger in &sop.triggers {
+                println!("    - {trigger}");
             }
 
             if !sop.steps.is_empty() {
-                println!("Steps:");
+                println!();
+                println!("  Steps:");
                 for step in &sop.steps {
-                    let confirm_tag = if step.requires_confirmation {
-                        " [requires confirmation]"
+                    let confirm = if step.requires_confirmation {
+                        " [confirmation required]"
                     } else {
                         ""
                     };
                     println!(
-                        "  {}. {}{}",
+                        "    {}. {}{}",
                         step.number,
                         console::style(&step.title).bold(),
-                        confirm_tag
+                        confirm,
                     );
                     if !step.body.is_empty() {
-                        for line in step.body.lines() {
-                            println!("     {line}");
-                        }
+                        println!("       {}", step.body);
                     }
                     if !step.suggested_tools.is_empty() {
-                        println!("     Tools: {}", step.suggested_tools.join(", "));
+                        println!("       Tools: {}", step.suggested_tools.join(", "));
                     }
                 }
             }
@@ -482,7 +139,9 @@ pub fn handle_command(command: crate::SopCommands, config: &crate::config::Confi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sop::types::SopManifest;
     use std::fs;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn parse_steps_basic() {
@@ -683,6 +342,7 @@ type = "manual"
             cooldown_secs: 0,
             max_concurrent: 1,
             location: None,
+            deterministic: false,
         };
 
         let warnings = validate_sop(&sop);
@@ -707,10 +367,13 @@ type = "manual"
                 body: "Do the thing".into(),
                 suggested_tools: vec!["shell".into()],
                 requires_confirmation: false,
+                kind: SopStepKind::default(),
+                schema: None,
             }],
             cooldown_secs: 0,
             max_concurrent: 1,
             location: None,
+            deterministic: false,
         };
 
         let warnings = validate_sop(&sop);
@@ -790,5 +453,76 @@ type = "manual"
             SopTrigger::Peripheral { .. }
         ));
         assert!(matches!(manifest.triggers[4], SopTrigger::Manual));
+    }
+
+    #[test]
+    fn deterministic_flag_overrides_execution_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let sop_dir = dir.path().join("det-sop");
+        fs::create_dir_all(&sop_dir).unwrap();
+
+        fs::write(
+            sop_dir.join("SOP.toml"),
+            r#"
+[sop]
+name = "det-sop"
+description = "A deterministic SOP"
+deterministic = true
+
+[[triggers]]
+type = "manual"
+"#,
+        )
+        .unwrap();
+
+        fs::write(
+            sop_dir.join("SOP.md"),
+            r#"# Det SOP
+
+## Steps
+
+1. **Step one** — First step.
+   - kind: execute
+
+2. **Checkpoint** — Pause for approval.
+   - kind: checkpoint
+
+3. **Step three** — Final step.
+"#,
+        )
+        .unwrap();
+
+        let sops = load_sops_from_directory(dir.path(), SopExecutionMode::Supervised);
+        assert_eq!(sops.len(), 1);
+
+        let sop = &sops[0];
+        assert_eq!(sop.name, "det-sop");
+        assert_eq!(sop.execution_mode, SopExecutionMode::Deterministic);
+        assert!(sop.deterministic);
+        assert_eq!(sop.steps.len(), 3);
+        assert_eq!(sop.steps[0].kind, SopStepKind::Execute);
+        assert_eq!(sop.steps[1].kind, SopStepKind::Checkpoint);
+        assert_eq!(sop.steps[2].kind, SopStepKind::Execute);
+    }
+
+    #[test]
+    fn parse_steps_with_checkpoint_kind() {
+        let md = r#"## Steps
+
+1. **Read data** — Read from sensor.
+   - tools: gpio_read
+   - kind: execute
+
+2. **Review** — Human review checkpoint.
+   - kind: checkpoint
+
+3. **Apply** — Apply changes.
+"#;
+        let steps = parse_steps(md);
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0].kind, SopStepKind::Execute);
+        assert_eq!(steps[1].kind, SopStepKind::Checkpoint);
+        // Default kind should be Execute
+        assert_eq!(steps[2].kind, SopStepKind::Execute);
     }
 }

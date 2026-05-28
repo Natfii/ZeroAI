@@ -6,6 +6,7 @@
 
 package com.zeroclaw.android.data.repository
 
+import com.zeroclaw.android.data.OnDeviceLargeAgent
 import com.zeroclaw.android.data.ProviderSlot
 import com.zeroclaw.android.data.ProviderSlotRegistry
 import com.zeroclaw.android.data.local.dao.AgentDao
@@ -36,7 +37,9 @@ class RoomAgentRepository(
     }
 
     override suspend fun ensureProviderSlots() {
-        dao.insertIgnore(ProviderSlotRegistry.all().map { slot -> slot.seedAgent().toEntity() })
+        val slotSeeds = ProviderSlotRegistry.all().map { slot -> slot.seedAgent().toEntity() }
+        val onDeviceSeed = OnDeviceLargeAgent.seedAgent().toEntity()
+        dao.insertIgnore(slotSeeds + onDeviceSeed)
     }
 
     override suspend fun delete(id: String) {
@@ -44,8 +47,10 @@ class RoomAgentRepository(
     }
 
     override suspend fun toggleEnabled(id: String) {
-        dao.toggleEnabled(id)
+        dao.toggleExclusive(id)
     }
+
+    override fun isAgentEnabled(id: String): Flow<Boolean> = agents.map { list -> list.firstOrNull { it.id == id }?.isEnabled == true }
 
     /**
      * Preserves stable slot IDs when existing save callers still address slot rows by [Agent.id].

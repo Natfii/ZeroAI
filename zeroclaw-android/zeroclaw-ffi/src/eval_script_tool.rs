@@ -7,11 +7,12 @@
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
-use zeroclaw::scripting::{
+use zeroai::scripting::{
     RhaiScriptRuntime, ScriptError, ScriptHost, ScriptLimits, ScriptManifest, ScriptRuntimeKind,
     build_agent_capabilities,
 };
-use zeroclaw::tools::traits::{Tool, ToolResult};
+use zeroclaw::tools::{Tool, ToolResult};
+use zeroclaw_api::attribution::{Attributable, Role, ToolKind};
 
 /// Maximum output size before truncation (16 KiB).
 const MAX_OUTPUT_BYTES: usize = 16 * 1024;
@@ -29,6 +30,11 @@ impl EvalScriptTool {
     pub(crate) fn new() -> Self {
         Self
     }
+}
+
+impl Attributable for EvalScriptTool {
+    fn role(&self) -> Role { Role::Tool(ToolKind::Plugin) }
+    fn alias(&self) -> &str { "eval_script" }
 }
 
 #[async_trait]

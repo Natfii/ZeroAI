@@ -59,7 +59,7 @@ class MemoryExtractionPipeline(
      * @param sessionId Current session identifier, reserved for Phase 2 scoped storage.
      * @return Number of facts extracted and stored.
      */
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    @Suppress("TooGenericExceptionCaught", "SwallowedException", "UnusedParameter")
     suspend fun process(
         userMessage: String,
         sessionId: String,
@@ -103,20 +103,6 @@ class MemoryExtractionPipeline(
                     false
                 }
             if (stored) storedCount++
-        }
-
-        // Phase 2: queue interesting unextracted messages for LLM consolidation
-        val needsLlmExtraction =
-            storedCount == 0 &&
-                InterestingnessFilter.isInteresting(userMessage, heuristicCaptured = false)
-        if (needsLlmExtraction) {
-            try {
-                com.zeroclaw.ffi.addToConsolidationBacklog(sessionId, userMessage)
-            } catch (
-                @Suppress("TooGenericExceptionCaught") e: Exception,
-            ) {
-                // Non-critical: backlog failure must not disrupt message flow
-            }
         }
 
         return storedCount

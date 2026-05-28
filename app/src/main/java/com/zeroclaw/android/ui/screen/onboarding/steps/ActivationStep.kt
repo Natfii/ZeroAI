@@ -93,9 +93,25 @@ fun ActivationStep(
 
         Spacer(modifier = Modifier.height(CardSpacing))
 
+        val providerConfigured = configSummary.provider.isNotBlank()
+        if (!providerConfigured) {
+            Spacer(modifier = Modifier.height(DescriptionSpacing))
+            Text(
+                text = "Pick a provider in Step 3 before finishing setup. The daemon needs at least one provider to answer chats.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier =
+                    Modifier.semantics {
+                        contentDescription =
+                            "Setup blocked because no provider is configured"
+                    },
+            )
+            Spacer(modifier = Modifier.height(CardSpacing))
+        }
+
         FilledTonalButton(
             onClick = onActivate,
-            enabled = !isActivating,
+            enabled = !isActivating && providerConfigured,
             modifier =
                 Modifier
                     .fillMaxWidth()

@@ -58,6 +58,19 @@ class DaemonPersistence(
 
     private val securePrefs = prefsFactory.create(context, SECURE_PREFS_NAME)
 
+    init {
+        // One-shot upgrade cleanup. Earlier versions wrote
+        // KEY_AGENT_SIGNATURE to plainPrefs; we now keep it in
+        // securePrefs (it encodes baseUrl, which can carry
+        // credential-bearing components for self-hosted setups).
+        // Strip the orphaned plain-prefs value so it doesn't sit
+        // there forever after the upgrade. Safe on fresh installs
+        // (no-op when the key is absent).
+        if (plainPrefs.contains(KEY_AGENT_SIGNATURE)) {
+            plainPrefs.edit().remove(KEY_AGENT_SIGNATURE).apply()
+        }
+    }
+
     /**
      * Records that the daemon was successfully started with the given config.
      *
@@ -156,6 +169,39 @@ class DaemonPersistence(
     fun wasRunning(): Boolean = plainPrefs.getBoolean(KEY_WAS_RUNNING, false)
 
     /**
+     * Returns the agent signature from the previous successful daemon
+     * start, or null if no daemon has started before. Used by
+     * [ZeroAIDaemonService] to detect agent swaps across restarts and
+     * trigger a session wipe so a new agent doesn't pick up stale
+     * conversation history from a different model / provider.
+     *
+     * Stored in [securePrefs] (encrypted) because the signature
+     * encodes the `baseUrl` of the active provider, which for
+     * self-hosted setups may include credential-bearing components
+     * (e.g., `http://user:pass@host:port`). Plain prefs would leak
+     * that on a rooted device or via adb backup.
+     */
+    fun lastAgentSignature(): String? = securePrefs.getString(KEY_AGENT_SIGNATURE, null)
+
+    /**
+     * Persists the agent signature for the just-started daemon.
+     *
+     * Compared against [lastAgentSignature] on the next daemon start
+     * to decide whether to wipe persistent session stores before the
+     * new daemon takes over. Cheap async commit — losing this on
+     * process death is harmless (a missed wipe is recoverable; an
+     * incorrect "agent unchanged" claim is what we must avoid, so we
+     * only ever record signatures after the daemon proves it can
+     * start).
+     */
+    fun recordAgentSignature(signature: String) {
+        securePrefs
+            .edit()
+            .putString(KEY_AGENT_SIGNATURE, signature)
+            .apply()
+    }
+
+    /**
      * Saved daemon startup parameters for recovery after process death.
      *
      * @property configToml TOML configuration string.
@@ -175,6 +221,7 @@ class DaemonPersistence(
         private const val KEY_CONFIG_TOML = "config_toml"
         private const val KEY_HOST = "host"
         private const val KEY_PORT = "port"
+        private const val KEY_AGENT_SIGNATURE = "agent_signature"
 
         /**
          * Default [SharedPreferencesFactory] that creates encrypted preferences

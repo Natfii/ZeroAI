@@ -89,6 +89,12 @@ fun readCredential(
 
 android {
     namespace = "com.zeroclaw.android"
+    packaging {
+        resources {
+            excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF")
+        }
+    }
+
     compileSdk = 35
 
     val releaseStoreFile = readBuildValue("ZEROAI_RELEASE_STORE_FILE", "RELEASE_STORE_FILE")
@@ -249,6 +255,7 @@ dependencies {
     implementation(libs.mlkit.genai.proofreading)
     implementation(libs.mlkit.genai.rewriting)
     implementation(libs.mlkit.genai.image.description)
+    implementation(libs.litertlm.android)
     implementation(libs.tink.android)
     implementation(libs.encrypted.datastore.preferences)
     ksp(libs.room.compiler)

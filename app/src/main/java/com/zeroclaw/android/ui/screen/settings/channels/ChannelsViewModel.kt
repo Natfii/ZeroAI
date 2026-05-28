@@ -32,8 +32,12 @@ import kotlinx.coroutines.launch
 class ChannelsViewModel(
     application: Application,
 ) : AndroidViewModel(application) {
-    private val repository = (application as ZeroAIApplication).channelConfigRepository
-    private val daemonBridge = (application as ZeroAIApplication).daemonBridge
+    private val app = application as ZeroAIApplication
+    private val repository = app.channelConfigRepository
+    private val daemonBridge = app.daemonBridge
+    private val daemonReloader =
+        com.zeroclaw.android.service
+            .DaemonReloader(app)
 
     /** All configured channels. */
     val channels: StateFlow<List<ConnectedChannel>> =
@@ -78,7 +82,11 @@ class ChannelsViewModel(
                 val nonSecrets = nonSecretEntries.associate { it.toPair() }
                 val updated = channel.copy(configValues = nonSecrets)
                 repository.save(updated, secrets)
-                daemonBridge.markRestartRequired()
+                // Rebuild + hot-reload so the daemon's in-memory channel
+                // registry actually picks up the new bot token. Without
+                // this the previous `markRestartRequired()` flow just
+                // flipped a UI banner and the polling loop never started.
+                daemonReloader.apply()
                 _saveState.value = SaveState.Saved
             } catch (e: Exception) {
                 Log.e(TAG, "Channel save failed", e)
@@ -97,7 +105,7 @@ class ChannelsViewModel(
         viewModelScope.launch {
             try {
                 repository.delete(id)
-                daemonBridge.markRestartRequired()
+                daemonReloader.apply()
                 _snackbarMessage.value = "Channel deleted"
             } catch (e: Exception) {
                 Log.e(TAG, "Channel delete failed", e)
@@ -114,6 +122,11 @@ class ChannelsViewModel(
     fun toggleChannel(id: String) {
         viewModelScope.launch {
             repository.toggleEnabled(id)
+            // Toggle is debounced via the existing "Restart to apply"
+            // banner — a full daemon restart per flick would burn 3-8 s
+            // each on every accidental tap. Save / delete still run a
+            // hot-reload immediately since those are higher-intent
+            // edits.
             daemonBridge.markRestartRequired()
         }
     }

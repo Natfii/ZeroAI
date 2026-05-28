@@ -81,47 +81,23 @@ class RoomPluginRepository(
         dao.updateConfigJson(pluginId, json.encodeToString(updatedConfig))
     }
 
-    /**
-     * Inserts any missing official plugin entities from seed data.
-     *
-     * Called on app start before [syncOfficialPluginStates] to handle
-     * upgrades that introduce new official plugins.
-     */
-    override suspend fun upsertMissingOfficialPlugins() {
-        val existingIds = dao.getExistingIds(OfficialPlugins.ALL.toList()).toSet()
+    override suspend fun reconcileOfficialPlugins(settings: AppSettings) {
+        val validIds = OfficialPlugins.ALL.toList()
+        val existingIds = dao.getExistingIds(validIds).toSet()
         val missing =
             SeedData
                 .seedPlugins()
                 .filter { it.id in OfficialPlugins.ALL && it.id !in existingIds }
-        if (missing.isNotEmpty()) {
-            dao.insertAllIgnoreConflicts(missing)
-        }
-    }
-
-    /**
-     * Synchronises the enabled state of official plugins with [AppSettings].
-     *
-     * [AppSettings] is the source of truth for official plugin enabled
-     * state because it drives [ConfigTomlBuilder][com.zeroclaw.android.service.ConfigTomlBuilder].
-     * This method updates the Room entity to match.
-     *
-     * @param settings Current application settings to sync from.
-     */
-    override suspend fun syncOfficialPluginStates(settings: AppSettings) {
-        val mapping =
+        val enabledStates =
             mapOf(
                 OfficialPlugins.WEB_SEARCH to settings.webSearchEnabled,
                 OfficialPlugins.WEB_FETCH to settings.webFetchEnabled,
                 OfficialPlugins.HTTP_REQUEST to settings.httpRequestEnabled,
                 OfficialPlugins.COMPOSIO to settings.composioEnabled,
                 OfficialPlugins.VISION to true,
-                OfficialPlugins.TRANSCRIPTION to settings.transcriptionEnabled,
                 OfficialPlugins.SHARED_FOLDER to settings.sharedFolderEnabled,
-                OfficialPlugins.QUERY_CLASSIFICATION to settings.queryClassificationEnabled,
             )
-        for ((id, enabled) in mapping) {
-            dao.setEnabled(id, enabled)
-        }
+        dao.reconcileOfficialRows(validIds, missing, enabledStates)
     }
 
     /** Constants for [RoomPluginRepository]. */

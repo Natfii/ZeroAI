@@ -35,26 +35,6 @@ object OfficialPluginSettingsSync {
             OfficialPlugins.HTTP_REQUEST -> settingsRepository.setHttpRequestEnabled(enabled)
             OfficialPlugins.COMPOSIO -> settingsRepository.setComposioEnabled(enabled)
             OfficialPlugins.SHARED_FOLDER -> settingsRepository.setSharedFolderEnabled(enabled)
-            OfficialPlugins.TRANSCRIPTION -> settingsRepository.setTranscriptionEnabled(enabled)
-            OfficialPlugins.QUERY_CLASSIFICATION ->
-                settingsRepository.setQueryClassificationEnabled(enabled)
         }
-    }
-
-    /**
-     * Restores all configurable official plugin-backed settings to their defaults.
-     *
-     * Vision is intentionally omitted because it remains enabled by repository sync.
-     *
-     * @param settingsRepository Settings repository that backs daemon TOML generation.
-     */
-    suspend fun restoreDefaults(settingsRepository: SettingsRepository) {
-        settingsRepository.setWebSearchEnabled(false)
-        settingsRepository.setWebFetchEnabled(false)
-        settingsRepository.setHttpRequestEnabled(false)
-        settingsRepository.setComposioEnabled(false)
-        settingsRepository.setTranscriptionEnabled(false)
-        settingsRepository.setQueryClassificationEnabled(false)
-        settingsRepository.setSharedFolderEnabled(false)
     }
 }

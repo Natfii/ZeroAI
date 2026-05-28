@@ -80,7 +80,6 @@ import com.zeroclaw.android.worker.MemoryMaintenanceWorker
 import com.zeroclaw.ffi.getVersion
 import java.io.File
 import java.util.concurrent.TimeUnit
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -107,6 +106,33 @@ import okhttp3.OkHttpClient
  * Persistent data is stored in a Room database ([ZeroAIDatabase]) that
  * survives process restarts. Settings and API keys remain in DataStore
  * and EncryptedSharedPreferences respectively.
+ *
+ * ## Two-tier init policy
+ *
+ * To keep [onCreate] off the main-thread critical path, properties use one
+ * of two declaration styles:
+ *
+ *  - **`lateinit var ... private set`** — cheap eager init touched by
+ *    [onCreate] directly. Used for the plain FFI bridges (HealthBridge,
+ *    CostBridge, CronBridge, SkillsBridge, ToolsBridge, MemoryBridge,
+ *    CapabilityGrantsBridge), the DataStore-backed repositories
+ *    (settingsRepository, onboardingRepository), the e-stop repo, and
+ *    main-thread observers (sessionLockManager).
+ *  - **`val ... by lazy { }`** — expensive init deferred until first
+ *    off-main access. Used for anything that opens the Android Keystore,
+ *    SQLCipher database, EncryptedSharedPreferences, or makes synchronous
+ *    NotificationManager / JNI calls (database, apiKeyRepository,
+ *    channelConfigRepository, emailConfigRepository, sshDataStore,
+ *    logRepository, activityRepository, agentRepository, pluginRepository,
+ *    terminalEntryRepository, capabilityApprovalNotifier, visionBridge,
+ *    sharedHttpClient, ioScope).
+ *
+ * The remaining `lateinit var`s assigned inside an [ioScope] launch (eg.
+ * eventBridge) are nullable on the receiving side (DaemonServiceBridge
+ * uses `EventBridge?` with safe-call register sites) so the temporary
+ * uninitialised window between launch dispatch and execution cannot crash
+ * the daemon path. Any new property whose constructor opens a keystore,
+ * database, or notification channel MUST be `by lazy`.
  */
 class ZeroAIApplication :
     Application(),
@@ -121,53 +147,107 @@ class ZeroAIApplication :
     lateinit var daemonBridge: DaemonServiceBridge
         private set
 
-    /** Room database instance for agents, plugins, logs, and activity events. */
-    lateinit var database: ZeroAIDatabase
-        private set
+    /**
+     * Room database instance for agents, plugins, logs, and activity events.
+     *
+     * Initialised on first access via [ZeroAIDatabase.build], which builds
+     * the SQLCipher passphrase + opens the encrypted DB. Lazy so the
+     * keystore + PBKDF2 cost is paid off [onCreate]'s critical path when
+     * the consumers (DAO-backed repos, EventBridge) also defer their
+     * first access to a background dispatcher.
+     */
+    val database: ZeroAIDatabase by lazy { ZeroAIDatabase.build(this, ioScope) }
 
     /** Application settings repository backed by Jetpack DataStore. */
     lateinit var settingsRepository: SettingsRepository
         private set
 
-    /** API key repository backed by EncryptedSharedPreferences. */
-    lateinit var apiKeyRepository: ApiKeyRepository
-        private set
+    /**
+     * API key repository backed by EncryptedSharedPreferences.
+     *
+     * Initialised on first access (off-main when called from a ViewModel
+     * coroutine) to keep the keystore-backed prefs open out of
+     * [onCreate]'s critical path.
+     */
+    val apiKeyRepository: ApiKeyRepository by lazy { createApiKeyRepository(ioScope) }
 
-    /** Log repository backed by Room with automatic pruning. */
-    lateinit var logRepository: LogRepository
-        private set
+    /**
+     * Log repository backed by Room with automatic pruning.
+     *
+     * Lazy so the first DAO access (and the underlying SQLCipher open it
+     * triggers) is deferred to a background dispatcher.
+     */
+    val logRepository: LogRepository by lazy {
+        RoomLogRepository(database.logEntryDao(), ioScope)
+    }
 
-    /** Activity feed repository backed by Room with automatic pruning. */
-    lateinit var activityRepository: ActivityRepository
-        private set
+    /**
+     * Activity feed repository backed by Room with automatic pruning.
+     *
+     * Lazy so first DAO access is deferred to a background dispatcher.
+     */
+    val activityRepository: ActivityRepository by lazy {
+        RoomActivityRepository(database.activityEventDao(), ioScope)
+    }
 
     /** Onboarding state repository backed by Jetpack DataStore. */
     lateinit var onboardingRepository: OnboardingRepository
         private set
 
-    /** Agent repository backed by Room. */
-    lateinit var agentRepository: AgentRepository
-        private set
+    /**
+     * Agent repository backed by Room.
+     *
+     * Lazy so first DAO access is deferred to a background dispatcher.
+     */
+    val agentRepository: AgentRepository by lazy {
+        RoomAgentRepository(database.agentDao())
+    }
 
-    /** Plugin repository backed by Room. */
-    lateinit var pluginRepository: PluginRepository
-        private set
+    /**
+     * Plugin repository backed by Room.
+     *
+     * Lazy so first DAO access is deferred to a background dispatcher.
+     */
+    val pluginRepository: PluginRepository by lazy {
+        RoomPluginRepository(database.pluginDao())
+    }
 
-    /** Channel configuration repository backed by Room + EncryptedSharedPreferences. */
-    lateinit var channelConfigRepository: ChannelConfigRepository
-        private set
+    /**
+     * Channel configuration repository backed by Room + EncryptedSharedPreferences.
+     *
+     * Initialised on first access to keep the keystore-backed prefs open
+     * out of [onCreate]'s critical path.
+     */
+    val channelConfigRepository: ChannelConfigRepository by lazy {
+        createChannelConfigRepository()
+    }
 
-    /** Email configuration repository backed by Room + EncryptedSharedPreferences. */
-    lateinit var emailConfigRepository: EmailConfigRepository
-        private set
+    /**
+     * Email configuration repository backed by Room + EncryptedSharedPreferences.
+     *
+     * Initialised on first access to keep the keystore-backed prefs open
+     * out of [onCreate]'s critical path.
+     */
+    val emailConfigRepository: EmailConfigRepository by lazy {
+        createEmailConfigRepository()
+    }
 
-    /** Terminal REPL entry repository backed by Room. */
-    lateinit var terminalEntryRepository: TerminalEntryRepository
-        private set
+    /**
+     * Terminal REPL entry repository backed by Room.
+     *
+     * Lazy so first DAO access is deferred to a background dispatcher.
+     */
+    val terminalEntryRepository: TerminalEntryRepository by lazy {
+        RoomTerminalEntryRepository(database.terminalEntryDao(), ioScope)
+    }
 
-    /** Encrypted DataStore for SSH key metadata. */
-    lateinit var sshDataStore: SshDataStore
-        private set
+    /**
+     * Encrypted DataStore for SSH key metadata.
+     *
+     * Initialised on first access to keep the keystore-backed open out of
+     * [onCreate]'s critical path.
+     */
+    val sshDataStore: SshDataStore by lazy { SshDataStore(this) }
 
     /** Emergency stop state repository. */
     lateinit var estopRepository: EstopRepository
@@ -205,12 +285,34 @@ class ZeroAIApplication :
     lateinit var capabilityGrantsBridge: CapabilityGrantsBridge
         private set
 
-    /** Notifier for capability approval requests shown as Android notifications. */
-    lateinit var capabilityApprovalNotifier: CapabilityApprovalNotifier
-        private set
+    /**
+     * Notifier for capability approval requests shown as Android notifications.
+     *
+     * Lazy so the synchronous NotificationManager.createNotificationChannel
+     * IPC is deferred off [onCreate]'s critical path.
+     */
+    val capabilityApprovalNotifier: CapabilityApprovalNotifier by lazy {
+        CapabilityApprovalNotifier(this)
+    }
 
     /** Bridge for direct-to-provider multimodal vision API calls. */
     val visionBridge: VisionBridge by lazy { VisionBridge() }
+
+    /**
+     * Application-scoped coordinator for the on-device large LLM
+     * engine. Watches the agent enabled flag + downloaded model
+     * file + daemon state; loads / unloads the LiteRT-LM engine
+     * accordingly. Wired up once in [onCreate] via
+     * [com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager.attach].
+     */
+    val onDeviceInferenceManager:
+        com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager by lazy {
+            com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager(
+                context = this,
+                agentRepository = agentRepository,
+                scope = ioScope,
+            )
+        }
 
     /**
      * Read-only Room database for the Discord message archive.
@@ -220,6 +322,19 @@ class ZeroAIApplication :
      */
     var discordArchiveDb: DiscordArchiveDatabase? = null
         private set
+
+    /**
+     * Background coroutine scope for I/O work spawned from [onCreate] and
+     * the lazy-initialised repositories that follow.
+     *
+     * Promoted to a class-level property so `by lazy { }` delegates that
+     * need a scope (encrypted-prefs repos, DataStore repos) can reference
+     * it without having to receive it as a parameter.
+     */
+    @Suppress("InjectDispatcher")
+    val ioScope: CoroutineScope by lazy {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
 
     /** App-wide session lock manager observing the process lifecycle. */
     lateinit var sessionLockManager: SessionLockManager
@@ -268,36 +383,41 @@ class ZeroAIApplication :
         com.zeroclaw.ffi.initLogging()
         verifyCrateVersion()
 
-        @Suppress("InjectDispatcher")
-        val ioDispatcher: CoroutineDispatcher = Dispatchers.IO
-        val ioScope = CoroutineScope(SupervisorJob() + ioDispatcher)
-
         daemonBridge = DaemonServiceBridge(filesDir.absolutePath)
-        database = ZeroAIDatabase.build(this, ioScope)
         settingsRepository = DataStoreSettingsRepository(this)
-        apiKeyRepository = createApiKeyRepository(ioScope)
-        logRepository = RoomLogRepository(database.logEntryDao(), ioScope)
-        activityRepository = RoomActivityRepository(database.activityEventDao(), ioScope)
         onboardingRepository = DataStoreOnboardingRepository(this)
-        agentRepository = RoomAgentRepository(database.agentDao())
-        pluginRepository = RoomPluginRepository(database.pluginDao())
-        channelConfigRepository = createChannelConfigRepository()
-        emailConfigRepository = createEmailConfigRepository()
-        terminalEntryRepository =
-            RoomTerminalEntryRepository(database.terminalEntryDao(), ioScope)
-        sshDataStore = SshDataStore(this)
-        try {
-            com.zeroclaw.ffi.sshKeyStoreInit(
-                filesDir.resolve("ssh/keys").absolutePath,
-            )
-        } catch (e: Exception) {
-            logRepository.append(
-                LogSeverity.ERROR,
-                TAG,
-                "SSH key store init failed: ${e.message}",
-            )
-        }
+
+        // Warm heavy lazies in a single coroutine, in dependency order,
+        // so parallel `ioScope.launch` blocks that touch SQLCipher /
+        // EncryptedSharedPreferences-backed repos can `join()` instead
+        // of racing on `SynchronizedLazyImpl` mutexes. The Job is
+        // explicitly awaited by every downstream coroutine below that
+        // touches a warmed lazy.
+        val warmupJob =
+            ioScope.launch {
+                @Suppress("UNUSED_EXPRESSION")
+                database
+                @Suppress("UNUSED_EXPRESSION")
+                apiKeyRepository
+                @Suppress("UNUSED_EXPRESSION")
+                logRepository
+                @Suppress("UNUSED_EXPRESSION")
+                activityRepository
+            }
+
         ioScope.launch {
+            warmupJob.join()
+            try {
+                com.zeroclaw.ffi.sshKeyStoreInit(
+                    filesDir.resolve("ssh/keys").absolutePath,
+                )
+            } catch (e: Exception) {
+                logRepository.append(
+                    LogSeverity.ERROR,
+                    TAG,
+                    "SSH key store init failed: ${e.message}",
+                )
+            }
             try {
                 sshDataStore.pruneStaleKeys()
             } catch (e: Exception) {
@@ -316,19 +436,22 @@ class ZeroAIApplication :
         toolsBridge = ToolsBridge()
         memoryBridge = MemoryBridge()
         capabilityGrantsBridge = CapabilityGrantsBridge(filesDir.absolutePath)
-        capabilityApprovalNotifier = CapabilityApprovalNotifier(this)
-        eventBridge =
-            EventBridge(
-                activityRepository = activityRepository,
-                scope = ioScope,
-                getPeers = { buildPeerRoutes() },
-                getPeerToken = { ip, port -> readPeerToken(ip, port) },
-                notifier = capabilityApprovalNotifier,
-            )
-        daemonBridge.eventBridge = eventBridge
-        daemonBridge.credentialBridge = CredentialBridge(apiKeyRepository)
+        ioScope.launch {
+            warmupJob.join()
+            eventBridge =
+                EventBridge(
+                    activityRepository = activityRepository,
+                    scope = ioScope,
+                    getPeers = { buildPeerRoutes() },
+                    getPeerToken = { ip, port -> readPeerToken(ip, port) },
+                    notifier = capabilityApprovalNotifier,
+                )
+            daemonBridge.eventBridge = eventBridge
+            daemonBridge.credentialBridge = CredentialBridge(apiKeyRepository)
+        }
 
         seedProviderSlots(ioScope)
+        onDeviceInferenceManager.attach()
 
         sessionLockManager = SessionLockManager(settingsRepository.settings, ioScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(sessionLockManager)

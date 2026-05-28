@@ -66,7 +66,6 @@ HSPLcom/zeroclaw/android/ui/screen/agents/AgentsViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/plugins/PluginsViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/agents/AgentDetailViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/plugins/PluginDetailViewModel;->**(**)**
-HSPLcom/zeroclaw/android/ui/screen/onboarding/OnboardingViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/settings/logs/LogViewerViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/settings/apikeys/ApiKeysViewModel;->**(**)**
 HSPLcom/zeroclaw/android/ui/screen/settings/channels/ChannelsViewModel;->**(**)**
@@ -77,7 +76,6 @@ Lcom/zeroclaw/android/ui/screen/agents/AgentsViewModel;
 Lcom/zeroclaw/android/ui/screen/plugins/PluginsViewModel;
 Lcom/zeroclaw/android/ui/screen/agents/AgentDetailViewModel;
 Lcom/zeroclaw/android/ui/screen/plugins/PluginDetailViewModel;
-Lcom/zeroclaw/android/ui/screen/onboarding/OnboardingViewModel;
 Lcom/zeroclaw/android/ui/screen/settings/logs/LogViewerViewModel;
 Lcom/zeroclaw/android/ui/screen/settings/apikeys/ApiKeysViewModel;
 Lcom/zeroclaw/android/ui/screen/settings/channels/ChannelsViewModel;

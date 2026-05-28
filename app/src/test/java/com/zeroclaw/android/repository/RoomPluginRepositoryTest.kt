@@ -125,59 +125,76 @@ class RoomPluginRepositoryTest {
         }
 
     @Test
-    fun `syncOfficialPluginStates enables plugins matching AppSettings`() =
+    fun `reconcileOfficialPlugins forwards enabled map to DAO transaction`() =
         runTest {
+            coEvery { dao.getExistingIds(any()) } returns OfficialPlugins.ALL.toList()
             val settings =
                 AppSettings(
                     webSearchEnabled = true,
                     webFetchEnabled = true,
                 )
 
-            repo.syncOfficialPluginStates(settings)
+            repo.reconcileOfficialPlugins(settings)
 
-            coVerify { dao.setEnabled(OfficialPlugins.WEB_SEARCH, true) }
-            coVerify { dao.setEnabled(OfficialPlugins.WEB_FETCH, true) }
+            coVerify {
+                dao.reconcileOfficialRows(
+                    validIds = OfficialPlugins.ALL.toList(),
+                    missing = emptyList(),
+                    enabledStates =
+                        match { states ->
+                            states[OfficialPlugins.WEB_SEARCH] == true &&
+                                states[OfficialPlugins.WEB_FETCH] == true &&
+                                states[OfficialPlugins.VISION] == true
+                        },
+                )
+            }
         }
 
     @Test
-    fun `syncOfficialPluginStates disables plugins not matching AppSettings`() =
+    fun `reconcileOfficialPlugins forwards disabled flags through DAO transaction`() =
         runTest {
+            coEvery { dao.getExistingIds(any()) } returns OfficialPlugins.ALL.toList()
             val settings =
                 AppSettings(
                     webSearchEnabled = false,
                     webFetchEnabled = false,
                     httpRequestEnabled = false,
                     composioEnabled = false,
-                    transcriptionEnabled = false,
-                    queryClassificationEnabled = false,
                 )
 
-            repo.syncOfficialPluginStates(settings)
+            repo.reconcileOfficialPlugins(settings)
 
-            coVerify { dao.setEnabled(OfficialPlugins.WEB_SEARCH, false) }
-            coVerify { dao.setEnabled(OfficialPlugins.WEB_FETCH, false) }
-            coVerify { dao.setEnabled(OfficialPlugins.HTTP_REQUEST, false) }
-            coVerify { dao.setEnabled(OfficialPlugins.COMPOSIO, false) }
-            coVerify { dao.setEnabled(OfficialPlugins.TRANSCRIPTION, false) }
-            coVerify { dao.setEnabled(OfficialPlugins.QUERY_CLASSIFICATION, false) }
+            coVerify {
+                dao.reconcileOfficialRows(
+                    validIds = OfficialPlugins.ALL.toList(),
+                    missing = emptyList(),
+                    enabledStates =
+                        match { states ->
+                            states[OfficialPlugins.WEB_SEARCH] == false &&
+                                states[OfficialPlugins.WEB_FETCH] == false &&
+                                states[OfficialPlugins.HTTP_REQUEST] == false &&
+                                states[OfficialPlugins.COMPOSIO] == false
+                        },
+                )
+            }
         }
 
     @Test
-    fun `Vision plugin is always enabled in sync mapping`() =
+    fun `Vision plugin is always marked enabled in reconcile mapping`() =
         runTest {
-            val settings =
-                AppSettings(
-                    webSearchEnabled = false,
-                    webFetchEnabled = false,
-                    httpRequestEnabled = false,
-                    composioEnabled = false,
-                    transcriptionEnabled = false,
-                    queryClassificationEnabled = false,
+            coEvery { dao.getExistingIds(any()) } returns OfficialPlugins.ALL.toList()
+            val settings = AppSettings()
+
+            repo.reconcileOfficialPlugins(settings)
+
+            coVerify {
+                dao.reconcileOfficialRows(
+                    validIds = any(),
+                    missing = any(),
+                    enabledStates =
+                        match { states -> states[OfficialPlugins.VISION] == true },
                 )
-
-            repo.syncOfficialPluginStates(settings)
-
-            coVerify { dao.setEnabled(OfficialPlugins.VISION, true) }
+            }
         }
 
     private fun makeEntity(

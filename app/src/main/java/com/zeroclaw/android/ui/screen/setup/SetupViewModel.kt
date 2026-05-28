@@ -14,7 +14,6 @@ import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.oauth.AuthProfileStore
 import com.zeroclaw.android.model.ApiKey
 import com.zeroclaw.android.model.AppSettings
-import com.zeroclaw.android.service.AgentTomlEntry
 import com.zeroclaw.android.service.ConfigTomlBuilder
 import com.zeroclaw.android.service.DaemonServiceBridge
 import com.zeroclaw.android.service.GlobalTomlConfig
@@ -105,7 +104,7 @@ class SetupViewModel(
             apiKey?.key?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
         secretBuffers.add(apiKeyBytes)
 
-        val configToml = buildConfigToml(effectiveSettings, apiKey, apiKeyBytes, secretBuffers)
+        val configToml = buildConfigToml(effectiveSettings, apiKey, apiKeyBytes)
 
         val enabledChannels =
             app.channelConfigRepository.channels
@@ -134,7 +133,7 @@ class SetupViewModel(
                 disableChannelByTomlKey(channelTomlKey)
             },
             onRebuildToml = {
-                buildConfigToml(effectiveSettings, apiKey, apiKeyBytes, secretBuffers)
+                buildConfigToml(effectiveSettings, apiKey, apiKeyBytes)
             },
         )
     }
@@ -148,14 +147,12 @@ class SetupViewModel(
      * @param settings Effective application settings with resolved defaults.
      * @param apiKey Default provider API key, or null.
      * @param apiKeyBytes Decrypted API key as a [ByteArray] for secure handling.
-     * @param secretBuffers Mutable list for agent key buffer cleanup tracking.
      * @return Complete TOML configuration string.
      */
     private suspend fun buildConfigToml(
         settings: AppSettings,
         apiKey: ApiKey?,
         apiKeyBytes: ByteArray,
-        secretBuffers: MutableList<ByteArray>,
     ): String {
         val globalConfig =
             buildGlobalTomlConfig(
@@ -169,7 +166,7 @@ class SetupViewModel(
                 app.channelConfigRepository.getEnabledWithSecrets(),
                 app.discordGuildId(),
             )
-        val agentsToml = buildAgentsToml(secretBuffers)
+        val agentsToml = buildAgentsToml()
         return baseToml + channelsToml + agentsToml
     }
 
@@ -210,150 +207,30 @@ class SetupViewModel(
      * @param apiKeyValue Decrypted API key string from the secure buffer.
      * @return A fully populated [GlobalTomlConfig].
      */
-    @Suppress("LongMethod")
     private fun buildGlobalTomlConfig(
         settings: AppSettings,
         apiKey: ApiKey?,
         apiKeyValue: String,
     ): GlobalTomlConfig =
-        GlobalTomlConfig(
-            provider = SlotAwareAgentConfig.configProvider(settings.defaultProvider),
-            model = settings.defaultModel,
-            apiKey = apiKeyValue,
-            baseUrl = apiKey?.baseUrl.orEmpty(),
-            temperature = settings.defaultTemperature,
-            reasoningEffort = settings.reasoningEffort,
-            compactContext = settings.compactContext,
-            costEnabled = settings.costEnabled,
-            dailyLimitUsd = settings.dailyLimitUsd.toDouble(),
-            monthlyLimitUsd = settings.monthlyLimitUsd.toDouble(),
-            costWarnAtPercent = settings.costWarnAtPercent,
-            providerRetries = settings.providerRetries,
-            fallbackProviders = splitCsv(settings.fallbackProviders),
-            memoryBackend = settings.memoryBackend,
-            memoryAutoSave = settings.memoryAutoSave,
-            identityJson = settings.identityJson,
-            autonomyLevel = settings.autonomyLevel,
-            workspaceOnly = settings.workspaceOnly,
-            allowedCommands = splitCsv(settings.allowedCommands),
-            forbiddenPaths = splitCsv(settings.forbiddenPaths),
-            maxActionsPerHour = settings.maxActionsPerHour,
-            maxCostPerDayCents = settings.maxCostPerDayCents,
-            requireApprovalMediumRisk = settings.requireApprovalMediumRisk,
-            blockHighRiskCommands = settings.blockHighRiskCommands,
-            tunnelProvider = settings.tunnelProvider,
-            tunnelTailscaleFunnel = settings.tunnelTailscaleFunnel,
-            tunnelTailscaleHostname = settings.tunnelTailscaleHostname,
-            gatewayHost = settings.host,
-            gatewayPort = settings.port,
-            gatewayRequirePairing = settings.gatewayRequirePairing,
-            gatewayAllowPublicBind = settings.gatewayAllowPublicBind,
-            gatewayPairedTokens = splitCsv(settings.gatewayPairedTokens),
-            gatewayPairRateLimit = settings.gatewayPairRateLimit,
-            gatewayWebhookRateLimit = settings.gatewayWebhookRateLimit,
-            gatewayIdempotencyTtl = settings.gatewayIdempotencyTtl,
-            schedulerEnabled = settings.schedulerEnabled,
-            schedulerMaxTasks = settings.schedulerMaxTasks,
-            schedulerMaxConcurrent = settings.schedulerMaxConcurrent,
-            heartbeatEnabled = settings.heartbeatEnabled,
-            heartbeatIntervalMinutes = settings.heartbeatIntervalMinutes,
-            observabilityBackend = settings.observabilityBackend,
-            observabilityOtelEndpoint = settings.observabilityOtelEndpoint,
-            observabilityOtelServiceName = settings.observabilityOtelServiceName,
-            memoryHygieneEnabled = settings.memoryHygieneEnabled,
-            memoryArchiveAfterDays = settings.memoryArchiveAfterDays,
-            memoryPurgeAfterDays = settings.memoryPurgeAfterDays,
-            memoryEmbeddingProvider = settings.memoryEmbeddingProvider,
-            memoryEmbeddingModel = settings.memoryEmbeddingModel,
-            memoryVectorWeight = settings.memoryVectorWeight.toDouble(),
-            memoryKeywordWeight = settings.memoryKeywordWeight.toDouble(),
-            composioEnabled = settings.composioEnabled,
-            composioApiKey = settings.composioApiKey,
-            composioEntityId = settings.composioEntityId,
-            browserEnabled = settings.browserEnabled,
-            browserAllowedDomains = splitCsv(settings.browserAllowedDomains),
-            httpRequestEnabled = settings.httpRequestEnabled,
-            httpRequestAllowedDomains = splitCsv(settings.httpRequestAllowedDomains),
-            webFetchEnabled = settings.webFetchEnabled,
-            webFetchAllowedDomains = splitCsv(settings.webFetchAllowedDomains),
-            webFetchBlockedDomains = splitCsv(settings.webFetchBlockedDomains),
-            webFetchMaxResponseSize = settings.webFetchMaxResponseSize,
-            webFetchTimeoutSecs = settings.webFetchTimeoutSecs,
-            webSearchEnabled = settings.webSearchEnabled,
-            webSearchProvider = settings.webSearchProvider,
-            webSearchBraveApiKey = settings.webSearchBraveApiKey,
-            webSearchMaxResults = settings.webSearchMaxResults,
-            webSearchTimeoutSecs = settings.webSearchTimeoutSecs,
-            securitySandboxEnabled = settings.securitySandboxEnabled,
-            securitySandboxBackend = settings.securitySandboxBackend,
-            securitySandboxFirejailArgs = splitCsv(settings.securitySandboxFirejailArgs),
-            securityResourcesMaxMemoryMb = settings.securityResourcesMaxMemoryMb,
-            securityResourcesMaxCpuTimeSecs = settings.securityResourcesMaxCpuTimeSecs,
-            securityResourcesMaxSubprocesses = settings.securityResourcesMaxSubprocesses,
-            securityResourcesMemoryMonitoring = settings.securityResourcesMemoryMonitoring,
-            securityAuditEnabled = settings.securityAuditEnabled,
-            securityEstopEnabled = settings.securityEstopEnabled,
-            securityEstopRequireOtpToResume = settings.securityEstopRequireOtpToResume,
-            proxyEnabled = settings.proxyEnabled,
-            proxyHttpProxy = settings.proxyHttpProxy,
-            proxyHttpsProxy = settings.proxyHttpsProxy,
-            proxyAllProxy = settings.proxyAllProxy,
-            proxyNoProxy = splitCsv(settings.proxyNoProxy),
-            proxyScope = settings.proxyScope,
-            proxyServiceSelectors = splitCsv(settings.proxyServiceSelectors),
-            reliabilityBackoffMs = settings.reliabilityBackoffMs,
-            reliabilityApiKeysJson = settings.reliabilityApiKeysJson,
+        com.zeroclaw.android.service.DaemonGlobalConfigMapper.toGlobalTomlConfig(
+            context = app,
+            settings = settings,
+            apiKey = apiKey,
+            apiKeyValue = apiKeyValue,
+            hubAppContext = null,
         )
 
     /**
-     * Resolves all enabled agents into [AgentTomlEntry] instances and builds
-     * the `[agents.<name>]` TOML sections.
-     *
-     * Each agent's API key is fetched and added to [secretBuffers] for
-     * zero-fill cleanup. Agents without a provider or model are skipped.
-     *
-     * @param secretBuffers Mutable list to which agent API key buffers are
-     *   appended for post-setup cleanup.
-     * @return TOML string with per-agent sections, or empty if no agents qualify.
+     * Delegates to [AgentTomlAssembler] — the single source of truth for
+     * `[agents.<name>]` emission. API key material no longer ships per
+     * agent (it lives on the referenced `[providers.models.<type>.default]`
+     * entry from V1-globals folding), so the previous per-agent secret-
+     * buffer tracking is no longer needed here. The global API key
+     * buffer is still tracked at the [GlobalTomlConfig] level.
      */
-    private suspend fun buildAgentsToml(secretBuffers: MutableList<ByteArray>): String {
-        val authProfiles = AuthProfileStore.listStandaloneOnIo(app)
-        val allAgents = app.agentRepository.agents.first()
-        val entries =
-            SlotAwareAgentConfig
-                .orderedConfiguredAgents(allAgents)
-                .map { agent ->
-                    val agentKey = app.apiKeyRepository.getByProviderFresh(agent.provider)
-                    if (
-                        !SlotAwareAgentConfig.hasUsableProviderCredentials(
-                            provider = agent.provider,
-                            apiKey = agentKey,
-                            authProfiles = authProfiles,
-                        )
-                    ) {
-                        return@map null
-                    }
-                    val keyBytes =
-                        agentKey
-                            ?.key
-                            ?.toByteArray(Charsets.UTF_8) ?: ByteArray(0)
-                    secretBuffers.add(keyBytes)
-                    AgentTomlEntry(
-                        name = SlotAwareAgentConfig.configName(agent),
-                        provider =
-                            ConfigTomlBuilder.resolveProvider(
-                                SlotAwareAgentConfig.configProvider(agent),
-                                agentKey?.baseUrl.orEmpty(),
-                            ),
-                        model = agent.modelName,
-                        apiKey = String(keyBytes, Charsets.UTF_8),
-                        systemPrompt = agent.systemPrompt,
-                        temperature = agent.temperature,
-                        maxDepth = agent.maxDepth,
-                    )
-                }.filterNotNull()
-        return ConfigTomlBuilder.buildAgentsToml(entries)
-    }
+    private suspend fun buildAgentsToml(): String =
+        com.zeroclaw.android.service.AgentTomlAssembler
+            .assemble(app)
 
     /**
      * Disables a channel in Room by its TOML key.
@@ -413,11 +290,3 @@ class SetupViewModel(
         private val VALID_PORT_RANGE = 1..65535
     }
 }
-
-/**
- * Splits a comma-separated string into a trimmed, non-blank list.
- *
- * @param csv Comma-separated string (may be blank).
- * @return List of trimmed non-blank tokens; empty list if [csv] is blank.
- */
-private fun splitCsv(csv: String): List<String> = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }

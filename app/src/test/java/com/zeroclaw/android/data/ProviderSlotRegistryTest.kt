@@ -12,11 +12,13 @@ import org.junit.jupiter.api.Test
 
 class ProviderSlotRegistryTest {
     @Test
-    fun returnsAllNineSlotsInStableOrder() {
+    fun returnsAllSlotsInLocalFirstOrder() {
         val slots = ProviderSlotRegistry.all()
-        assertEquals(9, slots.size)
-        assertEquals("gemini-api", slots.first().slotId)
-        assertEquals("ollama", slots.last().slotId)
+        // 6 slots after 2026-05-25 drop of deepseek/qwen/xai.
+        assertEquals(6, slots.size)
+        // Ollama leads (local-first ordering).
+        assertEquals("ollama", slots.first().slotId)
+        assertEquals("openrouter-api", slots.last().slotId)
     }
 
     @Test
@@ -38,21 +40,35 @@ class ProviderSlotRegistryTest {
 
     @Test
     fun findsKnownSlotAndRejectsUnknown() {
-        val slot = ProviderSlotRegistry.findById("gemini-api")
+        val slot = ProviderSlotRegistry.findById("ollama")
         assertNotNull(slot)
-        assertEquals("Gemini API", slot?.displayName)
+        assertEquals("Ollama / Local", slot?.displayName)
         assertNull(ProviderSlotRegistry.findById("gemini-oauth"))
         assertNull(ProviderSlotRegistry.findById("missing-slot"))
+        // Dropped provider IDs no longer resolve.
+        assertNull(ProviderSlotRegistry.findById("xai-api"))
+        assertNull(ProviderSlotRegistry.findById("deepseek-api"))
+        assertNull(ProviderSlotRegistry.findById("qwen-api"))
     }
 
+    /**
+     * Sentinel test for UI hole #7: every `providerRegistryId` referenced
+     * by a slot must resolve in [ProviderRegistry]. The init-time `check`
+     * inside [ProviderSlotRegistry] also enforces this, but a failing
+     * unit test surfaces the break at PR-review time instead of at app
+     * launch — preventing the class of bug that crashed the app when
+     * deepseek/qwen/xai tiles were dropped without updating the slots.
+     */
     @Test
-    fun resolvesXaiSlot() {
-        assertEquals("xai-api", ProviderSlotRegistry.resolveSlotId("xai", false))
-        assertNull(ProviderSlotRegistry.resolveSlotId("xai", true))
-    }
-
-    @Test
-    fun providerRegistryMappingsAreResolvable() {
-        assertTrue(ProviderSlotRegistry.all().all { ProviderRegistry.findById(it.providerRegistryId) != null })
+    fun everySlotResolvesInProviderRegistry() {
+        val unresolved =
+            ProviderSlotRegistry
+                .all()
+                .filter { ProviderRegistry.findById(it.providerRegistryId) == null }
+                .map { it.slotId }
+        assertTrue(
+            unresolved.isEmpty(),
+            "ProviderSlotRegistry references unknown ProviderRegistry IDs: $unresolved",
+        )
     }
 }

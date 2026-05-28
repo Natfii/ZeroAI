@@ -1,4 +1,5 @@
-pub mod engine;
+#[allow(unused_imports)]
+pub use zeroclaw_runtime::heartbeat::*;
 
 #[cfg(test)]
 mod tests {

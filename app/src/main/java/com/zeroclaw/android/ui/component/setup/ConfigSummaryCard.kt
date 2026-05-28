@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.zeroclaw.android.data.MemoryBackendCatalog
 import com.zeroclaw.android.ui.theme.ZeroAITheme
 
 /** Internal padding for the summary card. */
@@ -58,7 +59,7 @@ private val IconTextSpacing = 8.dp
  * @property provider Selected provider ID (e.g. "openai"), or blank if unconfigured.
  * @property model Selected model name (e.g. "gpt-4o"), or blank if unconfigured.
  * @property autonomy Autonomy level: "supervised", "constrained", or "unconstrained".
- * @property memoryBackend Memory backend: "sqlite", "markdown", or "none".
+ * @property memoryBackend Memory backend: "sqlite", "lucid", or "none".
  * @property autoSave Whether the memory auto-save feature is enabled.
  * @property channels List of configured channel display names.
  * @property identityFormat Identity format: "openclaw" or "aieos".
@@ -133,7 +134,7 @@ fun ConfigSummaryCard(
 
             val memoryValue =
                 buildString {
-                    append(summary.memoryBackend.replaceFirstChar { it.uppercase() })
+                    append(MemoryBackendCatalog.labelFor(summary.memoryBackend))
                     if (summary.autoSave) {
                         append(" (auto-save)")
                     }

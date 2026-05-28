@@ -9,8 +9,6 @@ package com.zeroclaw.android.data.local
 import com.zeroclaw.android.data.local.entity.PluginEntity
 import com.zeroclaw.android.model.OfficialPlugins
 import com.zeroclaw.android.model.PluginCategory
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * Provides seed data for first-install database population.
@@ -20,13 +18,13 @@ import kotlinx.serialization.json.Json
  */
 object SeedData {
     /**
-     * Returns all seed plugin entities: official built-in plugins plus
-     * community sample plugins.
+     * Returns all seed plugin entities (currently just the official
+     * built-ins; community/vaporware channels removed).
      *
      * @return List of pre-configured [PluginEntity] instances.
      */
     @Suppress("LongMethod")
-    fun seedPlugins(): List<PluginEntity> = officialPluginEntities() + communityPluginEntities()
+    fun seedPlugins(): List<PluginEntity> = officialPluginEntities()
 
     @Suppress("LongMethod")
     private fun officialPluginEntities(): List<PluginEntity> =
@@ -95,54 +93,6 @@ object SeedData {
                 category = PluginCategory.TOOL.name,
                 isInstalled = true,
                 isEnabled = true,
-                configJson = "{}",
-            ),
-            PluginEntity(
-                id = OfficialPlugins.TRANSCRIPTION,
-                name = "Transcription",
-                description = "Transcribe audio via Whisper-compatible API.",
-                version = "1.0.0",
-                author = "ZeroAI",
-                category = PluginCategory.TOOL.name,
-                isInstalled = true,
-                isEnabled = false,
-                configJson = "{}",
-            ),
-            PluginEntity(
-                id = OfficialPlugins.QUERY_CLASSIFICATION,
-                name = "Query Classification",
-                description = "Classify queries for intelligent model routing.",
-                version = "1.0.0",
-                author = "ZeroAI",
-                category = PluginCategory.OTHER.name,
-                isInstalled = true,
-                isEnabled = false,
-                configJson = "{}",
-            ),
-        )
-
-    private fun communityPluginEntities(): List<PluginEntity> =
-        listOf(
-            PluginEntity(
-                id = "plugin-http-channel",
-                name = "HTTP Channel",
-                description = "REST API channel for agent communication.",
-                version = "1.0.0",
-                author = "ZeroAI",
-                category = PluginCategory.CHANNEL.name,
-                isInstalled = true,
-                isEnabled = true,
-                configJson = Json.encodeToString(mapOf("port" to "8080", "host" to "0.0.0.0")),
-            ),
-            PluginEntity(
-                id = "plugin-mqtt-channel",
-                name = "MQTT Channel",
-                description = "MQTT message broker channel for IoT communication.",
-                version = "1.0.0",
-                author = "ZeroAI",
-                category = PluginCategory.CHANNEL.name,
-                isInstalled = true,
-                isEnabled = false,
                 configJson = "{}",
             ),
         )

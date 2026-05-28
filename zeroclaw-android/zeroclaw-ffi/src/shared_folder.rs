@@ -15,6 +15,7 @@ use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Mutex;
 use zeroclaw::tools::{Tool, ToolResult};
+use zeroclaw_api::attribution::{Attributable, Role, ToolKind};
 
 /// Callback interface implemented in Kotlin for SAF operations.
 #[uniffi::export(callback_interface)]
@@ -69,6 +70,11 @@ fn dispatch(tool_name: &str, params_json: &str) -> Result<String, String> {
 /// Lists contents of a path within the shared folder.
 pub(crate) struct SharedFolderListTool;
 
+impl Attributable for SharedFolderListTool {
+    fn role(&self) -> Role { Role::Tool(ToolKind::Plugin) }
+    fn alias(&self) -> &str { "shared_folder_list" }
+}
+
 #[async_trait]
 impl Tool for SharedFolderListTool {
     fn name(&self) -> &str {
@@ -112,6 +118,11 @@ impl Tool for SharedFolderListTool {
 /// Reads a file from the shared folder.
 pub(crate) struct SharedFolderReadTool;
 
+impl Attributable for SharedFolderReadTool {
+    fn role(&self) -> Role { Role::Tool(ToolKind::Plugin) }
+    fn alias(&self) -> &str { "shared_folder_read" }
+}
+
 #[async_trait]
 impl Tool for SharedFolderReadTool {
     fn name(&self) -> &str {
@@ -154,6 +165,11 @@ impl Tool for SharedFolderReadTool {
 
 /// Writes a file or creates a directory in the shared folder.
 pub(crate) struct SharedFolderWriteTool;
+
+impl Attributable for SharedFolderWriteTool {
+    fn role(&self) -> Role { Role::Tool(ToolKind::Plugin) }
+    fn alias(&self) -> &str { "shared_folder_write" }
+}
 
 #[async_trait]
 impl Tool for SharedFolderWriteTool {

@@ -190,13 +190,11 @@ class DataStoreSettingsRepositoryTest {
             val repo = InMemorySettingsRepository()
 
             repo.setTwitterBrowseEnabled(true)
-            repo.setTwitterBrowseCookieString("ct0=test; auth_token=secret")
             repo.setTwitterBrowseMaxItems(25L)
             repo.setTwitterBrowseTimeoutSecs(45L)
 
             val settings = repo.settings.first()
             assertEquals(true, settings.twitterBrowseEnabled)
-            assertEquals("ct0=test; auth_token=secret", settings.twitterBrowseCookieString)
             assertEquals(25L, settings.twitterBrowseMaxItems)
             assertEquals(45L, settings.twitterBrowseTimeoutSecs)
         }
@@ -377,16 +375,8 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setWebSearchGoogleCx(value: String) { /* no-op */ }
 
-    override fun getTwitterBrowseHandle(): String? = null
-
-    override suspend fun setTwitterBrowseHandle(handle: String?) { /* no-op */ }
-
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) {
         _settings.update { it.copy(twitterBrowseEnabled = enabled) }
-    }
-
-    override suspend fun setTwitterBrowseCookieString(cookieString: String) {
-        _settings.update { it.copy(twitterBrowseCookieString = cookieString) }
     }
 
     override suspend fun setTwitterBrowseMaxItems(max: Long) {
@@ -403,23 +393,11 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean) { /* no-op */ }
 
-    override suspend fun setTranscriptionEnabled(enabled: Boolean) { /* no-op */ }
-
-    override suspend fun setTranscriptionApiUrl(url: String) { /* no-op */ }
-
-    override suspend fun setTranscriptionModel(model: String) { /* no-op */ }
-
-    override suspend fun setTranscriptionLanguage(language: String) { /* no-op */ }
-
-    override suspend fun setTranscriptionMaxDurationSecs(secs: Long) { /* no-op */ }
-
     override suspend fun setMemoryQdrantUrl(url: String) { /* no-op */ }
 
     override suspend fun setMemoryQdrantCollection(collection: String) { /* no-op */ }
 
     override suspend fun setMemoryQdrantApiKey(key: String) { /* no-op */ }
-
-    override suspend fun setQueryClassificationEnabled(enabled: Boolean) { /* no-op */ }
 
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) { /* no-op */ }
 

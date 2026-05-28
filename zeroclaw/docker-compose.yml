@@ -1,0 +1,71 @@
+# ZeroClaw Docker Compose Example
+# 
+# Quick start:
+#   1. Copy this file and set your API key
+#   2. Run: docker compose up -d
+#   3. Access gateway at http://localhost:42617
+#
+# For more info: https://github.com/zeroclaw-labs/zeroclaw
+
+services:
+  zeroclaw:
+    image: ghcr.io/zeroclaw-labs/zeroclaw:latest
+    # For ARM64 environments where the distroless image exits immediately,
+    # switch to the Debian compatibility image instead:
+    # image: ghcr.io/zeroclaw-labs/zeroclaw:debian
+    # Or build locally (distroless, no shell):
+    # build: .
+    # Or build the Debian variant (includes bash, git, curl):
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile.debian
+    container_name: zeroclaw
+    restart: unless-stopped
+    
+    environment:
+      # V0.8.0: single env-var override surface — the schema-mirror grammar
+      # `ZEROCLAW_<dotted_path_with_double_underscores>=<value>`. Each `__`
+      # is a path separator. Legacy `API_KEY`, `ANTHROPIC_API_KEY`,
+      # `OPENAI_API_KEY`, `PROVIDER`, `ZEROCLAW_MODEL` (etc.) fallbacks were
+      # eradicated.
+      #
+      # Pick a typed-family alias and set its api_key + model:
+      - ZEROCLAW_providers__models__openrouter__default__api_key=${OPENROUTER_API_KEY:-}
+      # - ZEROCLAW_providers__models__openrouter__default__model=anthropic/claude-sonnet-4-20250514
+      # - ZEROCLAW_providers__models__anthropic__default__api_key=${ANTHROPIC_API_KEY:-}
+      # - ZEROCLAW_providers__models__openai__default__api_key=${OPENAI_API_KEY:-}
+
+      # Allow public bind inside Docker (required for container networking)
+      - ZEROCLAW_gateway__allow_public_bind=true
+      # Default gateway port inside container
+      - ZEROCLAW_gateway__port=${ZEROCLAW_GATEWAY_PORT:-42617}
+      
+    volumes:
+      # Persist workspace and config (must match WORKDIR/HOME in Dockerfile)
+      - zeroclaw-data:/zeroclaw-data
+      
+    ports:
+      # Gateway API port (override HOST_PORT if 42617 is taken)
+      - "${HOST_PORT:-42617}:${ZEROCLAW_GATEWAY_PORT:-42617}"
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 32M
+
+    # Health check — uses lightweight status instead of full diagnostics.
+    # For images with curl, prefer: curl -f http://localhost:42617/health
+    healthcheck:
+      test: ["CMD", "zeroclaw", "status", "--format=exit-code"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  zeroclaw-data:

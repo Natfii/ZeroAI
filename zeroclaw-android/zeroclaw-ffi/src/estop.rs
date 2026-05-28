@@ -62,6 +62,43 @@ pub(crate) fn load_state(data_dir: &Path) {
     }
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Engages the emergency stop, cancelling all active agent execution.
+    ///
+    /// While engaged, send_message-family fns return EstopEngaged. State
+    /// is persisted to disk and survives process death.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn engage_estop() -> () = engage_estop_inner
+);
+
+crate::ffi_export!(
+    /// Returns the current emergency stop status.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_estop_status() -> FfiEstopStatus = get_estop_status_inner
+);
+
+crate::ffi_export!(
+    /// Resumes from an engaged emergency stop.
+    ///
+    /// Clears the kill-all flag and persists the resumed state to disk.
+    /// Agent-executing functions will accept requests again immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn resume_estop() -> () = resume_estop_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 /// Engages the emergency stop, cancels active sessions, persists state.
 ///
 /// The `Result` return type maintains consistency with all other `_inner`
@@ -149,9 +186,9 @@ fn state_path(data_dir: &Path) -> PathBuf {
 /// one level to get the data directory itself.
 fn get_data_dir() -> Result<PathBuf, FfiError> {
     crate::runtime::with_daemon_config(|c| {
-        c.workspace_dir
+        c.data_dir
             .parent()
-            .unwrap_or(&c.workspace_dir)
+            .unwrap_or(&c.data_dir)
             .to_path_buf()
     })
 }

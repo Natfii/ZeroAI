@@ -1,10 +1,10 @@
 use super::traits::{Memory, MemoryCategory};
 use super::{
-    classify_memory_backend, create_memory_for_migration, effective_memory_backend_name,
-    MemoryBackendKind,
+    MemoryBackendKind, backend_kind_from_dotted, classify_memory_backend,
+    create_memory_for_migration, create_memory_with_storage_and_routes,
 };
 use crate::config::Config;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use console::style;
 
 /// Handle `zeroclaw memory <subcommand>` CLI commands.
@@ -21,25 +21,68 @@ pub async fn handle_command(command: crate::MemoryCommands, config: &Config) -> 
         crate::MemoryCommands::Clear { key, category, yes } => {
             handle_clear(config, key, category, yes).await
         }
+        crate::MemoryCommands::Reindex => handle_reindex(config).await,
     }
+}
+
+/// Create a memory backend with the configured embedder wired in.
+///
+/// Unlike `create_cli_memory`, which skips embedding setup for pure
+/// read/delete operations, this factory is used by commands that must
+/// actually compute embeddings (e.g. `reindex`). Mirrors the gateway's
+/// memory construction so the same model provider / route resolution
+/// applies. Removed `model_providers.fallback`; the embedder API key falls
+/// back to the first configured model provider, matching how the gateway
+/// resolves it (`crates/zeroclaw-gateway/src/lib.rs` `fallback`).
+fn create_memory_with_embedder(config: &Config) -> Result<Box<dyn Memory>> {
+    let backend = backend_kind_from_dotted(&config.memory.backend);
+    if matches!(classify_memory_backend(&backend), MemoryBackendKind::None) {
+        bail!("Memory backend is 'none' (disabled). No entries to manage.");
+    }
+    let fallback_api_key = config
+        .first_model_provider()
+        .and_then(|e| e.api_key.as_deref());
+    create_memory_with_storage_and_routes(
+        &config.memory,
+        &config.embedding_routes,
+        config.resolve_active_storage(),
+        &config.data_dir,
+        fallback_api_key,
+    )
+}
+
+async fn handle_reindex(config: &Config) -> Result<()> {
+    let mem = create_memory_with_embedder(config)?;
+    println!("{} Reindexing memory backend...", style("→").cyan());
+    let count = mem.reindex().await?;
+    if count == 0 {
+        println!(
+            "{} FTS rebuilt. No embeddings to fill in (either everything is already embedded or the backend has no embedder configured).",
+            style("✓").green()
+        );
+    } else {
+        println!(
+            "{} FTS rebuilt. Re-embedded {count} {}.",
+            style("✓").green(),
+            if count == 1 { "entry" } else { "entries" }
+        );
+    }
+    Ok(())
 }
 
 /// Create a lightweight memory backend for CLI management operations.
 ///
 /// CLI commands (list/get/stats/clear) never use vector search, so we skip
-/// embedding provider initialisation for local backends by using the
+/// embedding model_provider initialisation for local backends by using the
 /// migration factory.
 fn create_cli_memory(config: &Config) -> Result<Box<dyn Memory>> {
-    let backend = effective_memory_backend_name(
-        &config.memory.backend,
-        Some(&config.storage.provider.config),
-    );
+    let backend = backend_kind_from_dotted(&config.memory.backend);
 
     match classify_memory_backend(&backend) {
         MemoryBackendKind::None => {
             bail!("Memory backend is 'none' (disabled). No entries to manage.");
         }
-        _ => create_memory_for_migration(&backend, &config.workspace_dir),
+        _ => create_memory_for_migration(&backend, &config.data_dir),
     }
 }
 
@@ -92,11 +135,13 @@ async fn handle_list(
 async fn handle_get(config: &Config, key: &str) -> Result<()> {
     let mem = create_cli_memory(config)?;
 
+    // Try exact match first.
     if let Some(entry) = mem.get(key).await? {
         print_entry(&entry);
         return Ok(());
     }
 
+    // Fall back to prefix match so users can copy partial keys from `list`.
     let all = mem.list(None, None).await?;
     let matches: Vec<_> = all.iter().filter(|e| e.key.starts_with(key)).collect();
 
@@ -155,7 +200,7 @@ async fn handle_stats(config: &Config) -> Result<()> {
 
         println!("\n  By category:");
         let mut sorted: Vec<_> = counts.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         for (cat, count) in sorted {
             println!("    {cat:<20} {count}");
         }
@@ -172,10 +217,12 @@ async fn handle_clear(
 ) -> Result<()> {
     let mem = create_cli_memory(config)?;
 
+    // Single-key deletion (exact or prefix match).
     if let Some(key) = key {
         return handle_clear_key(&*mem, &key, yes).await;
     }
 
+    // Batch deletion by category (or all).
     let cat = category.as_deref().map(parse_category);
     let entries = mem.list(cat.as_ref(), None).await?;
 
@@ -216,6 +263,7 @@ async fn handle_clear(
 
 /// Delete a single entry by exact key or prefix match.
 async fn handle_clear_key(mem: &dyn Memory, key: &str, yes: bool) -> Result<()> {
+    // Resolve the target key (exact match or unique prefix).
     let target = if mem.get(key).await?.is_some() {
         key.to_string()
     } else {

@@ -62,8 +62,29 @@ object ModelFetcher {
                 val json = executeRequest(url, provider.modelListFormat, apiKey)
                 val models = parseModels(json, provider.modelListFormat)
                 Result.success(models)
-            } catch (e: Exception) {
-                Result.failure(e)
+            } catch (primary: Exception) {
+                // Fallback for Ollama-typed providers pointing at an
+                // OpenAI-compatible endpoint (LM Studio, vLLM, LocalAI).
+                // Those servers expose /v1/models with {"data":[...]} shape
+                // rather than Ollama-native /api/tags with {"models":[...]}.
+                //
+                // LM Studio's docs advertise base URL with `/v1` already
+                // included (e.g. http://host:1234/v1). Strip any trailing
+                // `/v1` before re-appending `/v1/models` so we don't end up
+                // with a double-prefixed URL like `.../v1/v1/models`.
+                if (provider.modelListFormat == ModelListFormat.OLLAMA) {
+                    val effectiveBase = baseUrl.ifBlank { provider.defaultBaseUrl }
+                    if (effectiveBase.isNotBlank()) {
+                        val withoutTrailingV1 =
+                            effectiveBase.trimEnd('/').removeSuffix("/v1")
+                        val openAiUrl = "$withoutTrailingV1/v1/models"
+                        runCatching {
+                            val json = executeRequest(openAiUrl, ModelListFormat.OPENAI_COMPATIBLE, apiKey)
+                            parseModels(json, ModelListFormat.OPENAI_COMPATIBLE)
+                        }.onSuccess { return@withContext Result.success(it) }
+                    }
+                }
+                Result.failure(primary)
             }
         }
 

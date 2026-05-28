@@ -75,8 +75,8 @@ class ConfigTomlBuilderTest {
         }
 
         @Test
-        @DisplayName("Ollama with custom URL uses custom:URL provider")
-        fun `ollama with custom URL maps to custom provider`() {
+        @DisplayName("Ollama with custom URL emits V1 form for upstream migration")
+        fun `ollama with custom URL emits V1 form`() {
             val toml =
                 ConfigTomlBuilder.build(
                     provider = "ollama",
@@ -85,9 +85,10 @@ class ConfigTomlBuilderTest {
                     baseUrl = "http://192.168.1.100:11434/v1",
                 )
 
-            assertTrue(
-                toml.contains("""default_provider = "custom:http://192.168.1.100:11434/v1""""),
-            )
+            assertTrue(toml.contains("""default_provider = "custom""""))
+            assertTrue(toml.contains("""default_model = "mistral""""))
+            assertTrue(toml.contains("""api_url = "http://192.168.1.100:11434/v1""""))
+            assertFalse(toml.contains("[providers.models."))
         }
 
         @Test
@@ -397,8 +398,10 @@ class ConfigTomlBuilderTest {
         }
 
         @Test
-        @DisplayName("transcription enabled emits transcription section")
-        fun `transcription enabled emits transcription section`() {
+        @DisplayName("transcription is no longer emitted by ConfigTomlBuilder.build()")
+        fun `transcription not emitted by ConfigTomlBuilder build`() {
+            // Transcription UI + storage were removed in the Hub cleanup;
+            // ConfigTomlBuilder no longer carries `[transcription]`.
             val toml =
                 ConfigTomlBuilder.build(
                     GlobalTomlConfig(
@@ -406,29 +409,6 @@ class ConfigTomlBuilderTest {
                         model = "",
                         apiKey = "",
                         baseUrl = "",
-                        transcriptionEnabled = true,
-                        transcriptionLanguage = "en",
-                    ),
-                )
-            assertTrue(toml.contains("[transcription]"))
-            assertTrue(toml.contains("enabled = true"))
-            assertTrue(toml.contains("api_url"))
-            assertTrue(toml.contains("""model = "whisper-large-v3-turbo""""))
-            assertTrue(toml.contains("""language = "en""""))
-            assertTrue(toml.contains("max_duration_secs = 120"))
-        }
-
-        @Test
-        @DisplayName("transcription disabled omits transcription section")
-        fun `transcription disabled omits transcription section`() {
-            val toml =
-                ConfigTomlBuilder.build(
-                    GlobalTomlConfig(
-                        provider = "",
-                        model = "",
-                        apiKey = "",
-                        baseUrl = "",
-                        transcriptionEnabled = false,
                     ),
                 )
             assertFalse(toml.contains("[transcription]"))
@@ -607,8 +587,13 @@ class ConfigTomlBuilderTest {
         }
 
         @Test
-        @DisplayName("twitter browse section emits enabled, cookie string, max items, and timeout")
-        fun `twitter browse section emits enabled cookie string max items and timeout`() {
+        @DisplayName("twitter browse section is no longer emitted by ConfigTomlBuilder.build()")
+        fun `twitter browse not emitted by ConfigTomlBuilder build`() {
+            // Migrated to `features/TwitterContributor.kt`: the
+            // `[twitter_browse]` TOML section is now produced by the
+            // FeatureContributor pipeline at daemon-start, not by
+            // ConfigTomlBuilder.build(). This test pins the behaviour
+            // shift so the old emitter never silently reappears.
             val toml =
                 ConfigTomlBuilder.build(
                     GlobalTomlConfig(
@@ -617,30 +602,8 @@ class ConfigTomlBuilderTest {
                         apiKey = "",
                         baseUrl = "",
                         twitterBrowseEnabled = true,
-                        twitterBrowseCookieString = "ct0=test; auth_token=secret",
                         twitterBrowseMaxItems = 25L,
                         twitterBrowseTimeoutSecs = 45L,
-                    ),
-                )
-
-            assertTrue(toml.contains("[twitter_browse]"))
-            assertTrue(toml.contains("enabled = true"))
-            assertTrue(toml.contains("""cookie_string = "ct0=test; auth_token=secret""""))
-            assertTrue(toml.contains("max_items = 25"))
-            assertTrue(toml.contains("timeout_secs = 45"))
-        }
-
-        @Test
-        @DisplayName("twitter browse disabled omits twitter_browse section")
-        fun `twitter browse disabled omits twitter browse section`() {
-            val toml =
-                ConfigTomlBuilder.build(
-                    GlobalTomlConfig(
-                        provider = "",
-                        model = "",
-                        apiKey = "",
-                        baseUrl = "",
-                        twitterBrowseEnabled = false,
                     ),
                 )
 
@@ -706,45 +669,38 @@ class ConfigTomlBuilderTest {
         }
 
         @Test
-        @DisplayName("single agent emits correct TOML section")
-        fun `single agent emits correct TOML section`() {
+        @DisplayName("agent emits a model_provider reference, not inline brain")
+        fun `agent emits model_provider reference`() {
             val entries =
                 listOf(
                     AgentTomlEntry(
                         name = "researcher",
-                        provider = "custom:http://192.168.1.197:1234/v1",
-                        model = "google/gemma-3-12b",
-                        apiKey = "",
-                        systemPrompt = "You are a research assistant.",
+                        modelProviderRef = "custom.default",
                     ),
                 )
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
 
             assertTrue(toml.contains("[agents.researcher]"))
-            assertTrue(toml.contains("""provider = "custom:http://192.168.1.197:1234/v1""""))
-            assertTrue(toml.contains("""model = "google/gemma-3-12b""""))
-            assertTrue(toml.contains("""system_prompt = "You are a research assistant.""""))
-            assertTrue(toml.contains("""api_key = "not-needed""""))
+            assertTrue(toml.contains("""model_provider = "custom.default""""))
+            // No inline brain — these all live on the referenced provider
+            // entry. Anchor each check to the start of a line so the
+            // substring of "model_provider = " doesn't false-positive
+            // for "provider = ".
+            assertFalse(Regex("""^\s*provider\s*=""", RegexOption.MULTILINE).containsMatchIn(toml))
+            assertFalse(Regex("""^\s*model\s*=""", RegexOption.MULTILINE).containsMatchIn(toml))
+            assertFalse(toml.contains("api_key"))
+            assertFalse(toml.contains("system_prompt"))
+            assertFalse(toml.contains("temperature"))
         }
 
         @Test
-        @DisplayName("agent with API key emits api_key field")
-        fun `agent with api key emits api_key field`() {
+        @DisplayName("blank modelProviderRef omits the field entirely")
+        fun `blank modelProviderRef omits the field`() {
             val entries =
-                listOf(
-                    AgentTomlEntry(
-                        name = "coder",
-                        provider = "openai",
-                        model = "gpt-4o",
-                        apiKey = "sk-test-key",
-                        systemPrompt = "",
-                    ),
-                )
+                listOf(AgentTomlEntry(name = "fallback", modelProviderRef = ""))
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
-
-            assertTrue(toml.contains("[agents.coder]"))
-            assertTrue(toml.contains("""api_key = "sk-test-key""""))
-            assertFalse(toml.contains("system_prompt"))
+            assertTrue(toml.contains("[agents.fallback]"))
+            assertFalse(toml.contains("model_provider"))
         }
 
         @Test
@@ -752,25 +708,15 @@ class ConfigTomlBuilderTest {
         fun `multiple agents produce separate sections`() {
             val entries =
                 listOf(
-                    AgentTomlEntry(
-                        name = "agent_a",
-                        provider = "openai",
-                        model = "gpt-4o",
-                    ),
-                    AgentTomlEntry(
-                        name = "agent_b",
-                        provider = "anthropic",
-                        model = "claude-sonnet-4-5-20250929",
-                        apiKey = "sk-ant-key",
-                        systemPrompt = "Be concise.",
-                    ),
+                    AgentTomlEntry(name = "agent_a", modelProviderRef = "openai.default"),
+                    AgentTomlEntry(name = "agent_b", modelProviderRef = "anthropic.default"),
                 )
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
 
             assertTrue(toml.contains("[agents.agent_a]"))
             assertTrue(toml.contains("[agents.agent_b]"))
-            assertTrue(toml.contains("""model = "gpt-4o""""))
-            assertTrue(toml.contains("""model = "claude-sonnet-4-5-20250929""""))
+            assertTrue(toml.contains("""model_provider = "openai.default""""))
+            assertTrue(toml.contains("""model_provider = "anthropic.default""""))
         }
 
         @Test
@@ -778,11 +724,7 @@ class ConfigTomlBuilderTest {
         fun `agent name with spaces is quoted in table header`() {
             val entries =
                 listOf(
-                    AgentTomlEntry(
-                        name = "My Agent",
-                        provider = "custom:http://192.168.1.50:1234/v1",
-                        model = "google/gemma-3-12b",
-                    ),
+                    AgentTomlEntry(name = "My Agent", modelProviderRef = "custom.default"),
                 )
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
 
@@ -795,66 +737,10 @@ class ConfigTomlBuilderTest {
         fun `agent name without special characters is bare key`() {
             val entries =
                 listOf(
-                    AgentTomlEntry(
-                        name = "my-agent_1",
-                        provider = "openai",
-                        model = "gpt-4o",
-                    ),
+                    AgentTomlEntry(name = "my-agent_1", modelProviderRef = "openai.default"),
                 )
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
-
             assertTrue(toml.contains("[agents.my-agent_1]"))
-        }
-
-        @Test
-        @DisplayName("special characters in system prompt are escaped")
-        fun `special characters in system prompt are escaped`() {
-            val entries =
-                listOf(
-                    AgentTomlEntry(
-                        name = "escaper",
-                        provider = "openai",
-                        model = "gpt-4o",
-                        systemPrompt = "Line1\nLine2\twith\"quotes",
-                    ),
-                )
-            val toml = ConfigTomlBuilder.buildAgentsToml(entries)
-
-            assertTrue(toml.contains("""\n"""))
-            assertTrue(toml.contains("""\t"""))
-            assertTrue(toml.contains("""\""""))
-        }
-
-        @Test
-        @DisplayName("agent with temperature emits temperature field")
-        fun `agent with temperature emits temperature field`() {
-            val entries =
-                listOf(
-                    AgentTomlEntry(
-                        name = "warm",
-                        provider = "openai",
-                        model = "gpt-4o",
-                        temperature = 1.5f,
-                    ),
-                )
-            val toml = ConfigTomlBuilder.buildAgentsToml(entries)
-            assertTrue(toml.contains("temperature = 1.5"))
-        }
-
-        @Test
-        @DisplayName("agent without temperature omits temperature field")
-        fun `agent without temperature omits temperature field`() {
-            val entries =
-                listOf(
-                    AgentTomlEntry(
-                        name = "default",
-                        provider = "openai",
-                        model = "gpt-4o",
-                        temperature = null,
-                    ),
-                )
-            val toml = ConfigTomlBuilder.buildAgentsToml(entries)
-            assertFalse(toml.contains("temperature"))
         }
 
         @Test
@@ -864,8 +750,7 @@ class ConfigTomlBuilderTest {
                 listOf(
                     AgentTomlEntry(
                         name = "deep",
-                        provider = "openai",
-                        model = "gpt-4o",
+                        modelProviderRef = "openai.default",
                         maxDepth = 7,
                     ),
                 )
@@ -880,13 +765,31 @@ class ConfigTomlBuilderTest {
                 listOf(
                     AgentTomlEntry(
                         name = "shallow",
-                        provider = "openai",
-                        model = "gpt-4o",
+                        modelProviderRef = "openai.default",
                         maxDepth = Agent.DEFAULT_MAX_DEPTH,
                     ),
                 )
             val toml = ConfigTomlBuilder.buildAgentsToml(entries)
             assertFalse(toml.contains("max_depth"))
+        }
+
+        @Test
+        @DisplayName("channels list emits as quoted dotted refs")
+        fun `channels list emits as quoted dotted refs`() {
+            val entries =
+                listOf(
+                    AgentTomlEntry(
+                        name = "primary",
+                        modelProviderRef = "custom.default",
+                        channels = listOf("telegram.default", "discord.default"),
+                    ),
+                )
+            val toml = ConfigTomlBuilder.buildAgentsToml(entries)
+            assertTrue(
+                toml.contains(
+                    """channels = ["telegram.default", "discord.default"]""",
+                ),
+            )
         }
     }
 
@@ -906,12 +809,11 @@ class ConfigTomlBuilderTest {
             assertEquals("openai", ConfigTomlBuilder.resolveProvider("openai", ""))
             assertEquals("anthropic", ConfigTomlBuilder.resolveProvider("anthropic", ""))
             assertEquals("openrouter", ConfigTomlBuilder.resolveProvider("openrouter", ""))
-            assertEquals("xai", ConfigTomlBuilder.resolveProvider("xai", ""))
         }
 
         @Test
-        @DisplayName("custom-openai with URL resolves to custom")
-        fun `custom-openai with URL resolves to custom`() {
+        @DisplayName("custom-openai with URL resolves to legacy custom:URL form")
+        fun `custom-openai with URL resolves to legacy form`() {
             assertEquals(
                 "custom:http://my-server:9090/v1",
                 ConfigTomlBuilder.resolveProvider("custom-openai", "http://my-server:9090/v1"),

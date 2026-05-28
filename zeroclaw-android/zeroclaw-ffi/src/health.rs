@@ -61,6 +61,40 @@ pub(crate) fn get_health_detail_inner() -> Result<FfiHealthDetail, FfiError> {
     })
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Returns structured health detail for all daemon components.
+    ///
+    /// Unlike `get_status` (raw JSON), this returns typed component-level
+    /// data including restart counts and last errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not
+    /// running, or [`crate::FfiError::InternalPanic`] if native code
+    /// panics.
+    fn get_health_detail() -> FfiHealthDetail = get_health_detail_inner
+);
+
+crate::ffi_export!(
+    /// Returns health for a single named component.
+    ///
+    /// Returns `None` if no component with the given name exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_component_health(name: String) -> Option<FfiComponentHealth> = get_component_health_ffi
+);
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn get_component_health_ffi(
+    name: String,
+) -> Result<Option<FfiComponentHealth>, FfiError> {
+    Ok(get_component_health_inner(name))
+}
+
 /// Returns health for a single named component.
 pub(crate) fn get_component_health_inner(name: String) -> Option<FfiComponentHealth> {
     let snapshot = crate::ffi_health::snapshot();

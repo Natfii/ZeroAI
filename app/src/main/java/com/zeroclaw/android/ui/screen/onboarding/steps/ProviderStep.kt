@@ -8,7 +8,6 @@
 
 package com.zeroclaw.android.ui.screen.onboarding.steps
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,18 +15,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,10 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.zeroclaw.android.data.ProviderRegistry
 import com.zeroclaw.android.data.ProviderSlot
@@ -54,30 +41,6 @@ private const val FIELD_SPACING_DP = 16
 
 /** Spacing after the section description. */
 private const val DESCRIPTION_SPACING_DP = 24
-
-/** Alpha applied to disabled Gemini Nano content. */
-private const val DISABLED_CARD_ALPHA = 0.5f
-
-/** Corner radius for slot and on-device cards. */
-private val CardCornerRadius = 12.dp
-
-/** Internal padding for provider cards. */
-private val ProviderCardPadding = 16.dp
-
-/** Size of the on-device chip icon. */
-private val OnDeviceIconSize = 24.dp
-
-/** Spacing between the icon and text in cards. */
-private val IconTextSpacing = 12.dp
-
-/** Corner radius for the badge chip. */
-private val BadgeCornerRadius = 8.dp
-
-/** Internal padding for the badge chip. */
-private val BadgeHorizontalPadding = 8.dp
-
-/** Internal vertical padding for the badge chip. */
-private val BadgeVerticalPadding = 4.dp
 
 /** Fixed onboarding catalog of provider slots. */
 private val OnboardingSlots: List<ProviderSlot> = ProviderSlotRegistry.allRouting()
@@ -111,10 +74,6 @@ private val OnboardingSlots: List<ProviderSlot> = ProviderSlotRegistry.allRoutin
  *   or empty string when not connected.
  * @param onOAuthLogin Optional callback to initiate the OAuth login flow.
  * @param onOAuthDisconnect Optional callback to disconnect the current OAuth session.
- * @param isOnDeviceAvailable Whether Gemini Nano on-device inference is available
- *   on this device. When false, the on-device card is shown in a disabled state.
- * @param onOnDeviceSelected Optional callback invoked when the user taps the
- *   Gemini Nano on-device card.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -137,8 +96,6 @@ fun ProviderStep(
     oauthEmail: String = "",
     onOAuthLogin: (() -> Unit)? = null,
     onOAuthDisconnect: (() -> Unit)? = null,
-    isOnDeviceAvailable: Boolean = false,
-    onOnDeviceSelected: (() -> Unit)? = null,
 ) {
     val scrollState = rememberScrollState()
     var showProviderPicker by
@@ -190,8 +147,6 @@ fun ProviderStep(
                     onSlotChanged(it)
                     showProviderPicker = false
                 },
-                isOnDeviceAvailable = isOnDeviceAvailable,
-                onOnDeviceSelected = onOnDeviceSelected,
             )
         } else {
             SelectedProviderSection(
@@ -248,15 +203,11 @@ private fun ProviderStepHeader(showProviderPicker: Boolean) {
  *
  * @param selectedSlotId Currently highlighted provider slot.
  * @param onSlotChanged Callback invoked when the user picks a slot.
- * @param isOnDeviceAvailable Whether Gemini Nano is available on this device.
- * @param onOnDeviceSelected Optional callback for Gemini Nano selection.
  */
 @Composable
 private fun ProviderPicker(
     selectedSlotId: String,
     onSlotChanged: (String) -> Unit,
-    isOnDeviceAvailable: Boolean,
-    onOnDeviceSelected: (() -> Unit)?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(FIELD_SPACING_DP.dp)) {
         OnboardingSlots.forEach { slot ->
@@ -267,13 +218,6 @@ private fun ProviderPicker(
             )
         }
     }
-
-    Spacer(modifier = Modifier.height((DESCRIPTION_SPACING_DP - FIELD_SPACING_DP).dp))
-    GeminiNanoOnDeviceCard(
-        isAvailable = isOnDeviceAvailable,
-        onSelected = onOnDeviceSelected,
-        modifier = Modifier.fillMaxWidth(),
-    )
 }
 
 /**
@@ -366,144 +310,4 @@ private fun SelectedProviderSection(
         onProviderVariantChanged = onProviderVariantChanged,
         modifier = Modifier.fillMaxWidth(),
     )
-}
-
-/**
- * Card offering Gemini Nano on-device inference as an alternative provider.
- *
- * Displays a tappable outlined card with an icon, title, description, and
- * a "Free / Private / On-Device" badge. When the device does not support
- * on-device inference, the card is visually dimmed and shows an explanatory
- * message instead.
- *
- * @param isAvailable Whether Gemini Nano is available on the current device.
- * @param onSelected Callback invoked when the card is tapped and the model
- *   is available. Ignored when `null` or when [isAvailable] is `false`.
- * @param modifier Modifier applied to the root card.
- */
-@Composable
-private fun GeminiNanoOnDeviceCard(
-    isAvailable: Boolean,
-    onSelected: (() -> Unit)?,
-    modifier: Modifier = Modifier,
-) {
-    val cardAlpha = if (isAvailable) 1f else DISABLED_CARD_ALPHA
-
-    OutlinedCard(
-        onClick = { if (isAvailable) onSelected?.invoke() },
-        enabled = isAvailable,
-        shape = RoundedCornerShape(CardCornerRadius),
-        border =
-            BorderStroke(
-                width = 1.dp,
-                color =
-                    if (isAvailable) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.outlineVariant
-                    },
-            ),
-        modifier =
-            modifier
-                .semantics {
-                    contentDescription =
-                        if (isAvailable) {
-                            "Gemini Nano on-device provider, available"
-                        } else {
-                            "Gemini Nano on-device provider, not supported on this device"
-                        }
-                },
-    ) {
-        GeminiNanoCardContent(
-            cardAlpha = cardAlpha,
-            isAvailable = isAvailable,
-        )
-    }
-}
-
-/**
- * Content body for the Gemini Nano onboarding card.
- *
- * @param cardAlpha Alpha applied to disabled content.
- * @param isAvailable Whether Gemini Nano is available on this device.
- */
-@Composable
-private fun GeminiNanoCardContent(
-    cardAlpha: Float,
-    isAvailable: Boolean,
-) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(ProviderCardPadding),
-    ) {
-        Icon(
-            imageVector = Icons.Filled.Memory,
-            contentDescription = null,
-            tint =
-                if (isAvailable) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = cardAlpha)
-                },
-            modifier = Modifier.size(OnDeviceIconSize),
-        )
-
-        Spacer(modifier = Modifier.width(IconTextSpacing))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(IconTextSpacing),
-            ) {
-                Text(
-                    text = "Gemini Nano (On-Device)",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = cardAlpha),
-                )
-                OnDeviceBadge()
-            }
-
-            Spacer(modifier = Modifier.height(BadgeVerticalPadding))
-
-            Text(
-                text =
-                    if (isAvailable) {
-                        "Run AI locally on your device. No API key needed."
-                    } else {
-                        "Requires Android 12+ with a supported Pixel or Samsung device."
-                    },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = cardAlpha),
-            )
-        }
-    }
-}
-
-/**
- * Badge chip displaying "Free / Private / On-Device".
- */
-@Composable
-private fun OnDeviceBadge() {
-    Surface(
-        shape = RoundedCornerShape(BadgeCornerRadius),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        modifier =
-            Modifier.semantics {
-                contentDescription = "Free, private, on-device inference"
-            },
-    ) {
-        Text(
-            text = "Free / Private / On-Device",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onTertiaryContainer,
-            modifier =
-                Modifier.padding(
-                    horizontal = BadgeHorizontalPadding,
-                    vertical = BadgeVerticalPadding,
-                ),
-        )
-    }
 }

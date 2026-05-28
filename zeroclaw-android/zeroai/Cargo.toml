@@ -1,0 +1,93 @@
+[package]
+name = "zeroai"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "ZeroAI Android-only Rust modules layered on top of upstream zeroclaw"
+
+[lib]
+name = "zeroai"
+
+[lints]
+workspace = true
+
+[dependencies]
+# Upstream zeroclaw re-export layer — gives us Memory, Config, ChatMessage etc.
+zeroclaw = { package = "zeroclawlabs", path = "../../zeroclaw", default-features = false, features = [
+    "agent-runtime",
+    "gateway",
+    "channel-telegram",
+    "channel-discord",
+    "channel-webhook",
+] }
+# Direct sub-crate deps for types not re-exported through the root crate.
+zeroclaw-api = { path = "../../zeroclaw/crates/zeroclaw-api" }
+zeroclaw-config = { path = "../../zeroclaw/crates/zeroclaw-config", default-features = false }
+
+# Async runtime
+tokio = { version = "1.50", features = ["rt-multi-thread", "sync", "macros", "net", "time", "fs", "process", "io-util"] }
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "stream", "multipart", "cookies"] }
+urlencoding = "2.1"
+url = "2"
+
+# Logging
+tracing = "0.1"
+
+# Time
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+# SQLite (memory extras, discord_archive)
+rusqlite = { version = "0.37", features = ["bundled"] }
+
+# Scripting (Rhai REPL host)
+rhai = { version = "1.21", features = ["sync"] }
+
+# Auth — OAuth flows
+parking_lot = "0.12"
+hex = "0.4"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+
+# Google Messages Bugle protocol
+prost = "0.13"
+qrcode = "0.14"
+aes = "0.8"
+ctr = "0.9"
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+rand_core06 = { package = "rand_core", version = "0.6", features = ["getrandom"] }
+rand = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+# WebSocket (Discord backfill long-poll, etc.)
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+
+# Misc
+regex = "1.10"
+
+# Capability-based filesystem (scripting plugin sandbox)
+cap-std = "3"
+
+# AEAD encryption for secret store
+chacha20poly1305 = "0.10"
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3.2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -46,7 +46,7 @@ Use this to run `zeroclaw` CLI commands manually, debug the binary, or check log
 
 Use this to act as the "user" or "environment" the agent interacts with.
 
-- **Path**: `<container workspace>`
+- **Path**: `/home/developer/workspace`
 - **User**: `developer` (sudo-enabled)
 
 ### 4. Development Cycle
@@ -65,12 +65,12 @@ Use this to act as the "user" or "environment" the agent interacts with.
 
 ### 5. Persistence & Shared Workspace
 
-The local `playground/` directory (in repo root) is mounted as the shared workspace:
+The `playground/` directory (in repo root) is mounted as the shared workspace:
 
-- **Agent**: `<agent workspace mount>`
-- **Sandbox**: `<container workspace>`
+- **Agent**: `/zeroclaw-data/workspace`
+- **Sandbox**: `/home/developer/workspace`
 
-Files created by the agent are visible to the sandbox user, and vice versa.
+Files created by the agent are visible to the sandbox user, and vice versa. The directory is git-ignored and auto-populated on first run — the agent creates `brain.db`, `sessions.db`, personality files (`IDENTITY.md`, `SOUL.md`), and hygiene state automatically.
 
 The agent configuration lives in `target/.zeroclaw` (mounted to `/zeroclaw-data/.zeroclaw`), so settings persist across container rebuilds.
 
@@ -82,7 +82,7 @@ Stop containers and remove volumes and generated config:
 ./dev/cli.sh clean
 ```
 
-**Note:** This removes `target/.zeroclaw` (config/DB) but leaves the `playground/` directory intact. To fully wipe everything, manually delete `playground/`.
+**Note:** This removes `target/.zeroclaw` (config/DB) but leaves the `playground/` directory intact. To fully wipe workspace data, manually delete `playground/`.
 
 ## Local CI/CD (Docker-Only)
 
@@ -115,17 +115,10 @@ To run an opt-in strict lint audit locally:
 ./dev/ci.sh lint-strict
 ```
 
-To run the incremental strict gate (changed Rust lines only):
-
-```bash
-./dev/ci.sh lint-delta
-```
-
 ### 3. Run targeted stages
 
 ```bash
 ./dev/ci.sh lint
-./dev/ci.sh lint-delta
 ./dev/ci.sh test
 ./dev/ci.sh build
 ./dev/ci.sh deny

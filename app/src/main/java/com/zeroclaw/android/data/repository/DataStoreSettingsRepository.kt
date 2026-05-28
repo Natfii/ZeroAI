@@ -53,10 +53,43 @@ private const val SECURE_SETTINGS_PREFS = "secure_settings"
 class DataStoreSettingsRepository(
     private val context: Context,
 ) : SettingsRepository {
-    private val securePrefs: SharedPreferences =
+    private val securePrefs: SharedPreferences by lazy {
         SecurePrefsProvider.create(context, SECURE_SETTINGS_PREFS).first
+    }
 
     private val secureRevision = MutableStateFlow(0)
+
+    /**
+     * Snapshot of the eight [EncryptedSharedPreferences] values consumed
+     * by [mapPrefsToSettings]. Re-read only when [secureRevision] bumps,
+     * so DataStore-only changes don't trigger expensive Tink decrypts.
+     */
+    private data class SecureSnapshot(
+        val gwPairedTokens: String,
+        val composioApiKey: String,
+        val pinHash: String,
+        val webSearchBraveApiKey: String,
+        val webSearchGoogleApiKey: String,
+        val memoryQdrantApiKey: String,
+        val reliabilityApiKeysJson: String,
+    )
+
+    /**
+     * Reads all 8 secure values in one go and returns a snapshot. Eight
+     * AES decrypts back-to-back rather than 10 interleaved across worker
+     * threads racing on the Tink mutex.
+     */
+    private fun readSecureSnapshot(): SecureSnapshot =
+        SecureSnapshot(
+            gwPairedTokens = securePrefs.getString(SEC_GW_PAIRED_TOKENS, "") ?: "",
+            composioApiKey = securePrefs.getString(SEC_COMPOSIO_API_KEY, "") ?: "",
+            pinHash = securePrefs.getString(SEC_PIN_HASH, "") ?: "",
+            webSearchBraveApiKey = securePrefs.getString(SEC_WEB_SEARCH_BRAVE_API_KEY, "") ?: "",
+            webSearchGoogleApiKey = securePrefs.getString(SEC_WEB_SEARCH_GOOGLE_API_KEY, "") ?: "",
+            memoryQdrantApiKey = securePrefs.getString(SEC_MEMORY_QDRANT_API_KEY, "") ?: "",
+            reliabilityApiKeysJson =
+                securePrefs.getString(SEC_RELIABILITY_API_KEYS_JSON, "{}") ?: "{}",
+        )
 
     init {
         runMigrations()
@@ -104,13 +137,16 @@ class DataStoreSettingsRepository(
     override val settings: Flow<AppSettings> =
         combine(
             context.settingsDataStore.data,
-            secureRevision,
-        ) { prefs, _ ->
-            mapPrefsToSettings(prefs)
+            secureRevision.map { readSecureSnapshot() },
+        ) { prefs, secrets ->
+            mapPrefsToSettings(prefs, secrets)
         }
 
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod", "LongMethod")
-    private fun mapPrefsToSettings(prefs: Preferences): AppSettings =
+    private fun mapPrefsToSettings(
+        prefs: Preferences,
+        secrets: SecureSnapshot,
+    ): AppSettings =
         AppSettings(
             host = prefs[KEY_HOST] ?: AppSettings.DEFAULT_HOST,
             port = prefs[KEY_PORT] ?: AppSettings.DEFAULT_PORT,
@@ -172,7 +208,7 @@ class DataStoreSettingsRepository(
             tunnelTailscaleHostname = prefs[KEY_TUNNEL_TS_HOSTNAME] ?: "",
             gatewayRequirePairing = prefs[KEY_GW_REQUIRE_PAIRING] ?: false,
             gatewayAllowPublicBind = prefs[KEY_GW_ALLOW_PUBLIC] ?: false,
-            gatewayPairedTokens = securePrefs.getString(SEC_GW_PAIRED_TOKENS, "") ?: "",
+            gatewayPairedTokens = secrets.gwPairedTokens,
             gatewayPairRateLimit =
                 prefs[KEY_GW_PAIR_RATE]
                     ?: AppSettings.DEFAULT_PAIR_RATE_LIMIT,
@@ -219,7 +255,7 @@ class DataStoreSettingsRepository(
                 prefs[KEY_MEMORY_KEYWORD_WEIGHT]
                     ?: AppSettings.DEFAULT_KEYWORD_WEIGHT,
             composioEnabled = prefs[KEY_COMPOSIO_ENABLED] ?: false,
-            composioApiKey = securePrefs.getString(SEC_COMPOSIO_API_KEY, "") ?: "",
+            composioApiKey = secrets.composioApiKey,
             composioEntityId = prefs[KEY_COMPOSIO_ENTITY_ID] ?: "default",
             sharedFolderEnabled = prefs[KEY_SHARED_FOLDER_ENABLED] ?: false,
             sharedFolderUri = prefs[KEY_SHARED_FOLDER_URI] ?: "",
@@ -237,7 +273,7 @@ class DataStoreSettingsRepository(
             lockTimeoutMinutes =
                 prefs[KEY_LOCK_TIMEOUT]
                     ?: AppSettings.DEFAULT_LOCK_TIMEOUT,
-            pinHash = securePrefs.getString(SEC_PIN_HASH, "") ?: "",
+            pinHash = secrets.pinHash,
             pluginRegistryUrl =
                 prefs[KEY_PLUGIN_REGISTRY_URL]
                     ?: AppSettings.DEFAULT_PLUGIN_REGISTRY_URL,
@@ -264,8 +300,8 @@ class DataStoreSettingsRepository(
             webSearchProvider =
                 prefs[KEY_WEB_SEARCH_PROVIDER]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_PROVIDER,
-            webSearchBraveApiKey = securePrefs.getString(SEC_WEB_SEARCH_BRAVE_API_KEY, "") ?: "",
-            webSearchGoogleApiKey = securePrefs.getString(SEC_WEB_SEARCH_GOOGLE_API_KEY, "") ?: "",
+            webSearchBraveApiKey = secrets.webSearchBraveApiKey,
+            webSearchGoogleApiKey = secrets.webSearchGoogleApiKey,
             webSearchGoogleCx = prefs[KEY_WEB_SEARCH_GOOGLE_CX] ?: "",
             webSearchMaxResults =
                 prefs[KEY_WEB_SEARCH_MAX_RESULTS]
@@ -274,25 +310,12 @@ class DataStoreSettingsRepository(
                 prefs[KEY_WEB_SEARCH_TIMEOUT_SECS]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
             twitterBrowseEnabled = prefs[KEY_TWITTER_BROWSE_ENABLED] ?: false,
-            twitterBrowseCookieString =
-                securePrefs.getString(SEC_TWITTER_BROWSE_COOKIE_STRING, "") ?: "",
             twitterBrowseMaxItems =
                 prefs[KEY_TWITTER_BROWSE_MAX_ITEMS]
                     ?: AppSettings.DEFAULT_TWITTER_BROWSE_MAX_ITEMS,
             twitterBrowseTimeoutSecs =
                 prefs[KEY_TWITTER_BROWSE_TIMEOUT_SECS]
                     ?: AppSettings.DEFAULT_TWITTER_BROWSE_TIMEOUT_SECS,
-            transcriptionEnabled = prefs[KEY_TRANSCRIPTION_ENABLED] ?: false,
-            transcriptionApiUrl =
-                prefs[KEY_TRANSCRIPTION_API_URL]
-                    ?: AppSettings.DEFAULT_TRANSCRIPTION_API_URL,
-            transcriptionModel =
-                prefs[KEY_TRANSCRIPTION_MODEL]
-                    ?: AppSettings.DEFAULT_TRANSCRIPTION_MODEL,
-            transcriptionLanguage = prefs[KEY_TRANSCRIPTION_LANGUAGE] ?: "",
-            transcriptionMaxDurationSecs =
-                prefs[KEY_TRANSCRIPTION_MAX_DURATION_SECS]
-                    ?: AppSettings.DEFAULT_TRANSCRIPTION_MAX_DURATION_SECS,
             multimodalMaxImages =
                 prefs[KEY_MULTIMODAL_MAX_IMAGES]
                     ?: AppSettings.DEFAULT_MULTIMODAL_MAX_IMAGES,
@@ -337,12 +360,11 @@ class DataStoreSettingsRepository(
             memoryQdrantCollection =
                 prefs[KEY_MEMORY_QDRANT_COLLECTION]
                     ?: AppSettings.DEFAULT_QDRANT_COLLECTION,
-            memoryQdrantApiKey = securePrefs.getString(SEC_MEMORY_QDRANT_API_KEY, "") ?: "",
+            memoryQdrantApiKey = secrets.memoryQdrantApiKey,
             embeddingRoutesJson = prefs[KEY_EMBEDDING_ROUTES_JSON] ?: "[]",
-            queryClassificationEnabled = prefs[KEY_QUERY_CLASSIFICATION_ENABLED] ?: false,
             skillsOpenSkillsEnabled = prefs[KEY_SKILLS_OPEN_SKILLS_ENABLED] ?: false,
             skillsOpenSkillsDir = prefs[KEY_SKILLS_OPEN_SKILLS_DIR] ?: "",
-            skillsPromptInjectionMode = prefs[KEY_SKILLS_PROMPT_INJECTION_MODE] ?: "full",
+            skillsPromptInjectionMode = prefs[KEY_SKILLS_PROMPT_INJECTION_MODE] ?: "compact",
             proxyEnabled = prefs[KEY_PROXY_ENABLED] ?: false,
             proxyHttpProxy = prefs[KEY_PROXY_HTTP_PROXY] ?: "",
             proxyHttpsProxy = prefs[KEY_PROXY_HTTPS_PROXY] ?: "",
@@ -356,7 +378,7 @@ class DataStoreSettingsRepository(
                 prefs[KEY_RELIABILITY_BACKOFF_MS]
                     ?: AppSettings.DEFAULT_RELIABILITY_BACKOFF_MS,
             reliabilityApiKeysJson =
-                securePrefs.getString(SEC_RELIABILITY_API_KEYS_JSON, "{}") ?: "{}",
+                secrets.reliabilityApiKeysJson,
             tailscaleAwarenessEnabled = prefs[KEY_TAILSCALE_AWARENESS_ENABLED] ?: false,
             tailscaleManualPeers = prefs[KEY_TAILSCALE_MANUAL_PEERS] ?: "",
             tailscaleCachedDiscovery = prefs[KEY_TAILSCALE_CACHED_DISCOVERY] ?: "",
@@ -506,33 +528,11 @@ class DataStoreSettingsRepository(
 
     override suspend fun setWebSearchTimeoutSecs(secs: Long) = edit { it[KEY_WEB_SEARCH_TIMEOUT_SECS] = secs }
 
-    override fun getTwitterBrowseHandle(): String? = securePrefs.getString("sec_twitter_browse_handle", null)
-
-    override suspend fun setTwitterBrowseHandle(handle: String?) {
-        if (handle != null) {
-            securePrefs.edit().putString("sec_twitter_browse_handle", handle).apply()
-        } else {
-            securePrefs.edit().remove("sec_twitter_browse_handle").apply()
-        }
-    }
-
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) = edit { it[KEY_TWITTER_BROWSE_ENABLED] = enabled }
-
-    override suspend fun setTwitterBrowseCookieString(cookieString: String) = editSecure(SEC_TWITTER_BROWSE_COOKIE_STRING, cookieString)
 
     override suspend fun setTwitterBrowseMaxItems(max: Long) = edit { it[KEY_TWITTER_BROWSE_MAX_ITEMS] = max }
 
     override suspend fun setTwitterBrowseTimeoutSecs(secs: Long) = edit { it[KEY_TWITTER_BROWSE_TIMEOUT_SECS] = secs }
-
-    override suspend fun setTranscriptionEnabled(enabled: Boolean) = edit { it[KEY_TRANSCRIPTION_ENABLED] = enabled }
-
-    override suspend fun setTranscriptionApiUrl(url: String) = edit { it[KEY_TRANSCRIPTION_API_URL] = url }
-
-    override suspend fun setTranscriptionModel(model: String) = edit { it[KEY_TRANSCRIPTION_MODEL] = model }
-
-    override suspend fun setTranscriptionLanguage(language: String) = edit { it[KEY_TRANSCRIPTION_LANGUAGE] = language }
-
-    override suspend fun setTranscriptionMaxDurationSecs(secs: Long) = edit { it[KEY_TRANSCRIPTION_MAX_DURATION_SECS] = secs }
 
     override suspend fun setMultimodalMaxImages(max: Int) = edit { it[KEY_MULTIMODAL_MAX_IMAGES] = max }
 
@@ -545,8 +545,6 @@ class DataStoreSettingsRepository(
     override suspend fun setMemoryQdrantCollection(collection: String) = edit { it[KEY_MEMORY_QDRANT_COLLECTION] = collection }
 
     override suspend fun setMemoryQdrantApiKey(key: String) = editSecure(SEC_MEMORY_QDRANT_API_KEY, key)
-
-    override suspend fun setQueryClassificationEnabled(enabled: Boolean) = edit { it[KEY_QUERY_CLASSIFICATION_ENABLED] = enabled }
 
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) = edit { it[KEY_SKILLS_OPEN_SKILLS_ENABLED] = enabled }
 
@@ -637,7 +635,6 @@ class DataStoreSettingsRepository(
         const val SEC_COMPOSIO_API_KEY = "sec_composio_api_key"
         const val SEC_WEB_SEARCH_BRAVE_API_KEY = "sec_web_search_brave_api_key"
         const val SEC_WEB_SEARCH_GOOGLE_API_KEY = "sec_web_search_google_api_key"
-        const val SEC_TWITTER_BROWSE_COOKIE_STRING = "sec_twitter_browse_cookie_string"
         const val SEC_MEMORY_QDRANT_API_KEY = "sec_memory_qdrant_api_key"
         const val SEC_PIN_HASH = "sec_pin_hash"
         const val SEC_RELIABILITY_API_KEYS_JSON = "sec_reliability_api_keys_json"
@@ -724,11 +721,6 @@ class DataStoreSettingsRepository(
         val KEY_TWITTER_BROWSE_ENABLED = booleanPreferencesKey("twitter_browse_enabled")
         val KEY_TWITTER_BROWSE_MAX_ITEMS = longPreferencesKey("twitter_browse_max_items")
         val KEY_TWITTER_BROWSE_TIMEOUT_SECS = longPreferencesKey("twitter_browse_timeout_secs")
-        val KEY_TRANSCRIPTION_ENABLED = booleanPreferencesKey("transcription_enabled")
-        val KEY_TRANSCRIPTION_API_URL = stringPreferencesKey("transcription_api_url")
-        val KEY_TRANSCRIPTION_MODEL = stringPreferencesKey("transcription_model")
-        val KEY_TRANSCRIPTION_LANGUAGE = stringPreferencesKey("transcription_language")
-        val KEY_TRANSCRIPTION_MAX_DURATION_SECS = longPreferencesKey("transcription_max_duration_secs")
         val KEY_MULTIMODAL_MAX_IMAGES = intPreferencesKey("multimodal_max_images")
         val KEY_MULTIMODAL_MAX_IMAGE_SIZE_MB = intPreferencesKey("multimodal_max_image_size_mb")
         val KEY_MULTIMODAL_ALLOW_REMOTE_FETCH = booleanPreferencesKey("multimodal_allow_remote_fetch")
@@ -752,7 +744,6 @@ class DataStoreSettingsRepository(
         val KEY_MEMORY_QDRANT_URL = stringPreferencesKey("memory_qdrant_url")
         val KEY_MEMORY_QDRANT_COLLECTION = stringPreferencesKey("memory_qdrant_collection")
         val KEY_EMBEDDING_ROUTES_JSON = stringPreferencesKey("embedding_routes_json")
-        val KEY_QUERY_CLASSIFICATION_ENABLED = booleanPreferencesKey("query_classification_enabled")
         val KEY_HTTP_REQUEST_MAX_RESPONSE_SIZE = longPreferencesKey("http_request_max_response_size")
         val KEY_HTTP_REQUEST_TIMEOUT_SECS = longPreferencesKey("http_request_timeout_secs")
         val KEY_SKILLS_OPEN_SKILLS_ENABLED = booleanPreferencesKey("skills_open_skills_enabled")

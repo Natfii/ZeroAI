@@ -13,12 +13,16 @@ use std::sync::{Arc, LazyLock, Mutex, OnceLock};
 use once_cell::sync::OnceCell;
 
 use crate::error::FfiError;
+use crate::repl_args::{
+    float_arg, i32_arg, int_arg, json_error, map_script_error, optional_string_arg,
+    script_host_error, string_arg, string_list_arg, to_json, u32_arg, u64_arg,
+};
 use crate::{
     auth_profiles, capability_grants, cost, cron, events, health, memory_browse, models, runtime,
-    skills, tools_browse, vision,
+    runtime_channels, skills, tools_browse, vision,
 };
-use zeroclaw::scripting::storage::ScriptStorage;
-use zeroclaw::scripting::{
+use zeroai::scripting::storage::ScriptStorage;
+use zeroai::scripting::{
     RhaiScriptRuntime, ScriptError, ScriptHost, ScriptManifest, ScriptOperation, ScriptRuntimeKind,
     ScriptValue,
 };
@@ -166,8 +170,10 @@ fn require_dangerous_capability_approval(
         "dangerous capability requires user approval; blocking until resolved"
     );
 
-    // Create a pending approval and emit an event for Kotlin.
-    let triggered_via = "terminal"; // TODO: propagate from session/channel context
+    // Create a pending approval and emit an event for Kotlin. The
+    // `triggered_via` channel is hard-coded to `"terminal"` until the
+    // session/channel context is plumbed through.
+    let triggered_via = "terminal";
     let (request_id, rx) =
         capability_grants::request_capability_approval(manifest_name, capability, triggered_via);
 
@@ -201,7 +207,7 @@ fn require_dangerous_capability_approval(
                 .join("workflows")
                 .join(manifest_name)
                 .with_extension("rhai");
-            zeroclaw::scripting::content_hash::hash_file(&script_path).unwrap_or_default()
+            zeroai::scripting::content_hash::hash_file(&script_path).unwrap_or_default()
         };
         if let Err(e) =
             capability_grants::save_grant(&ws_dir, manifest_name, capability, triggered_via, &hash)
@@ -319,7 +325,7 @@ pub(crate) fn dispatch_common_operation(
             runtime::get_status_inner().map_err(script_host_error("status"))?,
         )),
         ScriptOperation::Version => Ok(ScriptValue::String(
-            crate::get_version().map_err(script_host_error("version"))?,
+            crate::runtime::get_version().map_err(script_host_error("version"))?,
         )),
         ScriptOperation::ValidateConfig => {
             let config_toml = string_arg(&args, "config_toml")?;
@@ -334,7 +340,7 @@ pub(crate) fn dispatch_common_operation(
         ScriptOperation::BindChannelIdentity => {
             let channel = string_arg(&args, "channel")?;
             let user_id = string_arg(&args, "user_id")?;
-            let field = runtime::bind_channel_identity_inner(channel.clone(), user_id.clone())
+            let field = runtime_channels::bind_channel_identity_inner(channel.clone(), user_id.clone())
                 .map_err(script_host_error("bind"))?;
             let message = if field == "already_bound" {
                 format!("{user_id} is already bound to {channel}")
@@ -345,7 +351,7 @@ pub(crate) fn dispatch_common_operation(
         }
         ScriptOperation::ChannelAllowlist => {
             let channel = string_arg(&args, "channel")?;
-            let allowlist = runtime::get_channel_allowlist_inner(channel)
+            let allowlist = runtime_channels::get_channel_allowlist_inner(channel)
                 .map_err(script_host_error("allowlist"))?;
             Ok(ScriptValue::String(to_json(&allowlist)?))
         }
@@ -679,7 +685,7 @@ fn runtime_label(kind: &ScriptRuntimeKind) -> String {
     kind.identifier().to_string()
 }
 
-fn validation_to_ffi(validation: zeroclaw::scripting::ScriptValidation) -> FfiScriptValidation {
+fn validation_to_ffi(validation: zeroai::scripting::ScriptValidation) -> FfiScriptValidation {
     FfiScriptValidation {
         manifest_name: validation.manifest_name,
         runtime: runtime_label(&validation.runtime),
@@ -698,7 +704,7 @@ fn manifest_from_capabilities(capabilities: Vec<String>) -> ScriptManifest {
     }
 }
 
-fn trigger_summary(trigger: &zeroclaw::scripting::ScriptTrigger) -> String {
+fn trigger_summary(trigger: &zeroai::scripting::ScriptTrigger) -> String {
     let mut parts = vec![trigger.kind.clone()];
     if let Some(schedule) = &trigger.schedule {
         parts.push(format!("schedule={schedule}"));
@@ -718,7 +724,7 @@ fn trigger_summary(trigger: &zeroclaw::scripting::ScriptTrigger) -> String {
     parts.join(" | ")
 }
 
-fn workspace_script_to_ffi(manifest: zeroclaw::scripting::ScriptManifest) -> FfiWorkspaceScript {
+fn workspace_script_to_ffi(manifest: zeroai::scripting::ScriptManifest) -> FfiWorkspaceScript {
     FfiWorkspaceScript {
         name: manifest.name,
         version: manifest.version,
@@ -734,109 +740,6 @@ fn workspace_script_to_ffi(manifest: zeroclaw::scripting::ScriptManifest) -> Ffi
     }
 }
 
-/// Wraps an [`FfiError`] into a [`ScriptError::HostError`] with the given
-/// operation label.
-pub(crate) fn script_host_error(operation: &'static str) -> impl FnOnce(FfiError) -> ScriptError {
-    move |error| ScriptError::HostError {
-        operation: operation.to_string(),
-        detail: error.to_string(),
-    }
-}
-
-/// Wraps a [`serde_json::Error`] into a [`ScriptError::HostError`] with a
-/// serialization-failure message.
-pub(crate) fn json_error(operation: &'static str) -> impl FnOnce(serde_json::Error) -> ScriptError {
-    move |error| ScriptError::HostError {
-        operation: operation.to_string(),
-        detail: format!("serialization failed: {error}"),
-    }
-}
-
-/// Converts a [`ScriptError`] into the appropriate [`FfiError`] variant.
-pub(crate) fn map_script_error(error: ScriptError) -> FfiError {
-    let detail = error.to_string();
-    match error {
-        ScriptError::InvalidArgument { .. }
-        | ScriptError::ValidationError { .. }
-        | ScriptError::CapabilityDenied { .. } => FfiError::InvalidArgument { detail },
-        ScriptError::HostError { .. } => FfiError::StateError { detail },
-        ScriptError::InternalState { .. } => FfiError::StateCorrupted { detail },
-    }
-}
-
-/// Serializes a value to JSON, mapping failures to [`ScriptError`].
-pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> Result<String, ScriptError> {
-    serde_json::to_string(value).map_err(json_error("json"))
-}
-
-/// Extracts a required string argument from a JSON value map.
-pub(crate) fn string_arg(args: &serde_json::Value, key: &str) -> Result<String, ScriptError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| ScriptError::InvalidArgument {
-            detail: format!("missing string argument: {key}"),
-        })
-}
-
-/// Extracts an optional string argument, returning `None` when absent or empty.
-pub(crate) fn optional_string_arg(args: &serde_json::Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-}
-
-/// Extracts a list of strings from a JSON array argument.
-pub(crate) fn string_list_arg(args: &serde_json::Value, key: &str) -> Vec<String> {
-    args.get(key)
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .collect()
-}
-
-/// Extracts a required `i64` argument from a JSON value map.
-pub(crate) fn int_arg(args: &serde_json::Value, key: &str) -> Result<i64, ScriptError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_i64)
-        .ok_or_else(|| ScriptError::InvalidArgument {
-            detail: format!("missing integer argument: {key}"),
-        })
-}
-
-/// Extracts a required `i32` argument from a JSON value map.
-pub(crate) fn i32_arg(args: &serde_json::Value, key: &str) -> Result<i32, ScriptError> {
-    i32::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
-        detail: format!("integer argument out of range for i32: {key}"),
-    })
-}
-
-/// Extracts a required non-negative `u32` argument from a JSON value map.
-pub(crate) fn u32_arg(args: &serde_json::Value, key: &str) -> Result<u32, ScriptError> {
-    u32::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
-        detail: format!("integer argument must be a non-negative u32: {key}"),
-    })
-}
-
-/// Extracts a required non-negative `u64` argument from a JSON value map.
-pub(crate) fn u64_arg(args: &serde_json::Value, key: &str) -> Result<u64, ScriptError> {
-    u64::try_from(int_arg(args, key)?).map_err(|_| ScriptError::InvalidArgument {
-        detail: format!("integer argument must be a non-negative u64: {key}"),
-    })
-}
-
-/// Extracts a required `f64` argument from a JSON value map.
-pub(crate) fn float_arg(args: &serde_json::Value, key: &str) -> Result<f64, ScriptError> {
-    args.get(key)
-        .and_then(serde_json::Value::as_f64)
-        .ok_or_else(|| ScriptError::InvalidArgument {
-            detail: format!("missing float argument: {key}"),
-        })
-}
 
 fn repl_default_manifest() -> ScriptManifest {
     ScriptManifest {
@@ -855,6 +758,116 @@ fn repl_default_manifest() -> ScriptManifest {
         ..Default::default()
     }
 }
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Evaluates a Rhai expression against the embedded REPL engine.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateCorrupted`] if the engine mutex is poisoned,
+    /// [`crate::FfiError::SpawnError`] if the Rhai evaluation fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn eval_script(expression: String) -> String = eval_script_inner
+);
+
+crate::ffi_export!(
+    /// Evaluates a script using an explicit capability grant set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] for invalid input, validation
+    /// failures, or denied capabilities, and [`crate::FfiError::InternalPanic`]
+    /// if native code panics.
+    fn eval_script_with_capabilities(
+        expression: String,
+        granted_capabilities: Vec<String>,
+    ) -> String = eval_script_with_capabilities_inner
+);
+
+crate::ffi_export!(
+    /// Validates a script and reports the capabilities it requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] for invalid script source or
+    /// validation failures, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn validate_script(expression: String) -> FfiScriptValidation = validate_script_inner
+);
+
+crate::ffi_export!(
+    /// Validates a script using an explicit capability grant set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] for invalid input or validation
+    /// failures, and [`crate::FfiError::InternalPanic`] if native code panics.
+    fn validate_script_with_capabilities(
+        expression: String,
+        granted_capabilities: Vec<String>,
+    ) -> FfiScriptValidation = validate_script_with_capabilities_inner
+);
+
+crate::ffi_export!(
+    /// Evaluates a Rhai expression against the embedded REPL engine.
+    ///
+    /// Backward-compatible alias for [`eval_script`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] for invalid script input,
+    /// [`crate::FfiError::SpawnError`] if evaluation fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn eval_repl(expression: String) -> String = eval_repl_inner
+);
+
+crate::ffi_export!(
+    /// Lists workspace and skill-packaged scripts discoverable by the daemon.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_workspace_scripts() -> Vec<FfiWorkspaceScript> = list_workspace_scripts_inner
+);
+
+crate::ffi_export!(
+    /// Validates a packaged workspace script without executing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::InvalidArgument`] for invalid paths or validation failures,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn validate_workspace_script(relative_path: String) -> FfiScriptValidation = validate_workspace_script_inner
+);
+
+crate::ffi_export!(
+    /// Executes a packaged workspace script using an explicit capability grant set.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::InvalidArgument`] for invalid paths, denied capabilities, or
+    /// unsupported runtimes, and [`crate::FfiError::InternalPanic`] if native code panics.
+    fn run_workspace_script(
+        relative_path: String,
+        granted_capabilities: Vec<String>,
+    ) -> String = run_workspace_script_inner
+);
+
+crate::ffi_export!(
+    /// Scan workspace skills for cron triggers and register them as scheduled jobs.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn register_script_triggers() -> u32 = register_script_triggers_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
 
 pub(crate) fn eval_script_inner(source: String) -> Result<String, FfiError> {
     script_runtime()
@@ -907,11 +920,11 @@ pub(crate) fn list_script_capabilities_inner() -> Vec<String> {
 }
 
 fn workspace_dir() -> Result<std::path::PathBuf, FfiError> {
-    crate::runtime::with_daemon_config(|config| config.workspace_dir.clone())
+    crate::runtime::with_daemon_config(|config| config.data_dir.clone())
 }
 
 fn list_workspace_scripts_in_dir(workspace_dir: &Path) -> Vec<FfiWorkspaceScript> {
-    zeroclaw::scripting::discover_workspace_scripts(workspace_dir)
+    zeroai::scripting::discover_workspace_scripts(workspace_dir)
         .into_iter()
         .map(workspace_script_to_ffi)
         .collect()
@@ -961,18 +974,18 @@ pub(crate) fn register_script_triggers_inner() -> Result<u32, FfiError> {
 
     // Register the real FfiScriptHost so cron script jobs can call back
     // into the Android bridge instead of falling back to StubScriptHost.
-    let host: Arc<dyn zeroclaw::scripting::ScriptHost> = Arc::new(FfiScriptHost);
-    zeroclaw::scripting::set_cron_script_host(host);
+    let host: Arc<dyn zeroai::scripting::ScriptHost> = Arc::new(FfiScriptHost);
+    zeroai::scripting::set_cron_script_host(host);
 
-    let scripts = zeroclaw::scripting::discover_workspace_scripts(&workspace_dir);
-    let cron_triggers = zeroclaw::scripting::triggers::collect_cron_triggers(&scripts);
+    let scripts = zeroai::scripting::discover_workspace_scripts(&workspace_dir);
+    let cron_triggers = zeroai::scripting::triggers::collect_cron_triggers(&scripts);
 
     let config = crate::runtime::clone_daemon_config()?;
     let existing = zeroclaw::cron::list_jobs(&config).map_err(|e| FfiError::StateError {
         detail: e.to_string(),
     })?;
 
-    let mut registered = 0u32;
+    let registered = 0u32;
     for resolved in &cron_triggers {
         let Some(schedule_expr) = resolved.trigger.schedule.as_deref() else {
             continue;
@@ -993,20 +1006,29 @@ pub(crate) fn register_script_triggers_inner() -> Result<u32, FfiError> {
 
         validate_capabilities(&resolved.manifest.capabilities).map_err(map_script_error)?;
 
-        let schedule = zeroclaw::cron::Schedule::Cron {
-            expr: schedule_expr.to_string(),
-            tz: None,
-        };
-        match zeroclaw::cron::add_script_job(
-            &config,
-            Some(trigger_name.clone()),
-            schedule,
-            &script_path,
-            &resolved.manifest.capabilities,
-        ) {
-            Ok(_) => registered += 1,
-            Err(e) => tracing::warn!("Failed to register trigger {trigger_name}: {e}"),
-        }
+        // Disabled: `cron::add_script_job` was removed upstream during
+        // the cron API unification (zeroclaw v0.8.0-beta-1). Manual
+        // cron entries still work via the generic `add_cron_job` FFI;
+        // script-backed cron triggers need a re-port if ever
+        // reintroduced upstream.
+        let _ = (schedule_expr, &script_path, &resolved.manifest.capabilities);
+        // let schedule = zeroclaw::cron::Schedule::Cron {
+        //     expr: schedule_expr.to_string(),
+        //     tz: None,
+        // };
+        // match zeroclaw::cron::add_script_job(
+        //     &config,
+        //     Some(trigger_name.clone()),
+        //     schedule,
+        //     &script_path,
+        //     &resolved.manifest.capabilities,
+        // ) {
+        //     Ok(_) => registered += 1,
+        //     Err(e) => tracing::warn!("Failed to register trigger {trigger_name}: {e}"),
+        // }
+        tracing::debug!(
+            "skipping script trigger registration for {trigger_name} (upstream API gone)"
+        );
     }
 
     Ok(registered)
@@ -1016,75 +1038,51 @@ pub(crate) fn script_plugin_host_wit_inner() -> String {
     script_runtime().plugin_host_wit().to_string()
 }
 
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
+// ── FFI exports ────────────────────────────────────────────────────────────
 
-    #[test]
-    fn eval_script_still_supports_basic_expressions() {
-        let result = eval_script_inner("2 + 3".into()).unwrap();
-        assert_eq!(result, "5");
-    }
+crate::ffi_export!(
+    /// Lists the script capability names known to this build.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_script_capabilities() -> Vec<String> = list_script_capabilities_ffi
+);
 
-    #[test]
-    fn validate_script_returns_requested_capabilities() {
-        let validation = validate_script_inner(r"agent::status(); memory_count();".into()).unwrap();
-        assert!(
-            validation
-                .requested_capabilities
-                .contains(&"agent.read".to_string())
-        );
-        assert!(
-            validation
-                .requested_capabilities
-                .contains(&"memory.read".to_string())
-        );
-    }
+crate::ffi_export!(
+    /// Lists the scripting runtimes known to this build.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_script_runtimes() -> Vec<FfiScriptRuntime> = list_script_runtimes_ffi
+);
 
-    #[test]
-    fn capability_listing_includes_default_denies() {
-        let capabilities = list_script_capabilities_inner();
-        assert!(capabilities.contains(&"net.none".to_string()));
-        assert!(capabilities.contains(&"model.chat".to_string()));
-    }
+crate::ffi_export!(
+    /// Returns the stable WIT host definition for plugin guests.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_script_plugin_host_wit() -> String = get_script_plugin_host_wit_ffi
+);
 
-    #[test]
-    fn explicit_empty_capabilities_deny_host_calls() {
-        let error =
-            eval_script_with_capabilities_inner(r#"send("hello");"#.into(), vec![]).unwrap_err();
-        assert!(matches!(error, FfiError::InvalidArgument { .. }));
-        assert!(error.to_string().contains("capability denied"));
-    }
-
-    #[test]
-    fn list_script_runtimes_reports_rhai() {
-        let runtimes = list_script_runtimes_inner();
-        assert!(
-            runtimes
-                .iter()
-                .any(|runtime| runtime.kind == "rhai" && runtime.available)
-        );
-    }
-
-    #[test]
-    fn plugin_host_wit_is_exposed() {
-        let wit = script_plugin_host_wit_inner();
-        assert!(wit.contains("world zero-scripting-plugin"));
-    }
-
-    #[test]
-    fn list_workspace_scripts_surfaces_manifests() {
-        let dir = tempfile::tempdir().unwrap();
-        let workflows_dir = dir.path().join("workflows");
-        std::fs::create_dir_all(&workflows_dir).unwrap();
-        std::fs::write(workflows_dir.join("cleanup.rhai"), "2 + 2").unwrap();
-
-        let manifests = list_workspace_scripts_in_dir(dir.path());
-        assert!(
-            manifests
-                .iter()
-                .any(|manifest| manifest.relative_path == "workflows/cleanup.rhai")
-        );
-    }
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn list_script_capabilities_ffi() -> Result<Vec<String>, FfiError> {
+    Ok(list_script_capabilities_inner())
 }
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn list_script_runtimes_ffi() -> Result<Vec<FfiScriptRuntime>, FfiError> {
+    Ok(list_script_runtimes_inner())
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn get_script_plugin_host_wit_ffi() -> Result<String, FfiError> {
+    Ok(script_plugin_host_wit_inner())
+}
+
+
+#[cfg(test)]
+#[path = "repl_tests.rs"]
+mod tests;

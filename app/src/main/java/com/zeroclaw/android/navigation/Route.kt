@@ -30,6 +30,10 @@ data class ProviderSlotDetailRoute(
     val slotId: String,
 )
 
+/** On-device large model (AICore Developer Preview / Gemma 4 E4B) setup screen. */
+@Serializable
+data object OnDeviceLargeModelRoute
+
 /** Plugin list and management screen. */
 @Serializable
 data object PluginsRoute

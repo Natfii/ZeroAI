@@ -19,6 +19,15 @@ enum class LocalServerType(
 
     /** Server responding to `/v1/models` (LM Studio, vLLM, LocalAI, etc.). */
     OPENAI_COMPATIBLE("OpenAI-Compatible"),
+
+    /** Upstream zeroclaw daemon detected via `/health` endpoint. */
+    ZEROCLAW("zeroclaw daemon"),
+
+    /** OpenClaw daemon detected via root JSON body name/title match. */
+    OPENCLAW("OpenClaw daemon"),
+
+    /** Hermes Agent gateway by Nous Research detected via `/health` `platform` field. */
+    HERMES("Hermes Agent"),
 }
 
 /**
@@ -45,6 +54,9 @@ data class DiscoveredServer(
             when (serverType) {
                 LocalServerType.OLLAMA -> "http://$host:$port"
                 LocalServerType.OPENAI_COMPATIBLE -> "http://$host:$port/v1"
+                LocalServerType.ZEROCLAW -> "http://$host:$port"
+                LocalServerType.OPENCLAW -> "http://$host:$port"
+                LocalServerType.HERMES -> "http://$host:$port/v1"
             }
 
     /** Short display string combining server type, host, and port. */

@@ -48,6 +48,9 @@ object NetworkScanner {
             PORT_LM_STUDIO,
             PORT_VLLM,
             PORT_LOCALAI,
+            PORT_ZEROCLAW,
+            PORT_OPENCLAW,
+            PORT_HERMES,
         )
 
     /** Maximum concurrent TCP connection attempts. */
@@ -318,11 +321,20 @@ object NetworkScanner {
      * @param port Server port number.
      * @return A [DiscoveredServer] with type and models, or null if unidentified.
      */
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    @Suppress("TooGenericExceptionCaught", "SwallowedException", "ReturnCount")
     private fun identifyServer(
         ip: String,
         port: Int,
     ): DiscoveredServer? {
+        // Agent-gateway probes first (they fingerprint specific JSON
+        // shapes on /health and short-circuit out — no point falling
+        // through to OpenAI-compat probes that would 404).
+        when (port) {
+            PORT_ZEROCLAW -> tryZeroclawGateway(ip, port)?.let { return it }
+            PORT_OPENCLAW -> tryOpenclawGateway(ip, port)?.let { return it }
+            PORT_HERMES -> tryHermesGateway(ip, port)?.let { return it }
+        }
+
         val ollamaResult = tryOllama(ip, port)
         if (ollamaResult != null) return ollamaResult
 
@@ -331,6 +343,74 @@ object NetworkScanner {
 
         return null
     }
+
+    /**
+     * Probes for an upstream zeroclaw gateway via `GET /health`. Upstream
+     * returns `{status, paired, require_pairing, runtime:{...}}`; the
+     * `runtime` key is the structural signal we key off.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun tryZeroclawGateway(
+        ip: String,
+        port: Int,
+    ): DiscoveredServer? =
+        try {
+            val json = rawHttpGet(ip, port, "/health")
+            val root = JSONObject(json)
+            if (!root.has("runtime") && !root.has("require_pairing")) {
+                null
+            } else {
+                DiscoveredServer(ip, port, LocalServerType.ZEROCLAW)
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+    /**
+     * Probes for an OpenClaw gateway via `GET /`. Detection key is a
+     * top-level JSON `name` or `title` containing "openclaw" (matches
+     * the Rust-side `probe_openclaw`).
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun tryOpenclawGateway(
+        ip: String,
+        port: Int,
+    ): DiscoveredServer? =
+        try {
+            val json = rawHttpGet(ip, port, "/")
+            val root = JSONObject(json)
+            val nameHit = root.optString("name").lowercase().contains("openclaw")
+            val titleHit = root.optString("title").lowercase().contains("openclaw")
+            if (!nameHit && !titleHit) {
+                null
+            } else {
+                DiscoveredServer(ip, port, LocalServerType.OPENCLAW)
+            }
+        } catch (e: Exception) {
+            null
+        }
+
+    /**
+     * Probes for a Hermes Agent gateway (Nous Research) via `GET /health`.
+     * Definitive signal: `platform == "hermes-agent"` in response JSON.
+     */
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    private fun tryHermesGateway(
+        ip: String,
+        port: Int,
+    ): DiscoveredServer? =
+        try {
+            val json = rawHttpGet(ip, port, "/health")
+            val root = JSONObject(json)
+            val platform = root.optString("platform")
+            if (!platform.equals("hermes-agent", ignoreCase = true)) {
+                null
+            } else {
+                DiscoveredServer(ip, port, LocalServerType.HERMES)
+            }
+        } catch (e: Exception) {
+            null
+        }
 
     /**
      * Probes for an Ollama server and extracts loaded models.
@@ -546,4 +626,13 @@ object NetworkScanner {
 
     /** Default LocalAI port. */
     private const val PORT_LOCALAI = 8080
+
+    /** Default upstream zeroclaw gateway port. */
+    private const val PORT_ZEROCLAW = 42617
+
+    /** Default OpenClaw gateway port. */
+    private const val PORT_OPENCLAW = 18789
+
+    /** Default Hermes Agent gateway port (Nous Research). */
+    private const val PORT_HERMES = 8642
 }

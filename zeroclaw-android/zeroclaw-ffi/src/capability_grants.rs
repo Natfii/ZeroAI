@@ -211,6 +211,34 @@ pub(crate) fn request_capability_approval(
 }
 
 // ---------------------------------------------------------------------------
+// FFI exports
+// ---------------------------------------------------------------------------
+
+crate::ffi_export!(
+    /// Returns all pending capability approval requests.
+    ///
+    /// Kotlin UI should poll this to discover new approval prompts, then call
+    /// [`resolve_capability_request`] with the user's decision.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the internal lock is poisoned, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_pending_approvals() -> Vec<PendingApprovalInfo> = get_pending_approvals_inner
+);
+
+crate::ffi_export!(
+    /// Resolves a pending capability approval request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if `request_id` is unknown,
+    /// [`crate::FfiError::StateError`] if the internal lock is poisoned, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn resolve_capability_request(request_id: String, approved: bool) -> () = resolve_capability_request_inner
+);
+
+// ---------------------------------------------------------------------------
 // FFI-exported inner functions
 // ---------------------------------------------------------------------------
 
@@ -250,11 +278,44 @@ pub(crate) fn resolve_capability_request_inner(
     Ok(())
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Lists all persisted capability grants from the workspace grants file.
+    ///
+    /// `data_dir` is the absolute path to the app's files directory; the
+    /// grants file at `<data_dir>/capability_grants.json` is read if present.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_capability_grants(data_dir: String) -> Vec<CapabilityGrantInfo> = list_capability_grants_inner
+);
+
+crate::ffi_export!(
+    /// Revokes a persisted capability grant for a specific skill and capability.
+    ///
+    /// `data_dir` is the absolute path to the app's files directory. The grants
+    /// file at `<data_dir>/capability_grants.json` is updated atomically.
+    /// If the grant does not exist, this is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] on I/O or serialisation failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn revoke_capability_grant(
+        data_dir: String,
+        skill_name: String,
+        capability: String
+    ) -> () = revoke_capability_grant_inner
+);
+
 /// Lists all persisted capability grants from the workspace grants file.
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn list_capability_grants_inner(
-    workspace_dir: &Path,
+    data_dir: String,
 ) -> Result<Vec<CapabilityGrantInfo>, FfiError> {
+    let workspace_dir = Path::new(&data_dir);
     let path = workspace_dir.join("capability_grants.json");
     let contents = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let grants: GrantsFile = serde_json::from_str(&contents).unwrap_or_default();
@@ -275,10 +336,13 @@ pub(crate) fn list_capability_grants_inner(
 
 /// Revokes a single persisted capability grant. Atomic write via tmp + rename.
 pub(crate) fn revoke_capability_grant_inner(
-    workspace_dir: &Path,
-    skill_name: &str,
-    capability: &str,
+    data_dir: String,
+    skill_name: String,
+    capability: String,
 ) -> Result<(), FfiError> {
+    let workspace_dir = Path::new(&data_dir);
+    let skill_name = skill_name.as_str();
+    let capability = capability.as_str();
     let path = workspace_dir.join("capability_grants.json");
     let contents = std::fs::read_to_string(&path).unwrap_or_else(|_| "{}".to_string());
     let mut grants: GrantsFile = serde_json::from_str(&contents).unwrap_or_default();

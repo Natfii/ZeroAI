@@ -30,11 +30,10 @@ data class RefreshResult(
 /**
  * Exception thrown when an OAuth token refresh fails.
  *
- * @param message Human-readable error description.
  * @property httpStatusCode HTTP status code from the refresh endpoint, or 0 for
  *   non-HTTP errors (e.g. network failure, JSON parse error).
- * @param cause Optional underlying cause.
  */
+@Suppress("OutdatedDocumentation")
 class OAuthRefreshException(
     message: String,
     val httpStatusCode: Int = 0,
@@ -48,8 +47,6 @@ class OAuthRefreshException(
  * issues a new (access token, refresh token) pair. OpenAI may or may not
  * return a new refresh token; when absent the existing token is reused.
  * Callers must persist all returned tokens immediately.
- *
- * Handles token refresh for OpenAI and Anthropic providers.
  */
 class OAuthTokenRefresher(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -134,16 +131,25 @@ class OAuthTokenRefresher(
         /**
          * Returns the OAuth token refresh URL for the given [provider].
          *
-         * Recognized providers: "openai". All other values (including
-         * "anthropic") fall back to the Anthropic refresh endpoint.
+         * Recognized providers: "openai" / "openai-codex" and "anthropic".
+         * Anything else throws [IllegalArgumentException] rather than
+         * silently routing the refresh token to a default endpoint — a
+         * stale or mistyped provider id must not leak a long-lived
+         * refresh secret to an unrelated identity provider.
          *
          * @param provider Provider identifier.
          * @return The refresh endpoint URL.
+         * @throws IllegalArgumentException when [provider] is not a
+         *   recognised OAuth provider.
          */
         fun refreshUrlForProvider(provider: String): String =
             when (provider) {
                 "openai", "openai-codex" -> OPENAI_REFRESH_URL
-                else -> ANTHROPIC_REFRESH_URL
+                "anthropic" -> ANTHROPIC_REFRESH_URL
+                else ->
+                    throw IllegalArgumentException(
+                        "Unknown OAuth provider '$provider' — refusing to route refresh token.",
+                    )
             }
     }
 }

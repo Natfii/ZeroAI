@@ -142,6 +142,13 @@ interface ApiKeyRepository {
      * surfaces a clear "credentials not set" error at daemon startup
      * rather than a silent 500 on the first webhook call.
      *
+     * Anthropic OAuth was killed for non-SDK agent apps in May 2026 — any
+     * remaining OAuth rows hold refresh tokens that
+     * `claude.ai/api/oauth/token` will reject. This method short-circuits
+     * those rows to [KeyStatus.INVALID] without attempting the refresh,
+     * preventing the daemon from leaking the now-revoked refresh token on
+     * every startup probe.
+     *
      * @param provider Provider ID or alias to search for.
      * @return The matching [ApiKey] (possibly refreshed), or `null` if not found
      *   or if token refresh failed.
@@ -150,6 +157,14 @@ interface ApiKeyRepository {
     suspend fun getByProviderFresh(provider: String): ApiKey? {
         val key = getByProvider(provider) ?: return null
         if (!key.isOAuthToken || !key.isExpired()) return key
+        if (key.isOAuthToken && key.provider == "anthropic") {
+            Log.w(
+                TAG,
+                "Anthropic OAuth is disabled; marking stale OAuth row invalid",
+            )
+            markKeyStatus(key.id, KeyStatus.INVALID)
+            return null
+        }
         return try {
             val refreshed =
                 OAuthTokenRefresher()

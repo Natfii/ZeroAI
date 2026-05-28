@@ -1,128 +1,6 @@
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+pub use zeroclaw_api::memory_traits::*;
 
-/// A single memory entry
-#[derive(Clone, Serialize, Deserialize)]
-pub struct MemoryEntry {
-    pub id: String,
-    pub key: String,
-    pub content: String,
-    pub category: MemoryCategory,
-    pub timestamp: String,
-    pub session_id: Option<String>,
-    pub score: Option<f64>,
-}
-
-impl std::fmt::Debug for MemoryEntry {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("MemoryEntry")
-            .field("id", &self.id)
-            .field("key", &self.key)
-            .field("content", &self.content)
-            .field("category", &self.category)
-            .field("timestamp", &self.timestamp)
-            .field("score", &self.score)
-            .finish_non_exhaustive()
-    }
-}
-
-/// Memory categories for organization
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum MemoryCategory {
-    /// Long-term facts, preferences, decisions
-    Core,
-    /// Daily session logs
-    Daily,
-    /// Conversation context
-    Conversation,
-    /// User-defined custom category
-    Custom(String),
-}
-
-impl std::fmt::Display for MemoryCategory {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Core => write!(f, "core"),
-            Self::Daily => write!(f, "daily"),
-            Self::Conversation => write!(f, "conversation"),
-            Self::Custom(name) => write!(f, "{name}"),
-        }
-    }
-}
-
-/// Core memory trait — implement for any persistence backend
-#[async_trait]
-pub trait Memory: Send + Sync {
-    /// Downcast to a concrete type for backend-specific operations.
-    fn as_any(&self) -> &dyn std::any::Any;
-
-    /// Backend name
-    fn name(&self) -> &str;
-
-    /// Store a memory entry, optionally scoped to a session
-    async fn store(
-        &self,
-        key: &str,
-        content: &str,
-        category: MemoryCategory,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<()>;
-
-    /// Stores a memory with full scoring metadata.
-    ///
-    /// Default implementation delegates to [`store`](Memory::store),
-    /// ignoring metadata. [`SqliteMemory`] overrides this to persist
-    /// confidence, source, tags, and decay half-life.
-    ///
-    /// # Parameters
-    ///
-    /// * `confidence` - Extraction confidence \[0.0, 1.0\].
-    /// * `source` - Origin: "heuristic", "llm", "agent", "user", "migrated".
-    /// * `tags` - Comma-separated fact tags.
-    /// * `decay_half_life_days` - Ebbinghaus half-life in days (must be > 0).
-    async fn store_with_metadata(
-        &self,
-        key: &str,
-        content: &str,
-        category: MemoryCategory,
-        session_id: Option<&str>,
-        confidence: f64,
-        source: &str,
-        tags: &str,
-        decay_half_life_days: u32,
-    ) -> anyhow::Result<()> {
-        let _ = (confidence, source, tags, decay_half_life_days);
-        self.store(key, content, category, session_id).await
-    }
-
-    /// Recall memories matching a query (keyword search), optionally scoped to a session
-    async fn recall(
-        &self,
-        query: &str,
-        limit: usize,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<Vec<MemoryEntry>>;
-
-    /// Get a specific memory by key
-    async fn get(&self, key: &str) -> anyhow::Result<Option<MemoryEntry>>;
-
-    /// List all memory keys, optionally filtered by category and/or session
-    async fn list(
-        &self,
-        category: Option<&MemoryCategory>,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<Vec<MemoryEntry>>;
-
-    /// Remove a memory by key
-    async fn forget(&self, key: &str) -> anyhow::Result<bool>;
-
-    /// Count total memories
-    async fn count(&self) -> anyhow::Result<usize>;
-
-    /// Health check
-    async fn health_check(&self) -> bool;
-}
+pub use async_trait::async_trait;
 
 #[cfg(test)]
 mod tests {
@@ -151,6 +29,15 @@ mod tests {
     }
 
     #[test]
+    fn memory_category_custom_roundtrip() {
+        let custom = MemoryCategory::Custom("project_notes".into());
+        let json = serde_json::to_string(&custom).unwrap();
+        assert_eq!(json, "\"project_notes\"");
+        let parsed: MemoryCategory = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, custom);
+    }
+
+    #[test]
     fn memory_entry_roundtrip_preserves_optional_fields() {
         let entry = MemoryEntry {
             id: "id-1".into(),
@@ -160,6 +47,11 @@ mod tests {
             timestamp: "2026-02-16T00:00:00Z".into(),
             session_id: Some("session-abc".into()),
             score: Some(0.98),
+            namespace: "default".into(),
+            importance: Some(0.7),
+            superseded_by: None,
+            agent_alias: None,
+            agent_id: None,
         };
 
         let json = serde_json::to_string(&entry).unwrap();
@@ -171,5 +63,8 @@ mod tests {
         assert_eq!(parsed.category, MemoryCategory::Core);
         assert_eq!(parsed.session_id.as_deref(), Some("session-abc"));
         assert_eq!(parsed.score, Some(0.98));
+        assert_eq!(parsed.namespace, "default");
+        assert_eq!(parsed.importance, Some(0.7));
+        assert!(parsed.superseded_by.is_none());
     }
 }

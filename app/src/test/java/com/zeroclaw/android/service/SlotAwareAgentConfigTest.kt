@@ -63,11 +63,13 @@ class SlotAwareAgentConfigTest {
         val ordered = SlotAwareAgentConfig.orderedConfiguredAgents(agents)
 
         assertEquals(
-            listOf("gemini-api", "openai-api", "legacy-alpha", "legacy-zeta"),
+            // Slot order changed 2026-05-25: Ollama-first (local-first).
+            // openai-api now precedes gemini-api in slot baseOrder.
+            listOf("openai-api", "gemini-api", "legacy-alpha", "legacy-zeta"),
             ordered.map(Agent::id),
         )
-        assertEquals("Gemini API", SlotAwareAgentConfig.configName(ordered.first()))
-        assertEquals("gemini", SlotAwareAgentConfig.configProvider(ordered.first()))
+        assertEquals("OpenAI API", SlotAwareAgentConfig.configName(ordered.first()))
+        assertEquals("openai", SlotAwareAgentConfig.configProvider(ordered.first()))
     }
 
     @Test

@@ -75,16 +75,12 @@ object ProviderRegistry {
                 aliases = listOf("openai-codex", "openai_codex", "chatgpt", "codex"),
                 suggestedModels =
                     listOf(
+                        "gpt-5.5",
                         "gpt-5.4",
-                        "gpt-5-chat-latest",
+                        "gpt-5.4-mini",
+                        "gpt-5.4-nano",
                         "gpt-5.3-codex",
-                        "gpt-5-mini",
-                        "gpt-5-nano",
-                        "o3",
-                        "o4-mini",
                         "gpt-4.1",
-                        "gpt-4.1-mini",
-                        "gpt-4.1-nano",
                     ),
                 category = ProviderCategory.PRIMARY,
                 iconUrl = faviconUrl("openai.com"),
@@ -104,10 +100,11 @@ object ProviderRegistry {
                 authType = ProviderAuthType.API_KEY_OR_OAUTH,
                 suggestedModels =
                     listOf(
-                        "claude-opus-4-6",
+                        "claude-opus-4-7",
                         "claude-sonnet-4-6",
-                        "claude-sonnet-4-5-20250929",
                         "claude-haiku-4-5-20251001",
+                        "claude-opus-4-6",
+                        "claude-sonnet-4-5-20250929",
                     ),
                 category = ProviderCategory.PRIMARY,
                 iconUrl = faviconUrl("anthropic.com"),
@@ -125,10 +122,12 @@ object ProviderRegistry {
                 authType = ProviderAuthType.API_KEY_ONLY,
                 suggestedModels =
                     listOf(
+                        "gemini-3.1-pro-preview",
+                        "gemini-3.5-flash",
+                        "gemini-3.1-flash-lite",
                         "gemini-2.5-pro",
                         "gemini-2.5-flash",
-                        "gemini-2.0-flash",
-                        "gemini-2.0-flash-lite",
+                        "gemini-2.5-flash-lite",
                     ),
                 aliases = listOf("google", "gemini"),
                 category = ProviderCategory.PRIMARY,
@@ -138,9 +137,7 @@ object ProviderRegistry {
                 keyCreationUrl = "https://aistudio.google.com/apikey",
                 keyPrefix = "AIza",
                 keyPrefixHint = "Keys start with AIza",
-                helpText =
-                    "Use an AI Studio API key for Gemini models. " +
-                        "Connect a Google account separately for Drive, Calendar, Docs, Sheets, Gmail, and YouTube.",
+                helpText = "Use an AI Studio API key for Gemini models.",
             ),
             ProviderInfo(
                 id = "openrouter",
@@ -148,10 +145,12 @@ object ProviderRegistry {
                 authType = ProviderAuthType.API_KEY_ONLY,
                 suggestedModels =
                     listOf(
-                        "openai/gpt-4o",
-                        "anthropic/claude-sonnet-4-20250514",
-                        "google/gemini-2.5-pro",
-                        "meta-llama/llama-4-maverick",
+                        "openai/gpt-5.5",
+                        "anthropic/claude-opus-4.7",
+                        "google/gemini-3.5-flash",
+                        "anthropic/claude-sonnet-4.6",
+                        "deepseek/deepseek-v4-pro",
+                        "qwen/qwen3.7-max",
                     ),
                 category = ProviderCategory.PRIMARY,
                 iconUrl = faviconUrl("openrouter.ai"),
@@ -164,64 +163,11 @@ object ProviderRegistry {
                     "OpenRouter routes requests to 300+ models from OpenAI, Anthropic, " +
                         "Google, Meta, and more through a single API key.",
             ),
-            ProviderInfo(
-                id = "xai",
-                displayName = "xAI (Grok)",
-                authType = ProviderAuthType.API_KEY_ONLY,
-                suggestedModels =
-                    listOf(
-                        "grok-4",
-                        "grok-4-1-fast-reasoning",
-                        "grok-4-1-fast-non-reasoning",
-                    ),
-                aliases = listOf("grok"),
-                category = ProviderCategory.PRIMARY,
-                iconUrl = faviconUrl("x.ai"),
-                modelListUrl = "https://api.x.ai/v1/models",
-                modelListFormat = ModelListFormat.OPENAI_COMPATIBLE,
-                keyCreationUrl = "https://console.x.ai",
-                keyPrefix = "xai-",
-                keyPrefixHint = "xAI keys typically start with xai-",
-                helpText = "Get your API key from the xAI Console",
-            ),
-            ProviderInfo(
-                id = "deepseek",
-                displayName = "DeepSeek",
-                authType = ProviderAuthType.API_KEY_ONLY,
-                suggestedModels =
-                    listOf(
-                        "deepseek-chat",
-                        "deepseek-reasoner",
-                    ),
-                category = ProviderCategory.PRIMARY,
-                iconUrl = faviconUrl("deepseek.com"),
-                keyCreationUrl = "https://platform.deepseek.com/api_keys",
-                keyPrefix = "sk-",
-                keyPrefixHint = "Keys start with sk-",
-                minKeyLength = 35,
-                modelListUrl = "https://api.deepseek.com/v1/models",
-                modelListFormat = ModelListFormat.OPENAI_COMPATIBLE,
-                helpText = "Get your API key from the DeepSeek Platform dashboard.",
-            ),
-            ProviderInfo(
-                id = "qwen",
-                displayName = "Qwen (Alibaba)",
-                authType = ProviderAuthType.API_KEY_ONLY,
-                suggestedModels =
-                    listOf(
-                        "qwen3.5-plus",
-                        "qwen3.5-max",
-                        "qwen3.5-turbo",
-                    ),
-                aliases = listOf("dashscope", "qwen-cn", "qwen-us", "dashscope-cn", "dashscope-us"),
-                category = ProviderCategory.PRIMARY,
-                iconUrl = faviconUrl("qwen.ai"),
-                keyCreationUrl = "https://bailian.console.aliyun.com/",
-                minKeyLength = 20,
-                modelListUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models",
-                modelListFormat = ModelListFormat.OPENAI_COMPATIBLE,
-                helpText = "Get your API key from Alibaba Cloud's Bailian console.",
-            ),
+            // xAI, DeepSeek, Qwen tiles removed 2026-05-25: backend providers
+            // were dropped during the upstream-zeroclaw re-absorption. Users
+            // who want these now go through OpenRouter (which proxies to all
+            // three) or wait for the upstream provider crate to add them
+            // back as first-class tiles.
             ProviderInfo(
                 id = "ollama",
                 displayName = "Ollama",
@@ -230,11 +176,11 @@ object ProviderRegistry {
                 suggestedModels =
                     listOf(
                         "llama3.3",
-                        "qwen2.5",
-                        "mistral",
                         "deepseek-r1",
-                        "phi4",
+                        "qwen3",
                         "gemma3",
+                        "phi4",
+                        "mistral",
                     ),
                 category = ProviderCategory.PRIMARY,
                 iconUrl = faviconUrl("ollama.com"),

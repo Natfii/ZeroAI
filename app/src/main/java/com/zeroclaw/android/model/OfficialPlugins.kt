@@ -31,12 +31,6 @@ object OfficialPlugins {
     /** Image and vision multimodal processing. Maps to `[multimodal]`. */
     const val VISION = "official-vision"
 
-    /** Audio transcription via Whisper-compatible API. Maps to `[transcription]`. */
-    const val TRANSCRIPTION = "official-transcription"
-
-    /** Query classification for model routing. Maps to `[query_classification]`. */
-    const val QUERY_CLASSIFICATION = "official-query-classification"
-
     /** Set of all official plugin IDs. */
     val ALL: Set<String> =
         setOf(
@@ -46,8 +40,6 @@ object OfficialPlugins {
             SHARED_FOLDER,
             COMPOSIO,
             VISION,
-            TRANSCRIPTION,
-            QUERY_CLASSIFICATION,
         )
 
     /** Returns true if the given [pluginId] is an official built-in plugin. */

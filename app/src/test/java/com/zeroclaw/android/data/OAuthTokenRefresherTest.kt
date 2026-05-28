@@ -7,6 +7,7 @@
 package com.zeroclaw.android.data
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.DisplayName
 import org.junit.jupiter.api.Test
 
@@ -34,11 +35,10 @@ class OAuthTokenRefresherTest {
     }
 
     @Test
-    @DisplayName("refreshUrlForProvider defaults to Anthropic for unknown providers")
-    fun `refreshUrlForProvider defaults to anthropic for unknown providers`() {
-        assertEquals(
-            "https://claude.ai/api/oauth/token",
-            OAuthTokenRefresher.refreshUrlForProvider("gemini"),
-        )
+    @DisplayName("refreshUrlForProvider throws for unknown providers")
+    fun `refreshUrlForProvider throws for unknown providers`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            OAuthTokenRefresher.refreshUrlForProvider("gemini")
+        }
     }
 }

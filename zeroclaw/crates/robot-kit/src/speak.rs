@@ -7,7 +7,7 @@ use crate::config::RobotConfig;
 use crate::traits::{Tool, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::PathBuf;
 
 pub struct SpeakTool {
@@ -174,7 +174,7 @@ impl Tool for SpeakTool {
 
         // Speak text
         let text = args["text"].as_str().ok_or_else(|| {
-            anyhow::anyhow!("Missing 'text' parameter (or use 'sound' for effects)")
+            anyhow::Error::msg("Missing 'text' parameter (or use 'sound' for effects)")
         })?;
 
         if text.is_empty() {

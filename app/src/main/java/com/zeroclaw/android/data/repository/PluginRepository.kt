@@ -82,16 +82,16 @@ interface PluginRepository {
      */
     suspend fun mergeRemotePlugins(remotePlugins: List<RemotePlugin>)
 
-    /** Inserts any missing official plugin entities from seed data on upgrade. */
-    suspend fun upsertMissingOfficialPlugins()
-
     /**
-     * Synchronises the enabled state of official plugins with [AppSettings].
+     * Reconcile the official plugin rows against this build in one atomic pass:
+     *   1. Delete rows whose IDs are no longer recognised (retired plugins).
+     *   2. Insert any missing official rows from seed data.
+     *   3. Sync `is_enabled` from [AppSettings] (the source of truth).
      *
-     * [AppSettings] is the source of truth for official plugin enabled
-     * state. This method updates the Room entity to match.
+     * Wrapped in a single Room transaction so a cancellation or crash can't
+     * leave the Hub showing a half-purged list or stale toggles.
      *
      * @param settings Current application settings to sync from.
      */
-    suspend fun syncOfficialPluginStates(settings: AppSettings)
+    suspend fun reconcileOfficialPlugins(settings: AppSettings)
 }

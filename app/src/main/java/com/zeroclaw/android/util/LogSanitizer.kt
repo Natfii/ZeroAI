@@ -53,6 +53,25 @@ object LogSanitizer {
     /** Matches suspiciously long URLs that may contain credentials. */
     private val LONG_URL_PATTERN = Regex("""https?://[^\s]{50,}""")
 
+    /**
+     * Matches TOML `<secret_field> = "value"` lines. Captures field names
+     * that are known to hold credentials regardless of the specific token
+     * format (Telegram bot tokens, Composio keys, custom-host API keys
+     * the format-specific patterns miss, etc.). Whitespace-tolerant so it
+     * survives both `bot_token = "..."` and `bot_token="..."`.
+     *
+     * The leading group is `([a-z_]*api_key|...)` so prefixed variants like
+     * `brave_api_key`, `google_api_key`, `composio_api_key` are caught
+     * alongside the bare `api_key` form.
+     */
+    private val TOML_SECRET_FIELD_PATTERN =
+        Regex(
+            """\b([a-z_]*api_key|bot_token|cookie_string|password|paired_tokens|""" +
+                """access_token|refresh_token|client_secret|secret_key)""" +
+                """\s*=\s*"[^"]*"""",
+            RegexOption.IGNORE_CASE,
+        )
+
     private const val REDACTION_PLACEHOLDER = "[REDACTED]"
     private const val REDACTED_URL = "[REDACTED_URL]"
 
@@ -76,5 +95,7 @@ object LogSanitizer {
             .replace(NGROK_TOKEN_PATTERN, REDACTION_PLACEHOLDER)
             .replace(AUTH_HEADER_PATTERN, "Authorization: $REDACTION_PLACEHOLDER")
             .replace(X_API_KEY_PATTERN, "x-api-key: $REDACTION_PLACEHOLDER")
-            .replace(LONG_URL_PATTERN, REDACTED_URL)
+            .replace(TOML_SECRET_FIELD_PATTERN) { match ->
+                "${match.groupValues[1]} = \"$REDACTION_PLACEHOLDER\""
+            }.replace(LONG_URL_PATTERN, REDACTED_URL)
 }

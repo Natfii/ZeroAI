@@ -15,7 +15,7 @@ const MIN_COMMENTARY_INTERVAL: Duration = Duration::from_secs(30);
 /// Delegates to the engine crate's compiled regex.
 #[allow(dead_code)]
 pub(crate) fn is_game_trigger(message: &str) -> bool {
-    zeroclaw::clawboy_triggers::is_game_trigger(message)
+    zeroai::clawboy_triggers::is_game_trigger(message)
 }
 
 /// Returns true if the message matches a stop-game trigger AND was
@@ -24,7 +24,7 @@ pub(crate) fn is_game_trigger(message: &str) -> bool {
 /// can stop it via chat.
 #[allow(dead_code)]
 pub(crate) fn is_stop_trigger(message: &str, sender_channel: Option<&str>) -> bool {
-    if !zeroclaw::clawboy_triggers::is_stop_trigger(message) {
+    if !zeroai::clawboy_triggers::is_stop_trigger(message) {
         return false;
     }
     if let Some(sender) = sender_channel
@@ -173,7 +173,7 @@ pub(crate) enum UserCommand {
 #[allow(dead_code)]
 pub(crate) fn parse_user_command(message: &str) -> UserCommand {
     let trimmed = message.trim();
-    if zeroclaw::clawboy_triggers::is_stop_trigger(trimmed) {
+    if zeroai::clawboy_triggers::is_stop_trigger(trimmed) {
         return UserCommand::Stop;
     }
     let lower = trimmed.to_lowercase();
@@ -499,16 +499,16 @@ mod tests {
 
     #[test]
     fn game_trigger_detected() {
-        assert!(is_game_trigger("play a game"));
-        assert!(is_game_trigger("hey, play pokemon!"));
+        assert!(is_game_trigger("play clawboy"));
+        assert!(is_game_trigger("hey, play clawboy!"));
         assert!(is_game_trigger("can you start clawboy?"));
-        assert!(is_game_trigger("start the game"));
+        assert!(is_game_trigger("start claw boy"));
     }
 
     #[test]
     fn game_trigger_case_insensitive() {
-        assert!(is_game_trigger("PLAY A GAME"));
-        assert!(is_game_trigger("Play Pokemon"));
+        assert!(is_game_trigger("PLAY CLAWBOY"));
+        assert!(is_game_trigger("Play ClawBoy"));
         assert!(is_game_trigger("START CLAWBOY"));
     }
 
@@ -517,11 +517,14 @@ mod tests {
         assert!(!is_game_trigger("hello"));
         assert!(!is_game_trigger("what are you doing?"));
         assert!(!is_game_trigger("how do I play?"));
+        // No more false positives on generic gaming chatter.
+        assert!(!is_game_trigger("play a game with me"));
+        assert!(!is_game_trigger("play pokemon"));
     }
 
     #[test]
     fn game_trigger_with_whitespace() {
-        assert!(is_game_trigger("  play a game  "));
+        assert!(is_game_trigger("  play clawboy  "));
     }
 
     // ── is_stop_trigger tests (delegates to engine regex) ───────────
@@ -566,7 +569,7 @@ mod tests {
         use std::sync::atomic::Ordering;
         super::super::session::ROM_PRESENT.store(false, Ordering::Relaxed);
         assert_eq!(
-            check_trigger("play pokemon", "cli"),
+            check_trigger("play clawboy", "cli"),
             TriggerResult::PassThrough
         );
     }

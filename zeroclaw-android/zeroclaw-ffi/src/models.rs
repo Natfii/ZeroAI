@@ -6,12 +6,15 @@
 
 //! Model discovery by querying provider APIs.
 //!
+//! Also hosts the `discover_models` FFI export so the per-domain split
+//! keeps lib.rs lean (see lib.rs decomposition plan).
+//!
 //! Queries `/v1/models`, `/api/tags`, or returns hardcoded lists depending
 //! on the provider type. Results are returned as a JSON array of
 //! `{"id": "...", "name": "..."}` objects.
 
 use crate::error::FfiError;
-use zeroclaw::auth_exports::{AuthService, state_dir_from_config};
+use zeroai::auth_exports::{AuthService, state_dir_from_config};
 
 const GEMINI_MODELS_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
@@ -83,12 +86,15 @@ pub(crate) fn discover_models_inner(
 fn resolve_provider(provider: String) -> Result<String, FfiError> {
     let trimmed = provider.trim();
     let raw_provider = if trimmed.is_empty() {
-        crate::runtime::clone_daemon_config()?
-            .default_provider
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| FfiError::InvalidArgument {
-                detail: "provider is required when the daemon has no default provider".into(),
-            })?
+        // The old flat `config.default_provider` field was removed
+        // upstream (zeroclaw v0.8.0-beta-1) — provider routing now
+        // lives under `config.providers.models.<type>.<alias>`. Force
+        // the Kotlin caller to be explicit instead of silently picking
+        // a fallback, per the no-hardcoded-default rule.
+        return Err(FfiError::InvalidArgument {
+            detail: "provider is required (daemon no longer carries a default_provider field)"
+                .into(),
+        });
     } else {
         trimmed.to_string()
     };
@@ -295,6 +301,34 @@ fn default_base_url(provider: &str) -> String {
         _ => "https://api.openai.com".into(),
     }
 }
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+//
+// Hosted here (rather than in lib.rs) as the pilot of the lib.rs
+// decomposition: keeping each domain's exports next to its inner fns
+// makes the export surface easy to scan when changing behaviour.
+
+crate::ffi_export!(
+    /// Discovers available models from a provider's API.
+    ///
+    /// Returns a JSON array of `{"id": "model-id", "name": "display-name"}` objects.
+    /// For Anthropic, returns a hardcoded list of known models. For Ollama, queries
+    /// the local `/api/tags` endpoint. All other providers use the `OpenAI`-compatible
+    /// `/v1/models` endpoint.
+    ///
+    /// This function does NOT require the daemon to be running. It creates its own
+    /// HTTP client and queries the provider API directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::SpawnError`] on HTTP client, network, or parse errors,
+    /// or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discover_models(
+        provider: String,
+        api_key: String,
+        base_url: Option<String>,
+    ) -> String = discover_models_inner
+);
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

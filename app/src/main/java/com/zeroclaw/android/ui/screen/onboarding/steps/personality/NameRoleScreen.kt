@@ -90,12 +90,13 @@ fun NameRoleScreen(
             },
             label = { Text("Agent name") },
             isError = showError,
-            supportingText =
+            supportingText = {
                 if (showError) {
-                    { Text("Name is required") }
+                    Text("Name is required")
                 } else {
-                    null
-                },
+                    Text("Required to continue, or use Skip")
+                }
+            },
             singleLine = true,
             modifier =
                 Modifier

@@ -56,10 +56,12 @@ class PluginsViewModel(
 
     init {
         viewModelScope.launch {
-            repository.upsertMissingOfficialPlugins()
-            settingsRepository.settings.first().let { settings ->
-                repository.syncOfficialPluginStates(settings)
-            }
+            // One transactional pass: purge retired rows, seed missing
+            // official rows, and sync enabled state from AppSettings.
+            // Atomic via Room `@Transaction` so a cancellation between
+            // steps can't leave the Hub mid-purge or out of sync.
+            val settings = settingsRepository.settings.first()
+            repository.reconcileOfficialPlugins(settings)
         }
         viewModelScope.launch {
             settingsRepository.migrationNoticePending.first().let { pending ->
@@ -240,28 +242,6 @@ class PluginsViewModel(
             } catch (e: Exception) {
                 _syncState.value =
                     SyncUiState.Error(ErrorSanitizer.sanitizeForUi(e))
-            }
-        }
-    }
-
-    /**
-     * Resets all official plugin enabled states to their seed defaults.
-     *
-     * Vision is enabled by default; all others are disabled. Updates
-     * both AppSettings (source of truth) and Room via sync.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun restoreDefaults() {
-        viewModelScope.launch {
-            try {
-                OfficialPluginSettingsSync.restoreDefaults(settingsRepository)
-                repository.upsertMissingOfficialPlugins()
-                val settings = settingsRepository.settings.first()
-                repository.syncOfficialPluginStates(settings)
-                _snackbarMessage.tryEmit("Official plugins restored to defaults")
-            } catch (e: Exception) {
-                Log.w(TAG, "Restore defaults failed", e)
-                _snackbarMessage.tryEmit("Restore failed: ${ErrorSanitizer.sanitizeForUi(e)}")
             }
         }
     }

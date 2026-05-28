@@ -27,7 +27,7 @@ ksp = "2.0.20-1.0.25"
 dokka = "2.1.0"
 kotlinx-serialization = "1.7.3"
 okhttp = "4.12.0"
-work-runtime = "2.9.1"
+work-runtime = "2.11.2"
 camerax = "1.4.1"
 mlkit-barcode = "17.3.0"
 sqlcipher = "4.6.1"
@@ -35,11 +35,12 @@ nanohttpd = "2.3.1"
 browser = "1.8.0"
 play-services-location = "21.3.0"
 bouncycastle = "1.81"
-mlkit-genai-prompt = "1.0.0-beta1"
+mlkit-genai-prompt = "1.0.0-beta2"
 mlkit-genai-summarization = "1.0.0-beta1"
 mlkit-genai-proofreading = "1.0.0-beta1"
 mlkit-genai-rewriting = "1.0.0-beta1"
 mlkit-genai-image-description = "1.0.0-beta1"
+litertlm = "0.11.0"
 benchmark = "1.4.1"
 profileinstaller = "1.4.1"
 uiautomator = "2.3.0"
@@ -104,6 +105,7 @@ mlkit-genai-summarization = { group = "com.google.mlkit", name = "genai-summariz
 mlkit-genai-proofreading = { group = "com.google.mlkit", name = "genai-proofreading", version.ref = "mlkit-genai-proofreading" }
 mlkit-genai-rewriting = { group = "com.google.mlkit", name = "genai-rewriting", version.ref = "mlkit-genai-rewriting" }
 mlkit-genai-image-description = { group = "com.google.mlkit", name = "genai-image-description", version.ref = "mlkit-genai-image-description" }
+litertlm-android = { group = "com.google.ai.edge.litertlm", name = "litertlm-android", version.ref = "litertlm" }
 benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
 profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }

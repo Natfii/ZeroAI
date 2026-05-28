@@ -20,8 +20,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.ProcessLifecycleOwner
 import com.zeroclaw.android.BuildConfig
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.DiscordDmLinkStore
@@ -50,7 +48,6 @@ import com.zeroclaw.ffi.listPersistedSessions
 import com.zeroclaw.ffi.registerSharedFolderHandler
 import com.zeroclaw.ffi.restoreSessionState
 import com.zeroclaw.ffi.saveSessionState
-import com.zeroclaw.ffi.setNanoAvailable
 import com.zeroclaw.ffi.unregisterSharedFolderHandler
 import com.zeroclaw.ffi.validateConfig
 import kotlinx.coroutines.CoroutineDispatcher
@@ -114,6 +111,27 @@ class ZeroAIDaemonService : Service() {
     private lateinit var channelConfigRepository: ChannelConfigRepository
     private lateinit var agentRepository: AgentRepository
     private val retryPolicy = RetryPolicy()
+
+    /**
+     * Feature contributors run on every daemon start. Each one owns both
+     * the TOML section AND the agent-awareness fragment for its feature
+     * (so adding a feature is a single-file change). Pilot pair:
+     * Twitter/X browse + IMAP/SMTP email. Older awareness helpers
+     * (`googleMessagesAwarenessFragment`, `clawBoyAwarenessFragment`,
+     * `tailscaleAwarenessFragment`) and their corresponding TOML emit
+     * paths inside [ConfigTomlBuilder] will migrate here once the pilot
+     * proves the shape.
+     */
+    private val featureContributors:
+        List<com.zeroclaw.android.service.features.FeatureContributor> =
+        listOf(
+            com.zeroclaw.android.service.features
+                .TwitterContributor(),
+            com.zeroclaw.android.service.features
+                .EmailContributor(),
+            com.zeroclaw.android.service.features
+                .TailscaleContributor(),
+        )
 
     private var statusPollJob: Job? = null
     private var startJob: Job? = null
@@ -265,7 +283,7 @@ class ZeroAIDaemonService : Service() {
      * flow-based. The foreground notification is posted immediately so the
      * system does not kill the service while waiting for I/O.
      */
-    @Suppress("LongMethod", "CognitiveComplexMethod")
+    @Suppress("LongMethod", "CognitiveComplexMethod", "CyclomaticComplexMethod")
     private fun handleStartFromSettings() {
         val notification =
             notificationManager.buildNotification(ServiceState.STARTING)
@@ -286,39 +304,166 @@ class ZeroAIDaemonService : Service() {
             val emailConfig =
                 try {
                     val ec = (application as ZeroAIApplication).emailConfigRepository.observe().first()
-                    Log.i(TAG, "Email config loaded: enabled=${ec.isEnabled}, address=${ec.address.take(3)}***, imap=${ec.imapHost}")
+                    if (BuildConfig.DEBUG) {
+                        // Address prefix + IMAP hostname are PII-ish
+                        // configuration data (reveal which mail
+                        // provider the user uses, linkable to their
+                        // identity). Debug-only diagnostic.
+                        Log.i(
+                            TAG,
+                            "Email config loaded: enabled=${ec.isEnabled}, " +
+                                "address=${ec.address.take(3)}***, imap=${ec.imapHost}",
+                        )
+                    }
                     ec
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to load email config", e)
                     null
                 }
+            // Run every registered FeatureContributor. Each contributor
+            // (Twitter, Email, ...) decides whether to emit its own TOML
+            // section + agent-awareness fragment based on the current
+            // settings. Legacy AwarenessFragment helpers and the per-
+            // feature `appendXxxSection` paths inside ConfigTomlBuilder
+            // are being migrated to this pattern one feature at a time.
+            val aliasPrefs = peerAliasPrefs()
+            val featureCtx =
+                com.zeroclaw.android.service.features.FeatureContext(
+                    settings = seededSettings,
+                    emailConfig = emailConfig,
+                    peerAliasLookup = { ip, port ->
+                        aliasPrefs.getString(peerAliasKey(ip, port), null)
+                    },
+                )
+            for (contributor in featureContributors) {
+                contributor.contribute(featureCtx)
+            }
+
             val hubAppContext =
                 listOfNotNull(
-                    twitterAwarenessFragment(seededSettings),
-                    emailAwarenessFragment(emailConfig),
+                    featureCtx.assembledAwareness(),
                     googleMessagesAwarenessFragment(),
-                    clawBoyAwarenessFragment(),
-                    tailscaleAwarenessFragment(seededSettings),
                 ).joinToString("\n").ifBlank { null }
 
+            val effectiveApiKey =
+                apiKey?.key?.takeIf { it.isNotBlank() }
+                    ?: resolveOAuthAccessToken(seededSettings.defaultProvider, authProfiles)
+            val cloudGlobalConfig =
+                DaemonGlobalConfigMapper.toGlobalTomlConfig(
+                    context = this@ZeroAIDaemonService,
+                    settings = seededSettings,
+                    apiKey = apiKey,
+                    apiKeyValue = effectiveApiKey,
+                    hubAppContext = hubAppContext,
+                )
+            val app = application as ZeroAIApplication
+            val readiness = app.onDeviceInferenceManager.awaitReadyForActiveAgent()
             val globalConfig =
-                buildGlobalTomlConfig(seededSettings, apiKey, authProfiles)
-                    .copy(
-                        hubAppContext = hubAppContext,
-                        emailImapHost = emailConfig?.imapHost.orEmpty(),
-                        emailImapPort = emailConfig?.imapPort ?: 993,
-                        emailSmtpHost = emailConfig?.smtpHost.orEmpty(),
-                        emailSmtpPort = emailConfig?.smtpPort ?: 465,
-                        emailAddress = emailConfig?.address.orEmpty(),
-                        emailPassword = emailConfig?.password.orEmpty(),
-                        emailCheckTimes = emailConfig?.checkTimes.orEmpty(),
-                        emailEnabled = emailConfig?.isEnabled == true,
-                    )
+                when (readiness) {
+                    is com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager
+                        .EngineReadiness.Ready,
+                    -> {
+                        Log.i(TAG, "Routing daemon TOML at localhost LiteRT-LM (${readiness.modelId})")
+                        cloudGlobalConfig.copy(
+                            provider = "custom-openai",
+                            model = readiness.modelId,
+                            // Bearer-token auth on the loopback
+                            // endpoint: the manager generates a
+                            // per-process secret; we pass it to the
+                            // daemon as the `api_key` so the daemon
+                            // sends `Authorization: Bearer ...` on
+                            // every request and our HTTP server
+                            // rejects unauthenticated callers
+                            // (other Android apps with INTERNET
+                            // permission that scan localhost).
+                            apiKey = app.onDeviceInferenceManager.getLocalAuthToken(),
+                            baseUrl = LOCAL_LITERT_BASE_URL,
+                            // Bump the daemon's HTTP-client timeout for
+                            // this provider far above its 120 s default.
+                            // CPU inference of a 4B-param model on
+                            // Tensor G5 takes 60-240 s for the first
+                            // response (prefill of system prompt + tool
+                            // defs + history dominates). The default
+                            // timeout kills the request mid-prefill and
+                            // the reliable layer retries, but the
+                            // engine is still busy with the dropped
+                            // generation — so every retry hits a busy
+                            // engine and 500s. 10 minutes is generous
+                            // enough that even worst-case 32K prefill
+                            // finishes inside the window.
+                            providerTimeoutSecs = LOCAL_LITERT_TIMEOUT_SECS,
+                        )
+                    }
+                    is com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager
+                        .EngineReadiness.Failed,
+                    -> {
+                        // On-device load attempted but failed — surface
+                        // the reason so the user can see why on-device
+                        // didn't take effect. Daemon still falls through
+                        // to the cloud config rather than blocking
+                        // startup entirely.
+                        Log.w(TAG, "On-device engine load failed: ${readiness.reason}; falling back to cloud config")
+                        logRepository.append(
+                            LogSeverity.WARN,
+                            TAG,
+                            "On-device engine failed (${readiness.reason}); using cloud provider",
+                        )
+                        activityRepository.record(
+                            ActivityType.DAEMON_ERROR,
+                            "On-device engine failed: ${readiness.reason}",
+                        )
+                        cloudGlobalConfig
+                    }
+                    is com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager
+                        .EngineReadiness.NotConfigured,
+                    ->
+                        cloudGlobalConfig
+                    is com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager
+                        .EngineReadiness.Cancelled,
+                    -> {
+                        Log.i(TAG, "On-device engine load was cancelled before completion; using cloud config")
+                        logRepository.append(
+                            LogSeverity.INFO,
+                            TAG,
+                            "On-device engine load cancelled mid-init; cloud provider takes over",
+                        )
+                        cloudGlobalConfig
+                    }
+                }
 
-            if (!validateProviderKeyOrStop(globalConfig)) return@launch
+            val onDeviceReady =
+                readiness is com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager
+                    .EngineReadiness.Ready
+
+            if (!onDeviceReady && !validateProviderKeyOrStop(globalConfig)) return@launch
+
+            // Wipe persistent session stores when the active agent
+            // changed since the last successful start. Without this,
+            // a switch from cloud → on-device (or between on-device
+            // variants) leaves the SqliteSessionBackend at
+            // `workspace/sessions/sessions.db` carrying turns from
+            // the previous agent — the new model then sees a chat
+            // history it didn't produce and responds out of context.
+            // [handleStop]'s `wipeSessionStores` covers user-initiated
+            // stops; this covers daemon crashes and silent restarts
+            // where `handleStop` never ran.
+            val currentSignature = computeAgentSignature(globalConfig)
+            val previousSignature = persistence.lastAgentSignature()
+            if (previousSignature != null && previousSignature != currentSignature) {
+                Log.i(
+                    TAG,
+                    "Active agent changed since last start (was=$previousSignature now=$currentSignature); wiping session stores",
+                )
+                logRepository.append(
+                    LogSeverity.INFO,
+                    TAG,
+                    "Active agent changed; wiping persistent session history",
+                )
+                wipeSessionStores()
+            }
+            persistence.recordAgentSignature(currentSignature)
 
             val baseToml = ConfigTomlBuilder.build(globalConfig)
-            Log.i(TAG, "TOML has [email]: ${baseToml.contains("[email]")}")
             Log.i(TAG, "Provider=${globalConfig.provider} Model=${globalConfig.model} BaseUrl=${globalConfig.baseUrl} ApiKey=${if (globalConfig.apiKey.isNotBlank()) "present" else "EMPTY"}")
             val enabledChannels = channelConfigRepository.getEnabledWithSecrets()
             val channelNames = enabledChannels.map { it.first.type.displayName }
@@ -341,10 +486,22 @@ class ZeroAIDaemonService : Service() {
                 (application as? ZeroAIApplication)?.discordGuildId()
             val channelsToml =
                 ConfigTomlBuilder.buildChannelsToml(enabledChannels, discordGuildId)
-            val agentsToml = buildAgentsToml()
-            val peersToml = buildPeersToml()
-            val configToml = baseToml + channelsToml + agentsToml + peersToml
+            val agentsToml = AgentTomlAssembler.assemble(application as ZeroAIApplication)
+            val configToml =
+                baseToml + channelsToml + agentsToml + featureCtx.assembledToml()
 
+            if (BuildConfig.DEBUG) {
+                // Full TOML dump is debug-only because LogSanitizer
+                // covers `api_key` / token fields but does not redact
+                // the `aieos_inline` identity blob, which carries
+                // user name, hometown, and city. In release builds
+                // this would leak PII to logcat on every daemon
+                // start; in debug builds it's the most useful
+                // diagnostic we have.
+                for (chunk in LogSanitizer.sanitizeLogMessage(configToml).chunked(TOML_LOG_CHUNK_CHARS)) {
+                    Log.i(TAG, "TOML[chunk]:\n$chunk")
+                }
+            }
             if (!validateConfigOrStop(configToml)) return@launch
 
             val conflict = bridge.detectMemoryConflict(seededSettings.memoryBackend)
@@ -502,138 +659,6 @@ class ZeroAIDaemonService : Service() {
     }
 
     /**
-     * Converts [AppSettings] and resolved API key into a [GlobalTomlConfig].
-     *
-     * Comma-separated string fields in [AppSettings] are split into lists
-     * for [GlobalTomlConfig] properties that expect `List<String>`.
-     *
-     * @param settings Current application settings.
-     * @param apiKey Resolved API key for the default provider, or null.
-     * @param authProfiles Standalone FFI auth profiles for OAuth-backed providers.
-     * @return A fully populated [GlobalTomlConfig].
-     */
-    @Suppress("LongMethod")
-    private fun buildGlobalTomlConfig(
-        settings: AppSettings,
-        apiKey: ApiKey?,
-        authProfiles: List<FfiAuthProfile> = emptyList(),
-    ): GlobalTomlConfig {
-        val directKey = apiKey?.key.orEmpty()
-        val effectiveApiKey =
-            if (directKey.isNotBlank()) {
-                directKey
-            } else {
-                resolveOAuthAccessToken(settings.defaultProvider, authProfiles)
-            }
-        return GlobalTomlConfig(
-            provider = SlotAwareAgentConfig.configProvider(settings.defaultProvider),
-            model = settings.defaultModel,
-            apiKey = effectiveApiKey,
-            baseUrl = apiKey?.baseUrl.orEmpty(),
-            temperature = settings.defaultTemperature,
-            reasoningEffort = settings.reasoningEffort,
-            compactContext = settings.compactContext,
-            costEnabled = settings.costEnabled,
-            dailyLimitUsd = settings.dailyLimitUsd.toDouble(),
-            monthlyLimitUsd = settings.monthlyLimitUsd.toDouble(),
-            costWarnAtPercent = settings.costWarnAtPercent,
-            providerRetries = settings.providerRetries,
-            fallbackProviders = splitCsv(settings.fallbackProviders),
-            memoryBackend = settings.memoryBackend,
-            memoryAutoSave = settings.memoryAutoSave,
-            identityJson = settings.identityJson,
-            autonomyLevel = settings.autonomyLevel,
-            workspaceOnly = settings.workspaceOnly,
-            allowedCommands = splitCsv(settings.allowedCommands),
-            forbiddenPaths = splitCsv(settings.forbiddenPaths),
-            maxActionsPerHour = settings.maxActionsPerHour,
-            maxCostPerDayCents = settings.maxCostPerDayCents,
-            requireApprovalMediumRisk = settings.requireApprovalMediumRisk,
-            blockHighRiskCommands = settings.blockHighRiskCommands,
-            tunnelProvider = settings.tunnelProvider,
-            tunnelTailscaleFunnel = settings.tunnelTailscaleFunnel,
-            tunnelTailscaleHostname = settings.tunnelTailscaleHostname,
-            gatewayHost = settings.host,
-            gatewayPort = settings.port,
-            gatewayRequirePairing = settings.gatewayRequirePairing,
-            gatewayAllowPublicBind = settings.gatewayAllowPublicBind,
-            gatewayPairedTokens = splitCsv(settings.gatewayPairedTokens),
-            gatewayPairRateLimit = settings.gatewayPairRateLimit,
-            gatewayWebhookRateLimit = settings.gatewayWebhookRateLimit,
-            gatewayIdempotencyTtl = settings.gatewayIdempotencyTtl,
-            schedulerEnabled = settings.schedulerEnabled,
-            schedulerMaxTasks = settings.schedulerMaxTasks,
-            schedulerMaxConcurrent = settings.schedulerMaxConcurrent,
-            heartbeatEnabled = settings.heartbeatEnabled,
-            heartbeatIntervalMinutes = settings.heartbeatIntervalMinutes,
-            observabilityBackend = settings.observabilityBackend,
-            observabilityOtelEndpoint = settings.observabilityOtelEndpoint,
-            observabilityOtelServiceName = settings.observabilityOtelServiceName,
-            memoryHygieneEnabled = settings.memoryHygieneEnabled,
-            memoryArchiveAfterDays = settings.memoryArchiveAfterDays,
-            memoryPurgeAfterDays = settings.memoryPurgeAfterDays,
-            memoryEmbeddingProvider = settings.memoryEmbeddingProvider,
-            memoryEmbeddingModel = settings.memoryEmbeddingModel,
-            memoryVectorWeight = settings.memoryVectorWeight.toDouble(),
-            memoryKeywordWeight = settings.memoryKeywordWeight.toDouble(),
-            composioEnabled = settings.composioEnabled,
-            composioApiKey = settings.composioApiKey,
-            composioEntityId = settings.composioEntityId,
-            sharedFolderEnabled = settings.sharedFolderEnabled,
-            browserEnabled = settings.browserEnabled,
-            browserAllowedDomains = splitCsv(settings.browserAllowedDomains),
-            httpRequestEnabled = settings.httpRequestEnabled,
-            httpRequestAllowedDomains = splitCsv(settings.httpRequestAllowedDomains),
-            httpRequestMaxResponseSize = settings.httpRequestMaxResponseSize,
-            httpRequestTimeoutSecs = settings.httpRequestTimeoutSecs,
-            webFetchEnabled = settings.webFetchEnabled,
-            webFetchAllowedDomains = splitCsv(settings.webFetchAllowedDomains),
-            webFetchBlockedDomains = splitCsv(settings.webFetchBlockedDomains),
-            webFetchMaxResponseSize = settings.webFetchMaxResponseSize,
-            webFetchTimeoutSecs = settings.webFetchTimeoutSecs,
-            webSearchEnabled = settings.webSearchEnabled,
-            webSearchProvider = settings.webSearchProvider,
-            webSearchBraveApiKey = settings.webSearchBraveApiKey,
-            webSearchMaxResults = settings.webSearchMaxResults,
-            webSearchTimeoutSecs = settings.webSearchTimeoutSecs,
-            twitterBrowseEnabled = settings.twitterBrowseEnabled,
-            twitterBrowseCookieString = settings.twitterBrowseCookieString,
-            twitterBrowseMaxItems = settings.twitterBrowseMaxItems,
-            twitterBrowseTimeoutSecs = settings.twitterBrowseTimeoutSecs,
-            transcriptionEnabled = settings.transcriptionEnabled,
-            transcriptionApiUrl = settings.transcriptionApiUrl,
-            transcriptionModel = settings.transcriptionModel,
-            transcriptionLanguage = settings.transcriptionLanguage,
-            transcriptionMaxDurationSecs = settings.transcriptionMaxDurationSecs,
-            multimodalMaxImages = settings.multimodalMaxImages,
-            multimodalMaxImageSizeMb = settings.multimodalMaxImageSizeMb,
-            multimodalAllowRemoteFetch = settings.multimodalAllowRemoteFetch,
-            securitySandboxEnabled = settings.securitySandboxEnabled,
-            securitySandboxBackend = settings.securitySandboxBackend,
-            securitySandboxFirejailArgs = splitCsv(settings.securitySandboxFirejailArgs),
-            securityResourcesMaxMemoryMb = settings.securityResourcesMaxMemoryMb,
-            securityResourcesMaxCpuTimeSecs = settings.securityResourcesMaxCpuTimeSecs,
-            securityResourcesMaxSubprocesses = settings.securityResourcesMaxSubprocesses,
-            securityResourcesMemoryMonitoring = settings.securityResourcesMemoryMonitoring,
-            securityAuditEnabled = settings.securityAuditEnabled,
-            securityEstopEnabled = settings.securityEstopEnabled,
-            securityEstopRequireOtpToResume = settings.securityEstopRequireOtpToResume,
-            securityEstopStateFile = "${filesDir.absolutePath}/estop-state.json",
-            securityAuditLogPath = "${filesDir.absolutePath}/audit.log",
-            skillsPromptInjectionMode = settings.skillsPromptInjectionMode,
-            proxyEnabled = settings.proxyEnabled,
-            proxyHttpProxy = settings.proxyHttpProxy,
-            proxyHttpsProxy = settings.proxyHttpsProxy,
-            proxyAllProxy = settings.proxyAllProxy,
-            proxyNoProxy = splitCsv(settings.proxyNoProxy),
-            proxyScope = settings.proxyScope,
-            proxyServiceSelectors = splitCsv(settings.proxyServiceSelectors),
-            reliabilityBackoffMs = settings.reliabilityBackoffMs,
-            reliabilityApiKeysJson = settings.reliabilityApiKeysJson,
-        )
-    }
-
-    /**
      * Resolves an OAuth access token for [provider] from the Rust auth-profile store.
      *
      * Used as a fallback when no direct API key is stored. Anthropic tokens
@@ -678,114 +703,6 @@ class ZeroAIDaemonService : Service() {
                 }
             else -> ""
         }
-
-    /**
-     * Resolves all enabled agents into [AgentTomlEntry] instances and builds
-     * the `[agents.<name>]` TOML sections.
-     *
-     * For each enabled agent, the provider ID is resolved to an upstream
-     * factory name and the corresponding API key is fetched (with OAuth
-     * refresh if needed). Agents without a provider or model are skipped.
-     *
-     * @return TOML string with per-agent sections, or empty if no agents qualify.
-     */
-    private suspend fun buildAgentsToml(): String {
-        val authProfiles = loadStandaloneAuthProfiles()
-        val allAgents = agentRepository.agents.first()
-        val entries =
-            SlotAwareAgentConfig
-                .orderedConfiguredAgents(allAgents)
-                .map { agent ->
-                    val agentKey = apiKeyRepository.getByProviderFresh(agent.provider)
-                    if (
-                        !SlotAwareAgentConfig.hasUsableDaemonProviderCredentials(
-                            provider = agent.provider,
-                            apiKey = agentKey,
-                            authProfiles = authProfiles,
-                        )
-                    ) {
-                        return@map null
-                    }
-                    AgentTomlEntry(
-                        name = SlotAwareAgentConfig.configName(agent),
-                        provider =
-                            ConfigTomlBuilder.resolveProvider(
-                                SlotAwareAgentConfig.configProvider(agent),
-                                agentKey?.baseUrl.orEmpty(),
-                            ),
-                        model = agent.modelName,
-                        apiKey = agentKey?.key.orEmpty(),
-                        systemPrompt = agent.systemPrompt,
-                        temperature = agent.temperature,
-                        maxDepth = agent.maxDepth,
-                    )
-                }.filterNotNull()
-        return ConfigTomlBuilder.buildAgentsToml(entries)
-    }
-
-    /**
-     * Builds the Tailscale peer agents TOML section from cached discovery state.
-     *
-     * Reads the peer list from cached settings and converts enabled
-     * agent peers (zeroclaw/openclaw kinds) into [PeerTomlEntry] instances.
-     *
-     * @return TOML string fragment for `[[tailscale_peers.entries]]`, or empty.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    private suspend fun buildPeersToml(): String {
-        val settings = settingsRepository.settings.first()
-        val cachedJson = settings.tailscaleCachedDiscovery
-        if (cachedJson.isBlank()) return ""
-
-        val peers =
-            try {
-                kotlinx.serialization.json.Json.decodeFromString<
-                    List<com.zeroclaw.android.model.CachedTailscalePeer>,
-                >(cachedJson)
-            } catch (_: Exception) {
-                return ""
-            }
-
-        val rawEntries =
-            peers.flatMap { peer ->
-                peer.services
-                    .filter { svc ->
-                        com.zeroclaw.android.tailscale
-                            .isAgentKind(svc.kind)
-                    }.map { svc ->
-                        Triple(
-                            peer,
-                            svc,
-                            com.zeroclaw.android.tailscale
-                                .normalizeKind(svc.kind),
-                        )
-                    }
-            }
-        val defaults =
-            com.zeroclaw.android.tailscale.PeerMessageRouter.resolveAliasConflicts(
-                rawEntries.map { it.third },
-            )
-        val aliasPrefs = peerAliasPrefs()
-        val entries =
-            rawEntries.mapIndexed { i, (peer, svc, _) ->
-                val savedAlias =
-                    aliasPrefs.getString(
-                        peerAliasKey(peer.ip, svc.port),
-                        null,
-                    )
-                PeerTomlEntry(
-                    ip = peer.ip,
-                    hostname = peer.hostname,
-                    kind = svc.kind,
-                    port = svc.port,
-                    alias = savedAlias ?: defaults[i],
-                    authRequired = svc.authRequired,
-                    enabled = true,
-                )
-            }
-
-        return ConfigTomlBuilder.buildTailscalePeersToml(entries)
-    }
 
     /**
      * Opens the encrypted preferences file for peer alias storage.
@@ -984,16 +901,7 @@ class ZeroAIDaemonService : Service() {
                     "Stop failed: $safeMsg",
                 )
             } finally {
-                try {
-                    val sessionDir = filesDir.resolve("sessions")
-                    if (sessionDir.exists()) {
-                        sessionDir.deleteRecursively()
-                    }
-                } catch (
-                    @Suppress("TooGenericExceptionCaught") e: Exception,
-                ) {
-                    Log.w(TAG, "Session cleanup failed", e)
-                }
+                wipeSessionStores()
                 releaseWakeLock()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -1127,10 +1035,7 @@ class ZeroAIDaemonService : Service() {
                             startStatusPolling()
                             runMemoryHealthCheck(memoryBackend)
                             restorePersistedSessions()
-                            initMessageClassifier()
                             initMemoryPipeline()
-                            startConsolidationIfNeeded()
-                            startLeaderboardRefresh()
                             try {
                                 val curSettings = settingsRepository.settings.first()
                                 if (curSettings.sharedFolderEnabled) {
@@ -1282,6 +1187,80 @@ class ZeroAIDaemonService : Service() {
                 TAG,
                 "Memory health check failed: ${healthResult.reason}",
             )
+        }
+    }
+
+    /**
+     * Builds an opaque signature for the currently-selected agent.
+     *
+     * Two starts that emit the same signature are considered the
+     * "same agent" — daemon-start does not wipe sessions in that
+     * case. Signature includes provider + model + base URL so that a
+     * model swap within the same provider (e.g., on-device variant
+     * switch, or cloud model change within the same key) also
+     * triggers a wipe.
+     */
+    private fun computeAgentSignature(config: GlobalTomlConfig): String {
+        val provider = config.provider.ifBlank { "unknown" }
+        val model = config.model.ifBlank { "unknown" }
+        val baseUrl = config.baseUrl.ifBlank { "default" }
+        return "$provider::$model::$baseUrl"
+    }
+
+    /**
+     * Deletes every on-disk chat-session store so a fresh daemon
+     * start opens with empty history.
+     *
+     * Three store locations are covered:
+     *
+     *   - `filesDir/sessions/` — per-session JSON snapshots saved by
+     *     [saveActiveSessions] for agent-script-host continuity.
+     *   - `filesDir/workspace/sessions/sessions.db` (plus its WAL +
+     *     SHM siblings) — upstream's `SqliteSessionBackend` store
+     *     that gives channel handlers their cross-channel pickup
+     *     within a daemon lifetime.
+     *   - `filesDir/agents/<alias>/workspace/sessions/` for every
+     *     configured agent — observed on disk as a separate store
+     *     (e.g. `agents/Ollama / Local/workspace/sessions/sessions.db`).
+     *     Walked dynamically because the agent set changes when
+     *     users add/rename agents, and a static list would silently
+     *     stop matching new agent aliases.
+     *
+     * Cross-channel pickup is a **runtime** property of the live
+     * sqlite connection; persistence across daemon restarts is the
+     * separate property we intentionally cut here. Wiping on stop
+     * preserves the "any chat app can pick up where another left
+     * off, while the daemon is running" behaviour without leaking
+     * stale history into the next daemon lifetime.
+     *
+     * In-flight writes from `bridge.stop()` failure paths: this is
+     * called from `handleStop()`'s `finally` block, so an FFI stop
+     * exception still triggers the wipe even if the daemon is
+     * mid-flush. On POSIX (Android) `unlink()` succeeds while the
+     * SQLite FD remains open — any further writes land on a phantom
+     * inode, the file is reclaimed when the FD closes, and there is
+     * no data corruption (we're discarding the contents anyway).
+     *
+     * Best-effort — failures log but never block the stop path.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun wipeSessionStores() {
+        val targets = mutableListOf<java.io.File>()
+        targets += filesDir.resolve("sessions")
+        targets += filesDir.resolve("workspace").resolve("sessions")
+        filesDir.resolve("agents").listFiles()?.forEach { agentDir ->
+            if (agentDir.isDirectory) {
+                targets += agentDir.resolve("workspace").resolve("sessions")
+            }
+        }
+        for (dir in targets) {
+            try {
+                if (dir.exists()) {
+                    dir.deleteRecursively()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Session store wipe failed at ${dir.path}: ${e.message}")
+            }
         }
     }
 
@@ -1505,84 +1484,6 @@ class ZeroAIDaemonService : Service() {
     }
 
     /**
-     * Runs LLM startup consolidation if enabled and conditions are met.
-     *
-     * Checks:
-     * 1. `smart_extraction` is enabled in config
-     * 2. Power state is not [MemoryExtractionPipeline.PowerState.CRITICAL]
-     * 3. At least 1 hour since last consolidation (SharedPreferences)
-     * 4. Backlog has messages queued
-     *
-     * Runs [com.zeroclaw.ffi.runStartupConsolidation] on [Dispatchers.IO]
-     * with a 60-second timeout. Records the timestamp on success.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    private fun startConsolidationIfNeeded() {
-        serviceScope.launch(ioDispatcher) {
-            try {
-                if (currentPowerState == MemoryExtractionPipeline.PowerState.CRITICAL) return@launch
-
-                val backlogCount = com.zeroclaw.ffi.consolidationBacklogCount()
-                if (backlogCount == 0) return@launch
-
-                val prefs = getSharedPreferences("memcore", MODE_PRIVATE)
-                val lastRun = prefs.getLong("last_consolidation_ms", 0L)
-                if (System.currentTimeMillis() - lastRun < CONSOLIDATION_COOLDOWN_MS) return@launch
-
-                Log.i(TAG, "Starting consolidation ($backlogCount backlog messages)")
-                val report = com.zeroclaw.ffi.runStartupConsolidation()
-                Log.i(
-                    TAG,
-                    "Consolidation complete: ${report.factsExtracted} facts, " +
-                        "${report.sessionsSummarized} summaries, " +
-                        "${report.errors.size} errors",
-                )
-                if (report.factsExtracted > 0u) {
-                    prefs.edit().putLong("last_consolidation_ms", System.currentTimeMillis()).apply()
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Consolidation failed: ${e.message}")
-            }
-        }
-    }
-
-    /**
-     * Starts periodic leaderboard cache refresh.
-     *
-     * Queries [InteractionOutcomeDao.providerLeaderboard] from Room,
-     * serializes to JSON, and pushes to the Rust FFI cache via
-     * [com.zeroclaw.ffi.setLeaderboardCache]. Repeats every 5 minutes.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    private fun startLeaderboardRefresh() {
-        serviceScope.launch(ioDispatcher) {
-            val app = application as ZeroAIApplication
-            val dao = app.database.interactionOutcomeDao()
-            while (true) {
-                try {
-                    val thirtyDaysAgo =
-                        System.currentTimeMillis() - LEADERBOARD_LOOKBACK_MS
-                    val rows = dao.providerLeaderboard(thirtyDaysAgo)
-                    val jsonArray = org.json.JSONArray()
-                    for (row in rows) {
-                        val obj = org.json.JSONObject()
-                        obj.put("provider", row.provider)
-                        obj.put("model", row.model)
-                        obj.put("total", row.total)
-                        obj.put("successRate", row.successRate)
-                        obj.put("avgLatency", row.avgLatency)
-                        jsonArray.put(obj)
-                    }
-                    com.zeroclaw.ffi.setLeaderboardCache(jsonArray.toString())
-                } catch (e: Exception) {
-                    Log.w(TAG, "Leaderboard refresh failed: ${e.message}")
-                }
-                delay(LEADERBOARD_REFRESH_INTERVAL_MS)
-            }
-        }
-    }
-
-    /**
      * Acquires a partial wake lock for the startup phase.
      *
      * If a previous wake lock reference exists but is no longer held
@@ -1651,70 +1552,6 @@ class ZeroAIDaemonService : Service() {
     }
 
     /**
-     * Initializes the [MessageClassifier] on the bridge after daemon startup.
-     *
-     * Checks Gemini Nano model availability and creates a [NanoClassifier]
-     * if the model is ready. Uses [ProcessLifecycleOwner] to detect whether
-     * the app is in the foreground (required by AICore for on-device inference).
-     */
-    private suspend fun initMessageClassifier() {
-        val nanoClassifier =
-            try {
-                val nanoBridge = OnDeviceInferenceBridge()
-                if (nanoBridge.checkModelStatus() is com.zeroclaw.android.model.OnDeviceStatus.Available) {
-                    nanoBridge.warmup()
-                    setNanoAvailable(true)
-                    NanoClassifier(nanoBridge)
-                } else {
-                    setNanoAvailable(false)
-                    null
-                }
-            } catch (
-                @Suppress("TooGenericExceptionCaught") e: Exception,
-            ) {
-                Log.w(TAG, "Nano model unavailable: ${e.message}")
-                setNanoAvailable(false)
-                null
-            }
-
-        bridge.initClassifier(
-            nanoClassifier = nanoClassifier,
-            isForeground = {
-                ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(
-                    Lifecycle.State.RESUMED,
-                )
-            },
-        )
-        Log.i(TAG, "Message classifier initialized (nano=${nanoClassifier != null})")
-    }
-
-    /**
-     * Builds the Twitter awareness fragment when connected and enabled.
-     *
-     * @param settings Current app settings snapshot.
-     * @return Fragment string or null if Twitter is not active.
-     */
-    private fun twitterAwarenessFragment(settings: AppSettings): String? {
-        if (!settings.twitterBrowseEnabled) return null
-        if (settings.twitterBrowseCookieString.isBlank()) return null
-        return "- Twitter/X: Connected. Use twitter_browse to search tweets and timelines."
-    }
-
-    /**
-     * Builds the email awareness fragment when configured and enabled.
-     *
-     * @param emailConfig Email configuration from repository, or null.
-     * @return Fragment string or null if email is not active.
-     */
-    private fun emailAwarenessFragment(
-        emailConfig: com.zeroclaw.android.data.email.EmailConfigState?,
-    ): String? {
-        if (emailConfig == null || !emailConfig.isEnabled) return null
-        if (emailConfig.address.isBlank()) return null
-        return "- Email: Connected as ${emailConfig.address}. Use email tools to check, read, search, and compose email."
-    }
-
-    /**
      * Builds the Google Messages awareness fragment when paired with allowlisted conversations.
      *
      * @return Fragment string or null if not connected or no allowlisted conversations.
@@ -1746,62 +1583,18 @@ class ZeroAIDaemonService : Service() {
         return "- Google Messages: Paired via RCS/SMS. Allowlisted conversations: $names. Use read_messages to read transcripts."
     }
 
-    /**
-     * Builds the ClawBoy awareness fragment. Always present since the emulator is installed.
-     *
-     * @return Static ClawBoy fragment.
-     */
-    private fun clawBoyAwarenessFragment(): String = "- ClawBoy: Game Boy emulator available. Say 'play pokemon' in chat to start a game."
+    // ClawBoy awareness fragment removed. The start/stop triggers are
+    // regex-driven (see `zeroclaw-android/zeroai/src/clawboy_triggers.rs`)
+    // and fire without the LLM ever seeing the keyword — there is
+    // nothing the agent needs to know about the emulator's existence
+    // until the user explicitly starts a session, at which point the
+    // gameplay-time prompt includes its own context. Carrying this
+    // line every turn just bloated the system prompt for a feature
+    // that's invoked < 1 % of the time.
 
-    /**
-     * Builds the Tailscale awareness fragment when enabled and services are cached.
-     *
-     * @param settings Current app settings snapshot.
-     * @return Fragment string or null if awareness is disabled or no healthy services.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    private fun tailscaleAwarenessFragment(settings: AppSettings): String? {
-        if (!settings.tailscaleAwarenessEnabled) return null
-        if (settings.tailscaleCachedDiscovery.isBlank()) return null
-        val peers =
-            try {
-                kotlinx.serialization.json.Json.decodeFromString<
-                    List<com.zeroclaw.android.model.CachedTailscalePeer>,
-                >(settings.tailscaleCachedDiscovery)
-            } catch (_: Exception) {
-                return null
-            }
-        val peersWithServices =
-            peers.filter { it.services.any { svc -> svc.healthy } }
-        if (peersWithServices.isEmpty()) return null
-        val fragment =
-            buildString {
-                append("- Tailscale: Connected to tailnet.")
-                peersWithServices.forEach { peer ->
-                    val name = peer.hostname.ifEmpty { peer.ip }
-                    append(" Peer \"$name\" (${peer.ip}) has:")
-                    peer.services.filter { it.healthy }.forEach { svc ->
-                        val label =
-                            when (svc.kind) {
-                                "ollama" -> "Ollama"
-                                "lm_studio" -> "LM Studio"
-                                "vllm" -> "vLLM"
-                                "local_ai" -> "LocalAI"
-                                "zeroclaw" -> "zeroclaw daemon"
-                                else -> svc.kind
-                            }
-                        val ver =
-                            if (svc.version != null) {
-                                " (${svc.version})"
-                            } else {
-                                ""
-                            }
-                        append(" $label$ver on port ${svc.port};")
-                    }
-                }
-            }.trimEnd(';').plus(".")
-        return fragment
-    }
+    // Tailscale peers TOML + awareness now live in
+    // `features/TailscaleContributor.kt`. The contributor reads settings
+    // + the alias lookup callback wired through `FeatureContext`.
 
     /** Constants for [ZeroAIDaemonService]. */
     companion object {
@@ -1825,14 +1618,33 @@ class ZeroAIDaemonService : Service() {
         const val ACTION_OAUTH_HOLD = "com.zeroclaw.android.action.OAUTH_HOLD"
 
         private const val TAG = "ZeroAIDaemonService"
+
+        /** Chunk size for splitting the sanitized TOML across multiple logcat entries. */
+        private const val TOML_LOG_CHUNK_CHARS = 3000
+
+        /**
+         * Localhost endpoint of the LiteRT-LM HTTP server started by
+         * [com.zeroclaw.android.service.ondevice.OnDeviceInferenceManager]
+         * when the on-device-large agent is active. The daemon's
+         * OpenAI-compatible provider points here so channels route
+         * through the local engine.
+         */
+        private const val LOCAL_LITERT_BASE_URL = "http://127.0.0.1:11434/v1"
+
+        /**
+         * HTTP-client timeout (seconds) the daemon's reliable provider
+         * layer waits for a response from the localhost LiteRT-LM
+         * server before retrying. Set far above the daemon's default
+         * 120 s because CPU inference of a 4B-param model can take
+         * 60-240 s on Tensor G5 for prefill alone.
+         */
+        private const val LOCAL_LITERT_TIMEOUT_SECS: Long = 600L
+
         private const val POLL_INTERVAL_FOREGROUND_MS = 5_000L
         private const val POLL_INTERVAL_BACKGROUND_MS = 60_000L
         private const val WAKE_LOCK_TAG = "zeroclaw:daemon"
         private const val WAKE_LOCK_TIMEOUT_MS = 180_000L
         private const val RESTART_DELAY_MS = 5_000L
-        private const val LEADERBOARD_REFRESH_INTERVAL_MS = 300_000L
-        private const val LEADERBOARD_LOOKBACK_MS = 30L * 24 * 60 * 60 * 1_000
-        private const val CONSOLIDATION_COOLDOWN_MS = 3_600_000L
         private const val RESTART_REQUEST_CODE = 42
         private const val OAUTH_HOLD_TIMEOUT_MS = 120_000L
         private const val BEARER_TOKEN_BYTES = 32
@@ -1847,15 +1659,7 @@ class ZeroAIDaemonService : Service() {
         /** Multiplier for converting battery level/scale to a percentage. */
         private const val PERCENT_SCALE = 100
 
-        /** Default battery percentage when scale is zero or unavailable. */
+        /** Default battery percentage when scale reports zero (broken battery service). */
         private const val DEFAULT_BATTERY_PCT = 50
     }
 }
-
-/**
- * Splits a comma-separated string into a trimmed, non-blank list.
- *
- * @param csv Comma-separated string (may be blank).
- * @return List of trimmed non-blank tokens; empty list if [csv] is blank.
- */
-private fun splitCsv(csv: String): List<String> = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }

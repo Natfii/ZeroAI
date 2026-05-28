@@ -199,7 +199,7 @@ internal fun SettingsContent(
             SettingsListItem(
                 icon = Icons.Outlined.Memory,
                 title = "Memory Advanced",
-                subtitle = "Embedding, hygiene, recall weights, Qdrant",
+                subtitle = "Embedding, hygiene, recall weights",
                 onClick = { onNavigate(SettingsNavAction.MemoryAdvanced) },
             )
             SettingsListItem(

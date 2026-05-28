@@ -32,46 +32,102 @@ pub struct FfiTwitterUser {
 }
 
 /// Reads the current twitter browse config from the daemon.
+///
+/// Disabled: `Config.twitter_browse` was removed upstream during the
+/// workspace split (zeroclaw v0.8.0-beta-1). Returns disabled defaults
+/// so the Android settings UI can render without a twitter config block.
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Returns the current twitter browse tool configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_twitter_browse_config() -> FfiTwitterBrowseConfig = get_twitter_browse_config_inner
+);
+
+crate::ffi_export!(
+    /// Hot-swaps the cookie string on the daemon's in-memory config.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn set_twitter_browse_cookie(cookie_string: String) -> () = set_twitter_browse_cookie_inner
+);
+
+crate::ffi_export!(
+    /// Clears the cookie from the daemon's in-memory config.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn clear_twitter_browse_cookie() -> () = clear_twitter_browse_cookie_inner
+);
+
+crate::ffi_export!(
+    /// Verifies a Twitter cookie string by checking for required cookies.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if required cookies are missing, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn verify_twitter_connection(cookie_string: String) -> FfiTwitterUser = verify_twitter_connection_inner
+);
+
+crate::ffi_export!(
+    /// Hot-updates the twitter browse tool config in the daemon's memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn update_twitter_browse_config(enabled: bool, max_items: u32, timeout_secs: u32) -> () = update_twitter_browse_config_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 pub(crate) fn get_twitter_browse_config_inner() -> Result<FfiTwitterBrowseConfig, FfiError> {
-    runtime::with_daemon_config(|config| FfiTwitterBrowseConfig {
-        enabled: config.twitter_browse.enabled,
-        has_cookie: config
-            .twitter_browse
-            .cookie_string
-            .as_ref()
-            .is_some_and(|s| !s.is_empty()),
-        max_items: u32::try_from(config.twitter_browse.max_items.min(u32::MAX as usize))
-            .unwrap_or(u32::MAX),
-        timeout_secs: u32::try_from(config.twitter_browse.timeout_secs.min(u64::from(u32::MAX)))
-            .unwrap_or(u32::MAX),
+    runtime::with_daemon_config(|_config| FfiTwitterBrowseConfig {
+        enabled: false,
+        has_cookie: false,
+        max_items: 0,
+        timeout_secs: 0,
     })
 }
 
 /// Hot-swaps the cookie string on the daemon's in-memory config.
-pub(crate) fn set_twitter_browse_cookie_inner(cookie_string: String) -> Result<(), FfiError> {
-    runtime::with_daemon_config_mut(|config| {
-        config.twitter_browse.cookie_string = Some(cookie_string);
-    })
+///
+/// Disabled: `twitter_browse` was removed upstream during the
+/// workspace split (zeroclaw v0.8.0-beta-1). No-op stub kept to
+/// preserve the FFI surface for the Android caller.
+pub(crate) fn set_twitter_browse_cookie_inner(_cookie_string: String) -> Result<(), FfiError> {
+    runtime::with_daemon_config_mut(|_config| {})
 }
 
 /// Clears the cookie from the daemon's in-memory config.
+///
+/// Disabled: `twitter_browse` was removed upstream during the
+/// workspace split (zeroclaw v0.8.0-beta-1). No-op stub kept to
+/// preserve the FFI surface for the Android caller.
 pub(crate) fn clear_twitter_browse_cookie_inner() -> Result<(), FfiError> {
-    runtime::with_daemon_config_mut(|config| {
-        config.twitter_browse.cookie_string = None;
-    })
+    runtime::with_daemon_config_mut(|_config| {})
 }
 
 /// Hot-updates the twitter browse tool config in the daemon's memory.
+///
+/// Disabled: `twitter_browse` was removed upstream during the
+/// workspace split (zeroclaw v0.8.0-beta-1). No-op stub kept to
+/// preserve the FFI surface for the Android caller.
 pub(crate) fn update_twitter_browse_config_inner(
-    enabled: bool,
-    max_items: u32,
-    timeout_secs: u32,
+    _enabled: bool,
+    _max_items: u32,
+    _timeout_secs: u32,
 ) -> Result<(), FfiError> {
-    runtime::with_daemon_config_mut(|config| {
-        config.twitter_browse.enabled = enabled;
-        config.twitter_browse.max_items = max_items as usize;
-        config.twitter_browse.timeout_secs = u64::from(timeout_secs);
-    })
+    runtime::with_daemon_config_mut(|_config| {})
 }
 
 /// Verifies a Twitter cookie string by checking for required cookies.

@@ -106,6 +106,8 @@ import kotlinx.coroutines.launch
  * @property restartRequired Whether the daemon must be restarted to apply pending changes.
  * @property memoryHealthWarning Warning from failed memory health check, if any.
  * @property estopEngaged Whether the emergency stop is currently active.
+ * @property onDeviceInferenceLoading Human-readable status string when the
+ *   on-device inference engine is mid-load, or null when idle/ready.
  */
 data class DashboardState(
     val serviceState: ServiceState,
@@ -121,6 +123,7 @@ data class DashboardState(
     val restartRequired: Boolean = false,
     val memoryHealthWarning: String? = null,
     val estopEngaged: Boolean = false,
+    val onDeviceInferenceLoading: String? = null,
 )
 
 /**
@@ -164,7 +167,11 @@ fun DashboardScreen(
     val context = LocalContext.current
     val app = context.applicationContext as ZeroAIApplication
     val estopEngaged by app.estopRepository.engaged.collectAsStateWithLifecycle()
+    val onDeviceState by app.onDeviceInferenceManager.state.collectAsStateWithLifecycle()
     val coroutineScope = rememberCoroutineScope()
+    val onDeviceLoadingLabel =
+        (onDeviceState as? com.zeroclaw.android.service.ondevice.OnDeviceInferenceState.Loading)
+            ?.let { "Loading on-device model: ${it.model.displayName}" }
 
     val conflictData = memoryConflict
     if (conflictData is MemoryConflict.StaleData) {
@@ -191,6 +198,7 @@ fun DashboardScreen(
                 restartRequired = restartRequired,
                 memoryHealthWarning = memoryHealthWarning,
                 estopEngaged = estopEngaged,
+                onDeviceInferenceLoading = onDeviceLoadingLabel,
             ),
         edgeMargin = edgeMargin,
         onNavigateToCostDetail = onNavigateToCostDetail,
@@ -258,6 +266,10 @@ internal fun DashboardContent(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(modifier = Modifier.height(8.dp))
+
+            state.onDeviceInferenceLoading?.let { label ->
+                OnDeviceLoadingBanner(label = label)
+            }
 
             if (state.restartRequired) {
                 RestartRequiredBanner(onRestartDaemon = onRestartDaemon)
@@ -1158,3 +1170,48 @@ private fun formatFileSize(bytes: Long): String {
 
 /** Number of bytes per kilobyte. */
 private const val BYTES_PER_KB = 1024L
+
+/**
+ * Banner explaining that the daemon is currently waiting for the
+ * on-device large model to finish loading. Without it, users who
+ * tap Start with the on-device agent active see a frozen-looking
+ * dashboard for several seconds while the engine warms up — the
+ * daemon foreground service is alive but `serviceState` doesn't
+ * flip to RUNNING until the engine load finishes.
+ *
+ * @param label User-facing description of which model is loading.
+ */
+@Composable
+private fun OnDeviceLoadingBanner(label: String) {
+    androidx.compose.material3.Card(
+        colors =
+            androidx.compose.material3.CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement =
+                androidx.compose.foundation.layout.Arrangement
+                    .spacedBy(12.dp),
+        ) {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+            )
+            androidx.compose.material3.Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+    }
+}

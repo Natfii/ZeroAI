@@ -33,6 +33,7 @@ import com.zeroclaw.android.service.ZeroAIDaemonService
 import com.zeroclaw.android.ui.component.PinEntryMode
 import com.zeroclaw.android.ui.component.PinEntrySheet
 import com.zeroclaw.android.ui.screen.agents.AgentsScreen
+import com.zeroclaw.android.ui.screen.agents.OnDeviceLargeModelScreen
 import com.zeroclaw.android.ui.screen.agents.ProviderSlotDetailScreen
 import com.zeroclaw.android.ui.screen.clawboy.ClawBoyConfigScreen
 import com.zeroclaw.android.ui.screen.dashboard.DashboardScreen
@@ -143,6 +144,9 @@ fun ZeroAINavHost(
                 onNavigateToDetail = { agentId ->
                     navController.navigate(ProviderSlotDetailRoute(slotId = agentId))
                 },
+                onNavigateToOnDeviceLarge = {
+                    navController.navigate(OnDeviceLargeModelRoute)
+                },
                 edgeMargin = edgeMargin,
             )
         }
@@ -153,6 +157,10 @@ fun ZeroAINavHost(
                 slotId = route.slotId,
                 edgeMargin = edgeMargin,
             )
+        }
+
+        composable<OnDeviceLargeModelRoute> {
+            OnDeviceLargeModelScreen(edgeMargin = edgeMargin)
         }
 
         composable<PluginsRoute> {

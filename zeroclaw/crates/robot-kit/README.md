@@ -88,7 +88,7 @@ pip install piper-tts
 
 ```bash
 # Clone and build
-git clone (private -- no remote)
+git clone https://github.com/zeroclaw-labs/zeroclaw
 cd zeroclaw
 cargo build -p zeroclaw-robot-kit --release
 ```
@@ -112,11 +112,11 @@ nano ~/.zeroclaw/robot.toml
 ollama serve &
 
 # Test in mock mode
-./target/release/zeroclaw agent -m "Say hello and show a happy face"
+./target/release/zeroclaw agent -a assistant -m "Say hello and show a happy face"
 
 # Test with real hardware
 # (after configuring robot.toml)
-./target/release/zeroclaw agent -m "Move forward 1 meter"
+./target/release/zeroclaw agent -a assistant -m "Move forward 1 meter"
 ```
 
 ## Integration

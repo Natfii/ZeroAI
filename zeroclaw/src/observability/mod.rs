@@ -1,40 +1,10 @@
-pub mod log;
-pub mod multi;
-pub mod noop;
-pub mod runtime_trace;
-pub mod traits;
-pub mod verbose;
-
 #[allow(unused_imports)]
-pub use self::log::LogObserver;
-#[allow(unused_imports)]
-pub use self::multi::MultiObserver;
-pub use noop::NoopObserver;
-pub use traits::{Observer, ObserverEvent};
-#[allow(unused_imports)]
-pub use verbose::VerboseObserver;
-
-use crate::config::ObservabilityConfig;
-
-/// Factory: create the right observer from config
-pub fn create_observer(config: &ObservabilityConfig) -> Box<dyn Observer> {
-    match config.backend.as_str() {
-        "log" => Box::new(LogObserver::new()),
-        "verbose" => Box::new(VerboseObserver::new()),
-        "none" | "noop" => Box::new(NoopObserver),
-        _ => {
-            tracing::warn!(
-                "Unknown observability backend '{}', falling back to noop",
-                config.backend
-            );
-            Box::new(NoopObserver)
-        }
-    }
-}
+pub use zeroclaw_runtime::observability::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::*;
 
     #[test]
     fn factory_none_returns_noop() {
@@ -61,6 +31,77 @@ mod tests {
             ..ObservabilityConfig::default()
         };
         assert_eq!(create_observer(&cfg).name(), "log");
+    }
+
+    #[test]
+    fn factory_verbose_returns_verbose() {
+        let cfg = ObservabilityConfig {
+            backend: "verbose".into(),
+            ..ObservabilityConfig::default()
+        };
+        assert_eq!(create_observer(&cfg).name(), "verbose");
+    }
+
+    #[test]
+    fn factory_prometheus_returns_prometheus() {
+        let cfg = ObservabilityConfig {
+            backend: "prometheus".into(),
+            ..ObservabilityConfig::default()
+        };
+        let expected = if cfg!(feature = "observability-prometheus") {
+            "prometheus"
+        } else {
+            "noop"
+        };
+        assert_eq!(create_observer(&cfg).name(), expected);
+    }
+
+    #[test]
+    fn factory_otel_returns_otel() {
+        let cfg = ObservabilityConfig {
+            backend: "otel".into(),
+            otel_endpoint: Some("http://127.0.0.1:19999".into()),
+            otel_service_name: Some("test".into()),
+            ..ObservabilityConfig::default()
+        };
+        let expected = if cfg!(feature = "observability-otel") {
+            "otel"
+        } else {
+            "noop"
+        };
+        assert_eq!(create_observer(&cfg).name(), expected);
+    }
+
+    #[test]
+    fn factory_opentelemetry_alias() {
+        let cfg = ObservabilityConfig {
+            backend: "opentelemetry".into(),
+            otel_endpoint: Some("http://127.0.0.1:19999".into()),
+            otel_service_name: Some("test".into()),
+            ..ObservabilityConfig::default()
+        };
+        let expected = if cfg!(feature = "observability-otel") {
+            "otel"
+        } else {
+            "noop"
+        };
+        assert_eq!(create_observer(&cfg).name(), expected);
+    }
+
+    #[test]
+    fn factory_otlp_alias() {
+        let cfg = ObservabilityConfig {
+            backend: "otlp".into(),
+            otel_endpoint: Some("http://127.0.0.1:19999".into()),
+            otel_service_name: Some("test".into()),
+            ..ObservabilityConfig::default()
+        };
+        let expected = if cfg!(feature = "observability-otel") {
+            "otel"
+        } else {
+            "noop"
+        };
+        assert_eq!(create_observer(&cfg).name(), expected);
     }
 
     #[test]

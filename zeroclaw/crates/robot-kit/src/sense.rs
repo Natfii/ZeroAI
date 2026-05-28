@@ -7,7 +7,7 @@ use crate::config::RobotConfig;
 use crate::traits::{Tool, ToolResult};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -104,12 +104,11 @@ impl SenseTool {
                 // Parse output (format: angle,distance per line)
                 let mut ranges = vec![999.0; 360];
                 for line in String::from_utf8_lossy(&out.stdout).lines() {
-                    if let Some((angle, dist)) = line.split_once(',') {
-                        if let (Ok(a), Ok(d)) = (angle.parse::<usize>(), dist.parse::<f64>()) {
-                            if a < 360 {
-                                ranges[a] = d;
-                            }
-                        }
+                    if let Some((angle, dist)) = line.split_once(',')
+                        && let (Ok(a), Ok(d)) = (angle.parse::<usize>(), dist.parse::<f64>())
+                        && a < 360
+                    {
+                        ranges[a] = d;
                     }
                 }
 
@@ -133,7 +132,12 @@ impl SenseTool {
             }
             _ => {
                 // Fallback to mock if hardware unavailable
-                tracing::warn!("RPLidar unavailable, using mock data");
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+                    "RPLidar unavailable, using mock data"
+                );
                 self.scan_mock().await
             }
         }
@@ -268,7 +272,7 @@ impl Tool for SenseTool {
     async fn execute(&self, args: Value) -> Result<ToolResult> {
         let action = args["action"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing 'action' parameter"))?;
+            .ok_or_else(|| anyhow::Error::msg("Missing 'action' parameter"))?;
 
         match action {
             "scan" => {

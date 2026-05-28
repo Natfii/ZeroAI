@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Refresh
@@ -266,6 +267,10 @@ private fun ServerCard(
                     when (server.serverType) {
                         LocalServerType.OLLAMA -> Icons.Default.Dns
                         LocalServerType.OPENAI_COMPATIBLE -> Icons.Default.Storage
+                        LocalServerType.ZEROCLAW,
+                        LocalServerType.OPENCLAW,
+                        LocalServerType.HERMES,
+                        -> Icons.Default.Cloud
                     },
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,

@@ -415,11 +415,6 @@ class SettingsViewModel(
         updateDaemonSetting { setTwitterBrowseEnabled(enabled) }
     }
 
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTwitterBrowseCookieString */
-    fun updateTwitterBrowseCookieString(cookieString: String) {
-        updateDaemonSetting { setTwitterBrowseCookieString(cookieString) }
-    }
-
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTwitterBrowseMaxItems */
     fun updateTwitterBrowseMaxItems(max: Long) {
         updateDaemonSetting { setTwitterBrowseMaxItems(max) }
@@ -428,31 +423,6 @@ class SettingsViewModel(
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTwitterBrowseTimeoutSecs */
     fun updateTwitterBrowseTimeoutSecs(secs: Long) {
         updateDaemonSetting { setTwitterBrowseTimeoutSecs(secs) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTranscriptionEnabled */
-    fun updateTranscriptionEnabled(enabled: Boolean) {
-        updateDaemonSetting { setTranscriptionEnabled(enabled) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTranscriptionApiUrl */
-    fun updateTranscriptionApiUrl(url: String) {
-        updateDaemonSetting { setTranscriptionApiUrl(url) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTranscriptionModel */
-    fun updateTranscriptionModel(model: String) {
-        updateDaemonSetting { setTranscriptionModel(model) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTranscriptionLanguage */
-    fun updateTranscriptionLanguage(language: String) {
-        updateDaemonSetting { setTranscriptionLanguage(language) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTranscriptionMaxDurationSecs */
-    fun updateTranscriptionMaxDurationSecs(secs: Long) {
-        updateDaemonSetting { setTranscriptionMaxDurationSecs(secs) }
     }
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMultimodalMaxImages */
@@ -483,11 +453,6 @@ class SettingsViewModel(
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setMemoryQdrantApiKey */
     fun updateMemoryQdrantApiKey(key: String) {
         updateDaemonSetting { setMemoryQdrantApiKey(key) }
-    }
-
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setQueryClassificationEnabled */
-    fun updateQueryClassificationEnabled(enabled: Boolean) {
-        updateDaemonSetting { setQueryClassificationEnabled(enabled) }
     }
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setProxyEnabled */
@@ -564,8 +529,6 @@ class SettingsViewModel(
             OfficialPlugins.WEB_FETCH -> updateWebFetchEnabled(enabled)
             OfficialPlugins.HTTP_REQUEST -> updateHttpRequestEnabled(enabled)
             OfficialPlugins.COMPOSIO -> updateComposioEnabled(enabled)
-            OfficialPlugins.TRANSCRIPTION -> updateTranscriptionEnabled(enabled)
-            OfficialPlugins.QUERY_CLASSIFICATION -> updateQueryClassificationEnabled(enabled)
             OfficialPlugins.SHARED_FOLDER -> updateSharedFolderEnabled(enabled)
             else -> {}
         }

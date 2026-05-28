@@ -29,12 +29,30 @@ use crate::runtime;
 /// Returns [`FfiError::StateError`] if the daemon is not running,
 /// or [`FfiError::SpawnError`] if the trace file cannot be read or
 /// the result cannot be serialised.
+crate::ffi_export!(
+    /// Queries runtime trace events from the daemon's JSONL trace file.
+    ///
+    /// Returns a JSON array of trace event objects, newest last.
+    /// Returns `"[]"` if tracing is disabled or no events match.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on I/O or serialisation failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn query_runtime_traces(
+        filter: Option<String>,
+        event_type: Option<String>,
+        limit: u32,
+    ) -> String = query_traces_inner
+);
+
 pub(crate) fn query_traces_inner(
     filter: Option<String>,
     event_type: Option<String>,
     limit: u32,
 ) -> Result<String, FfiError> {
-    let workspace_dir = runtime::with_daemon_config(|c| c.workspace_dir.clone())?;
+    let workspace_dir = runtime::with_daemon_config(|c| c.data_dir.clone())?;
     let trace_path = workspace_dir.join("state").join("runtime-trace.jsonl");
 
     if !trace_path.exists() {

@@ -249,14 +249,9 @@ object AnthropicOAuthManager {
 
                 val statusCode = conn.responseCode
                 if (statusCode !in HTTP_OK_START..HTTP_OK_END) {
-                    val errorBody =
-                        try {
-                            conn.errorStream?.bufferedReader()?.readText() ?: ""
-                        } catch (_: Exception) {
-                            ""
-                        }
+                    drainErrorStreamWithoutLogging(conn)
                     throw OAuthExchangeException(
-                        "Token exchange failed (HTTP $statusCode): $errorBody",
+                        "Token exchange failed (HTTP $statusCode)",
                         httpStatusCode = statusCode,
                     )
                 }
@@ -303,4 +298,26 @@ object AnthropicOAuthManager {
      * @return URL-encoded string with spaces encoded as `%20`.
      */
     private fun urlEncode(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+
+    /**
+     * Best-effort drain of an HTTP error stream so the underlying
+     * connection can be reused, without surfacing the body anywhere.
+     *
+     * Anthropic's token endpoint echoes back the submitted `code`,
+     * `code_verifier`, and `refresh_token` inside validation-failure
+     * responses. Logging or attaching that body to a thrown exception
+     * leaks secret-bearing material into ADB logs and Play Store crash
+     * reports — this helper reads-and-drops the bytes instead. Caller
+     * is responsible for throwing a status-only exception afterwards.
+     *
+     * @param conn The HTTP connection whose error stream should be drained.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun drainErrorStreamWithoutLogging(conn: java.net.HttpURLConnection) {
+        try {
+            conn.errorStream?.bufferedReader()?.use { it.readText() }
+        } catch (_: Exception) {
+            // KDoc above documents the best-effort contract.
+        }
+    }
 }

@@ -10,6 +10,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
+import com.zeroclaw.android.data.OnDeviceLargeAgent
 import com.zeroclaw.android.data.ProviderRegistry
 import com.zeroclaw.android.data.ProviderSlot
 import com.zeroclaw.android.data.ProviderSlotRegistry
@@ -84,6 +85,19 @@ class AgentsViewModel(
                 }
             }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
 
+    /**
+     * Whether the on-device large-model agent is the currently active row.
+     *
+     * Drives the secondary label on the on-device card shown above the
+     * cloud-slot grid. Sourced through [AgentRepository.isAgentEnabled]
+     * so it stays consistent with the mutual-exclusion invariant
+     * enforced in `AgentDao.toggleExclusive`.
+     */
+    val onDeviceLargeEnabled: StateFlow<Boolean> =
+        repository
+            .isAgentEnabled(OnDeviceLargeAgent.ID)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
+
     /** Fixed slot cards shown on the Agents screen. */
     val slots: StateFlow<List<AgentSlotItem>> =
         combine(repository.agents, apiKeyRepository.keys, authProfiles, _searchQuery) {
@@ -115,6 +129,22 @@ class AgentsViewModel(
      */
     fun updateSearch(query: String) {
         _searchQuery.value = query
+    }
+
+    /**
+     * Flips the on-device large-model agent row.
+     *
+     * Mutual exclusion in `AgentDao.toggleExclusive` disables every
+     * other agent when this turns on, matching the slot-card toggles.
+     * No daemon-restart flag: the on-device row never lands in the
+     * agent TOML (its `modelName` is blank), so flipping it does not
+     * change cloud routing — daemon-lifecycle hooks pick the model up
+     * directly on the next service start.
+     */
+    fun toggleOnDeviceLarge() {
+        viewModelScope.launch {
+            repository.toggleEnabled(OnDeviceLargeAgent.ID)
+        }
     }
 
     /**

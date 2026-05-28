@@ -157,8 +157,10 @@ object SlotAwareAgentConfig {
         }
         return when (authProvider) {
             "openai-codex" -> "ChatGPT"
-            "anthropic" -> "Claude Code"
-            "gemini" -> "Google account"
+            // Anthropic OAuth (Claude Code) was killed by Anthropic for
+            // non-SDK agent apps in May 2026; Gemini Google sign-in
+            // also retired. Only ChatGPT remains as a profile-backed
+            // connection on Android.
             else -> null
         }
     }

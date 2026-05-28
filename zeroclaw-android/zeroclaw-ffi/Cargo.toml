@@ -15,18 +15,43 @@ workspace = true
 [dependencies]
 uniffi = "0.29"
 thiserror = "2.0"
-# default-features = false: The FFI layer communicates via the gateway
-# REST API, so no optional upstream features are needed (channel-matrix,
-# channel-lark, memory-postgres, observability-otel, hardware, browser-native,
-# sandbox-*, probe, rag-pdf, whatsapp-web are all excluded). The daemon
-# binary enables platform-specific features independently.
-zeroclaw = { path = "../../zeroclaw", default-features = false }
+# Upstream zeroclaw is now a 17-crate workspace (v0.8.0-beta-1). The root
+# crate (`zeroclawlabs`) is a re-export shim layer — we pull it in and
+# alias it back to `zeroclaw` so existing `use zeroclaw::*` paths in the
+# FFI source resolve without touching every file.
+#
+# Features kept minimal for Android: agent-runtime + gateway + our 3
+# kept channels. No TUI, no acp-bridge, no observability-prometheus.
+zeroclaw = { package = "zeroclawlabs", path = "../../zeroclaw", default-features = false, features = [
+    "agent-runtime",
+    "gateway",
+    "channel-telegram",
+    "channel-discord",
+    "channel-webhook",
+] }
+# Direct sub-crate deps for items the root `zeroclaw` shim doesn't re-export
+# publicly (skills, security policy types, config sub-modules like `pairing`).
+# Kept minimal — only add a sub-crate when a needed item isn't reachable via
+# the root re-export.
+zeroclaw-api = { path = "../../zeroclaw/crates/zeroclaw-api" }
+zeroclaw-config = { path = "../../zeroclaw/crates/zeroclaw-config" }
+zeroclaw-runtime = { path = "../../zeroclaw/crates/zeroclaw-runtime" }
+# Local Android-only Rust additions (scripting, Google Messages bridge,
+# ClawBoy triggers, FFI credential hook, custom auth, Discord
+# backfill/buffer, memory extras,).
+zeroai = { path = "../zeroai" }
 tokio = { version = "1.50", features = ["rt-multi-thread", "sync", "macros", "net", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yml = "0.0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots", "stream"] }
+# rustls is brought in transitively via reqwest / tokio-tungstenite, but
+# the Discord channel reaches rustls APIs directly and panics on first
+# TLS handshake when no process-wide CryptoProvider is installed. Pin
+# the same `ring` provider the upstream binary uses (see zeroclaw/src/main.rs:1253)
+# and install it once at FFI start.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 nanohtml2text = "0.1"
 futures-util = "0.3"
 anyhow = "1.0"
@@ -69,7 +94,6 @@ parking_lot = "0.12"
 
 [features]
 default = ["ghostty-vt"]
-scripting-wasm-component = ["zeroclaw/scripting-wasm-component"]
 ghostty-vt = []
 
 [dev-dependencies]

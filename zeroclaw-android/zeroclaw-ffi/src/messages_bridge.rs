@@ -110,8 +110,8 @@ pub enum FfiBridgeStatus {
 ///
 /// For [`AwaitingPairing`], substitutes the raw QR URL with the local
 /// page server URL so the Kotlin layer shows the LAN address.
-fn status_to_ffi(status: &zeroclaw::messages_bridge::types::BridgeStatus) -> FfiBridgeStatus {
-    use zeroclaw::messages_bridge::types::BridgeStatus;
+fn status_to_ffi(status: &zeroai::messages_bridge::types::BridgeStatus) -> FfiBridgeStatus {
+    use zeroai::messages_bridge::types::BridgeStatus;
 
     match status {
         BridgeStatus::Unpaired => FfiBridgeStatus::Unpaired,
@@ -137,7 +137,7 @@ fn status_to_ffi(status: &zeroclaw::messages_bridge::types::BridgeStatus) -> Ffi
 
 /// Converts a core [`BridgedConversation`] to the FFI-safe [`FfiBridgedConversation`].
 fn conv_to_ffi(
-    conv: &zeroclaw::messages_bridge::types::BridgedConversation,
+    conv: &zeroai::messages_bridge::types::BridgedConversation,
 ) -> FfiBridgedConversation {
     FfiBridgedConversation {
         id: conv.id.clone(),
@@ -159,12 +159,17 @@ fn conv_to_ffi(
 /// polling `/status` sees `{"paired":true}`.
 ///
 /// Returns [`FfiBridgeStatus::Unpaired`] if no session is active.
-pub(crate) fn get_status_inner() -> FfiBridgeStatus {
-    let status = zeroclaw::messages_bridge::session::get_status();
+///
+/// Returns `Result` (always `Ok`) to fit the [`crate::ffi_export!`] macro
+/// signature; the function itself cannot fail, but the macro wrapper
+/// converts panics into [`FfiError::InternalPanic`].
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn get_status_inner() -> Result<FfiBridgeStatus, FfiError> {
+    let status = zeroai::messages_bridge::session::get_status();
 
     if matches!(
         status,
-        zeroclaw::messages_bridge::types::BridgeStatus::Connected
+        zeroai::messages_bridge::types::BridgeStatus::Connected
     ) {
         let guard = PAIRING_SERVER
             .lock()
@@ -174,7 +179,7 @@ pub(crate) fn get_status_inner() -> FfiBridgeStatus {
         }
     }
 
-    status_to_ffi(&status)
+    Ok(status_to_ffi(&status))
 }
 
 /// Lists all bridged conversations from the message store.
@@ -185,9 +190,81 @@ pub(crate) fn get_status_inner() -> FfiBridgeStatus {
 ///
 /// Returns [`FfiError::StateError`] if the bridge session is not active,
 /// or [`FfiError::SpawnError`] if the store query fails.
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Returns the current Google Messages bridge connection status.
+    ///
+    /// Also synchronises the pairing page server (sets `paired_flag` when
+    /// the bridge reaches `Connected`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    /// The inner function itself cannot fail.
+    fn messages_bridge_get_status() -> FfiBridgeStatus = get_status_inner
+);
+
+crate::ffi_export!(
+    /// Lists all bridged Google Messages conversations.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the bridge session is not active,
+    /// [`crate::FfiError::SpawnError`] on store query failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn messages_bridge_list_conversations() -> Vec<FfiBridgedConversation> = list_conversations_inner
+);
+
+crate::ffi_export!(
+    /// Sets whether the AI agent is allowed to read a specific conversation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the bridge session is not active,
+    /// [`crate::FfiError::SpawnError`] on store update failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn messages_bridge_set_allowed(
+        conversation_id: String,
+        allowed: bool,
+        window_start_ms: Option<i64>,
+    ) -> () = set_allowed_inner
+);
+
+crate::ffi_export!(
+    /// Disconnects the Google Messages bridge.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn messages_bridge_disconnect() -> () = disconnect_inner
+);
+
+crate::ffi_export!(
+    /// Disconnects the Google Messages bridge and wipes all stored data.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn messages_bridge_disconnect_and_clear() -> () = disconnect_and_clear_inner
+);
+
+crate::ffi_export!(
+    /// Initiates QR-code pairing with Google Messages.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::SpawnError`] if the runtime cannot be created
+    /// or the pairing RPC call fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn messages_bridge_start_pairing(data_dir: String) -> String = start_pairing_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 pub(crate) fn list_conversations_inner() -> Result<Vec<FfiBridgedConversation>, FfiError> {
     let store =
-        zeroclaw::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
+        zeroai::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
             detail: "Messages bridge not active".into(),
         })?;
     let convs = store
@@ -213,7 +290,7 @@ pub(crate) fn set_allowed_inner(
     window_start_ms: Option<i64>,
 ) -> Result<(), FfiError> {
     let store =
-        zeroclaw::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
+        zeroai::messages_bridge::session::get_store().ok_or_else(|| FfiError::StateError {
             detail: "Messages bridge not active".into(),
         })?;
     store
@@ -230,7 +307,7 @@ pub(crate) fn set_allowed_inner(
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn disconnect_inner() -> Result<(), FfiError> {
     shutdown_pairing_server();
-    zeroclaw::messages_bridge::session::disconnect();
+    zeroai::messages_bridge::session::disconnect();
     Ok(())
 }
 
@@ -241,7 +318,7 @@ pub(crate) fn disconnect_inner() -> Result<(), FfiError> {
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn disconnect_and_clear_inner() -> Result<(), FfiError> {
     shutdown_pairing_server();
-    zeroclaw::messages_bridge::session::disconnect_and_clear();
+    zeroai::messages_bridge::session::disconnect_and_clear();
     Ok(())
 }
 
@@ -262,7 +339,7 @@ pub(crate) fn start_pairing_inner(data_dir: String) -> Result<String, FfiError> 
 
     handle.block_on(async {
         // 1. Run the Bugle pairing flow to get the raw QR URL.
-        let qr_url = zeroclaw::messages_bridge::session::begin_pairing(&path)
+        let qr_url = zeroai::messages_bridge::session::begin_pairing(&path)
             .await
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("pairing failed: {e}"),
@@ -589,46 +666,7 @@ fn local_ip() -> String {
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn generate_qr_svg_produces_svg_markup() {
-        let svg = generate_qr_svg("https://example.com/pair?token=abc123");
-        assert!(svg.contains("<svg"), "output should contain an SVG element");
-    }
-
-    #[test]
-    fn pairing_html_contains_placeholder() {
-        assert!(
-            PAIRING_HTML.contains("QR_SVG_PLACEHOLDER"),
-            "PAIRING_HTML must contain the QR_SVG_PLACEHOLDER token"
-        );
-    }
-
-    #[test]
-    fn pairing_html_placeholder_replaced() {
-        let html = PAIRING_HTML.replace("QR_SVG_PLACEHOLDER", "<svg/>");
-        assert!(html.contains("<svg/>"), "placeholder should be replaced");
-        assert!(
-            !html.contains("QR_SVG_PLACEHOLDER"),
-            "placeholder should be gone"
-        );
-    }
-
-    #[tokio::test]
-    async fn server_starts_and_reports_port() {
-        let paired = Arc::new(AtomicBool::new(false));
-        let server = PairingPageServer::start("https://example.com/pair".to_owned(), paired)
-            .await
-            .unwrap();
-        assert!(server.port() > 0, "port should be non-zero");
-        assert!(
-            server.page_url().starts_with("http://"),
-            "page URL should be an HTTP URL"
-        );
-        drop(server);
-    }
-}
+#[path = "messages_bridge_tests.rs"]
+mod tests;

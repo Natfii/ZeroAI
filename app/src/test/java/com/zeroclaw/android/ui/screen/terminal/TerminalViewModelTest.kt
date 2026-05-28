@@ -68,26 +68,45 @@ class TerminalViewModelTest {
     @DisplayName("decideDefaultChatRouting")
     inner class DecideDefaultChatRouting {
         @Test
-        @DisplayName("configured cloud provider bypasses Nano heuristic")
-        fun `configured cloud provider bypasses nano heuristic`() {
+        @DisplayName("daemon running + cloud provider routes to cloud")
+        fun `daemon running plus cloud provider routes to cloud`() {
             val result =
                 TerminalViewModel.decideDefaultChatRouting(
+                    daemonRunning = true,
                     hasConfiguredCloudProvider = true,
                     query = "hello",
                 )
 
             assertTrue(result is RoutingDecision.Cloud)
             assertEquals(
-                "configured cloud provider available",
+                "daemon running with configured cloud provider",
                 (result as RoutingDecision.Cloud).reason,
             )
         }
 
         @Test
-        @DisplayName("without cloud provider falls back to Nano heuristic")
-        fun `without cloud provider falls back to nano heuristic`() {
+        @DisplayName("daemon off forces local Nano regardless of cloud config")
+        fun `daemon off forces local nano`() {
             val result =
                 TerminalViewModel.decideDefaultChatRouting(
+                    daemonRunning = false,
+                    hasConfiguredCloudProvider = true,
+                    query = "hello",
+                )
+
+            assertTrue(result is RoutingDecision.Local)
+            assertEquals(
+                "daemon not running — using on-device Nano",
+                (result as RoutingDecision.Local).reason,
+            )
+        }
+
+        @Test
+        @DisplayName("daemon running, no cloud provider falls back to Nano heuristic")
+        fun `daemon running without cloud provider falls back to nano heuristic`() {
+            val result =
+                TerminalViewModel.decideDefaultChatRouting(
+                    daemonRunning = true,
                     hasConfiguredCloudProvider = false,
                     query = "hello",
                 )

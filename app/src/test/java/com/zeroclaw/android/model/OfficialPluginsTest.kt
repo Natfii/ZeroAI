@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test
 @DisplayName("OfficialPlugins")
 class OfficialPluginsTest {
     @Test
-    fun `ALL contains exactly 8 official plugin IDs`() {
-        assertEquals(8, OfficialPlugins.ALL.size)
+    fun `ALL contains exactly 6 official plugin IDs`() {
+        assertEquals(6, OfficialPlugins.ALL.size)
     }
 
     @Test
@@ -43,8 +43,6 @@ class OfficialPluginsTest {
                 OfficialPlugins.SHARED_FOLDER,
                 OfficialPlugins.COMPOSIO,
                 OfficialPlugins.VISION,
-                OfficialPlugins.TRANSCRIPTION,
-                OfficialPlugins.QUERY_CLASSIFICATION,
             )
         for (id in expectedIds) {
             assertTrue(id in OfficialPlugins.ALL, "Expected $id in ALL set")
@@ -54,7 +52,7 @@ class OfficialPluginsTest {
 
     @Test
     fun `ALL set size matches sync mapping count`() {
-        val syncMappingCount = 8
+        val syncMappingCount = 6
         assertEquals(syncMappingCount, OfficialPlugins.ALL.size)
     }
 }

@@ -268,6 +268,12 @@ class EventBridge(
             try {
                 dao.insert(
                     InteractionOutcomeEntity(
+                        // Always-"default" placeholder until a future
+                        // routing experiment re-uses this slot. The
+                        // classifier that originally produced hint
+                        // strings was removed with the cascade router;
+                        // the column is preserved so the schema doesn't
+                        // need a destructive Room migration.
                         routeHint = "default",
                         provider = turnProvider,
                         model = turnModel,

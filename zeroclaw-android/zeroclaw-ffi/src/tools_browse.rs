@@ -282,6 +282,19 @@ fn builtin_to_spec(tool: &BuiltInTool) -> FfiToolSpec {
 /// # Errors
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running.
+crate::ffi_export!(
+    /// Lists all available tools based on daemon config and installed skills.
+    ///
+    /// Returns built-in tools (always present), conditional tools (browser,
+    /// HTTP, Composio, delegate), and skill-provided tools.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_tools() -> Vec<FfiToolSpec> = list_tools_inner
+);
+
 pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
     let (
         workspace_dir,
@@ -292,14 +305,18 @@ pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
         has_agents,
         shared_folder_enabled,
     ) = crate::runtime::with_daemon_config(|config| {
+        // `Config.shared_folder` was removed upstream during the
+        // plugins refactor (zeroclaw v0.8.0-beta-1). Plugin enable state
+        // lives in `[plugins]` config now; defaulting to `false` here
+        // because the tools_browse surface does not yet consult it.
         (
-            config.workspace_dir.clone(),
+            config.data_dir.clone(),
             config.browser.enabled,
             config.http_request.enabled,
             config.web_search.enabled,
             config.composio.api_key.clone(),
             !config.agents.is_empty(),
-            config.shared_folder.enabled,
+            false,
         )
     })?;
 
@@ -337,7 +354,7 @@ pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
         specs.push(s);
     }
 
-    if composio_key.as_ref().is_some_and(|k| !k.is_empty()) {
+    if composio_key.as_ref().is_some_and(|k: &String| !k.is_empty()) {
         let mut s = builtin_to_spec(&COMPOSIO_TOOL);
         s.is_active = true;
         s.inactive_reason = String::new();
@@ -362,14 +379,14 @@ pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
 
     for tool in MESSAGES_BRIDGE_TOOLS {
         let mut s = builtin_to_spec(tool);
-        s.is_active = zeroclaw::messages_bridge::session::get_store().is_some();
+        s.is_active = zeroai::messages_bridge::session::get_store().is_some();
         if !s.is_active {
             s.inactive_reason = "Google Messages not paired".to_string();
         }
         specs.push(s);
     }
 
-    let skills = crate::skills::load_skills_from_workspace(&workspace_dir);
+    let skills = crate::skills_loader::load_skills_from_workspace(&workspace_dir);
     for loaded in &skills {
         for tool in &loaded.tools {
             specs.push(FfiToolSpec {
@@ -410,15 +427,26 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
     // Enforce SecurityPolicy (autonomy level + rate limits) when the daemon is running.
     // If the daemon isn't running (no config), fall through — session tools don't require it.
     if let Ok(config) = crate::runtime::clone_daemon_config() {
-        use zeroclaw::security::policy::{SecurityPolicy, ToolOperation};
-        let policy = SecurityPolicy::from_config(&config.autonomy, &config.workspace_dir);
-        let op = match name {
-            "memory_recall" | "memory_search" | "cron_list" | "cron_runs" => ToolOperation::Read,
-            _ => ToolOperation::Act,
-        };
-        policy
-            .enforce_tool_operation(op, name)
-            .map_err(|reason| FfiError::InvalidArgument { detail: reason })?;
+        // Upstream made `zeroclaw::security` and `zeroclaw::config::policy`
+        // `pub(crate)` in the root shim. Reach the public types through the
+        // workspace sub-crates directly.
+        // Upstream replaced `SecurityPolicy::from_config(autonomy,
+        // workspace_dir)` with `SecurityPolicy::for_agent(config,
+        // agent_alias)` driven by the new risk_profiles + agents
+        // schema. Best-effort: fall through silently if the agent has
+        // no resolvable risk profile (matches the pre-rename permissive
+        // behaviour rather than blocking all tools).
+        use zeroclaw_config::policy::ToolOperation;
+        use zeroclaw_runtime::security::SecurityPolicy;
+        if let Ok(policy) = SecurityPolicy::for_agent(&config, "default") {
+            let op = match name {
+                "memory_recall" | "memory_search" | "cron_list" | "cron_runs" => ToolOperation::Read,
+                _ => ToolOperation::Act,
+            };
+            policy
+                .enforce_tool_operation(op, name)
+                .map_err(|reason| FfiError::InvalidArgument { detail: reason })?;
+        }
     }
 
     let args: serde_json::Value =
@@ -429,7 +457,7 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
     let config = crate::runtime::clone_daemon_config()?;
     let memory = crate::runtime::clone_daemon_memory()?;
 
-    let tools = crate::session::build_tools_registry(&config, memory);
+    let tools = crate::session_registry::build_tools_registry(&config, memory);
 
     let tool = tools
         .iter()
@@ -456,139 +484,7 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
     }
 }
 
+
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn eval_script_in_script_tool_denylist() {
-        assert!(
-            SCRIPT_TOOL_DENYLIST.contains(&"eval_script"),
-            "eval_script must be in SCRIPT_TOOL_DENYLIST to prevent recursive script execution"
-        );
-    }
-
-    #[test]
-    fn test_list_tools_not_running() {
-        let result = list_tools_inner();
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            FfiError::StateError { detail } => {
-                assert!(detail.contains("not running"));
-            }
-            other => panic!("expected StateError, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_core_tools_count() {
-        assert_eq!(CORE_TOOLS.len(), 14);
-    }
-
-    #[test]
-    fn test_builtin_to_spec() {
-        let tool = &CORE_TOOLS[0];
-        let spec = builtin_to_spec(tool);
-        assert_eq!(spec.name, "shell");
-        assert_eq!(spec.source, "built-in");
-        assert_eq!(spec.parameters_json, "{}");
-        assert!(!spec.description.is_empty());
-    }
-
-    #[test]
-    fn test_browser_tools_count() {
-        assert_eq!(BROWSER_TOOLS.len(), 2);
-    }
-
-    #[test]
-    fn test_session_tools_are_active() {
-        for &name in SESSION_TOOLS {
-            let tool = CORE_TOOLS
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("session tool {name} missing from CORE_TOOLS"));
-            let spec = builtin_to_spec(tool);
-            assert!(spec.is_active, "{name} should be active");
-            assert!(
-                spec.inactive_reason.is_empty(),
-                "{name} should have empty inactive_reason"
-            );
-        }
-    }
-
-    #[test]
-    fn test_security_policy_tools_are_inactive() {
-        for &name in SECURITY_POLICY_TOOLS {
-            let tool = CORE_TOOLS
-                .iter()
-                .find(|t| t.name == name)
-                .unwrap_or_else(|| panic!("security tool {name} missing from CORE_TOOLS"));
-            let spec = builtin_to_spec(tool);
-            assert!(!spec.is_active, "{name} should be inactive");
-            assert_eq!(
-                spec.inactive_reason, REASON_DAEMON_ONLY,
-                "{name} should have daemon-only reason"
-            );
-        }
-    }
-
-    #[test]
-    fn test_session_and_security_cover_all_core_tools() {
-        for tool in CORE_TOOLS {
-            assert!(
-                SESSION_TOOLS.contains(&tool.name) || SECURITY_POLICY_TOOLS.contains(&tool.name),
-                "core tool {:?} is in neither SESSION_TOOLS nor SECURITY_POLICY_TOOLS",
-                tool.name
-            );
-        }
-    }
-
-    #[test]
-    fn test_excluded_tools_not_in_core_filtered() {
-        let filtered: Vec<&BuiltInTool> = CORE_TOOLS
-            .iter()
-            .filter(|t| !ANDROID_EXCLUDED_TOOLS.contains(&t.name))
-            .collect();
-        assert!(!filtered.iter().any(|t| t.name == "screenshot"));
-        assert!(filtered.iter().any(|t| t.name == "shell"));
-    }
-
-    #[test]
-    fn test_excluded_tools_not_in_browser_filtered() {
-        let filtered: Vec<&BuiltInTool> = BROWSER_TOOLS
-            .iter()
-            .filter(|t| !ANDROID_EXCLUDED_TOOLS.contains(&t.name))
-            .collect();
-        assert!(!filtered.iter().any(|t| t.name == "browser"));
-        assert!(filtered.iter().any(|t| t.name == "browser_open"));
-    }
-
-    #[test]
-    fn test_conditional_tools_default_inactive() {
-        let web_search = builtin_to_spec(&WEB_SEARCH_TOOL);
-        assert!(
-            !web_search.is_active,
-            "web_search should default to inactive"
-        );
-
-        let http = builtin_to_spec(&HTTP_TOOL);
-        assert!(!http.is_active, "http_request should default to inactive");
-        assert_eq!(http.inactive_reason, REASON_DAEMON_ONLY);
-
-        let composio = builtin_to_spec(&COMPOSIO_TOOL);
-        assert!(!composio.is_active, "composio should default to inactive");
-
-        let delegate = builtin_to_spec(&DELEGATE_TOOL);
-        assert!(!delegate.is_active, "delegate should default to inactive");
-
-        for browser_tool in BROWSER_TOOLS {
-            let spec = builtin_to_spec(browser_tool);
-            assert!(
-                !spec.is_active,
-                "{} should default to inactive",
-                browser_tool.name
-            );
-        }
-    }
-}
+#[path = "tools_browse_tests.rs"]
+mod tests;

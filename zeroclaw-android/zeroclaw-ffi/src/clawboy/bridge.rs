@@ -479,38 +479,45 @@ async fn call_llm(
 
     history.push(ChatMessage::user(user_content));
 
-    // Resolve provider settings from config.
-    let provider_name = config.default_provider.as_deref().unwrap_or("anthropic");
-    let api_key = config.api_key.as_deref();
+    // Upstream removed flat `config.default_provider` / `api_key` /
+    // `api_url` / `default_model` and dropped `custom_headers` from
+    // `ModelProviderRuntimeOptions`. The canonical provider type comes
+    // from `effective_model_provider_type`; the provider factory reads
+    // its own auth + endpoint from the matching
+    // `[providers.models.<type>.<alias>]` block on construction.
+    let provider_name_owned = crate::runtime::effective_model_provider_type(&config).map_err(|e| e.to_string())?;
+    let provider_name = provider_name_owned.as_str();
 
-    let provider = zeroclaw::providers::create_resilient_provider_with_options(
+    let provider = zeroclaw::providers::create_resilient_model_provider_with_options(
         provider_name,
-        api_key,
-        config.api_url.as_deref(),
-        &config.reliability,
         None,
-        &zeroclaw::providers::ProviderRuntimeOptions {
+        None,
+        &config.reliability,
+        &zeroclaw::providers::ModelProviderRuntimeOptions {
             auth_profile_override: None,
-            provider_api_url: config.api_url.clone(),
-            zeroclaw_dir: Some(config.workspace_dir.clone()),
+            provider_api_url: None,
+            zeroclaw_dir: Some(config.data_dir.clone()),
             secrets_encrypt: config.secrets.encrypt,
             reasoning_enabled: None,
             reasoning_effort: None,
-            custom_headers: None,
+            ..Default::default()
         },
     )
     .map_err(|e| format!("failed to create provider: {e}"))?;
 
-    let model = config.default_model.as_deref().unwrap_or(FALLBACK_MODEL);
+    let model = config
+        .resolve_default_model()
+        .unwrap_or_else(|| FALLBACK_MODEL.to_string());
 
     // Build chat request.
     let request = ChatRequest {
         messages: history.as_slice(),
         tools: None,
+        thinking: None,
     };
 
     let response = provider
-        .chat(request, model, DECISION_TEMPERATURE)
+        .chat(request, &model, Some(DECISION_TEMPERATURE))
         .await
         .map_err(|e| format!("LLM call failed: {e}"))?;
 

@@ -1,73 +1,13 @@
-mod none;
-
 #[allow(unused_imports)]
-pub use none::NoneTunnel;
-
-use crate::config::schema::TunnelConfig;
-use anyhow::Result;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-
-/// Agnostic tunnel abstraction for exposing the gateway externally.
-///
-/// Implementations wrap an external tunnel binary (tailscale, etc.)
-/// The gateway calls `start()` after binding its local port and `stop()`
-/// on shutdown.
-#[async_trait::async_trait]
-pub trait Tunnel: Send + Sync {
-    /// Human-readable provider name (e.g. "tailscale")
-    fn name(&self) -> &str;
-
-    /// Start the tunnel, exposing `local_host:local_port` externally.
-    /// Returns the public URL on success.
-    async fn start(&self, local_host: &str, local_port: u16) -> Result<String>;
-
-    /// Stop the tunnel process gracefully.
-    async fn stop(&self) -> Result<()>;
-
-    /// Check if the tunnel is still alive.
-    async fn health_check(&self) -> bool;
-
-    /// Return the public URL if the tunnel is running.
-    fn public_url(&self) -> Option<String>;
-}
-
-/// Wraps a spawned tunnel child process so implementations can share it.
-pub(crate) struct TunnelProcess {
-    pub child: tokio::process::Child,
-    pub public_url: String,
-}
-
-pub(crate) type SharedProcess = Arc<Mutex<Option<TunnelProcess>>>;
-
-pub(crate) fn new_shared_process() -> SharedProcess {
-    Arc::new(Mutex::new(None))
-}
-
-/// Kill a shared tunnel process if running.
-pub(crate) async fn kill_shared(proc: &SharedProcess) -> Result<()> {
-    let mut guard = proc.lock().await;
-    if let Some(ref mut tp) = *guard {
-        tp.child.kill().await.ok();
-        tp.child.wait().await.ok();
-    }
-    *guard = None;
-    Ok(())
-}
-
-/// Create a tunnel from config. Returns `None` for provider "none".
-pub fn create_tunnel(config: &TunnelConfig) -> Result<Option<Box<dyn Tunnel>>> {
-    match config.provider.as_str() {
-        "none" | "" => Ok(None),
-
-        other => anyhow::bail!("Unknown tunnel provider: \"{other}\". Valid: none"),
-    }
-}
+pub use zeroclaw_runtime::tunnel::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::schema::TunnelConfig;
+    use crate::config::schema::{
+        CloudflareTunnelConfig, CustomTunnelConfig, NgrokTunnelConfig, OpenVpnTunnelConfig,
+        PinggyTunnelConfig, TunnelConfig,
+    };
     use tokio::process::Command;
 
     /// Helper: assert `create_tunnel` returns an error containing `needle`.
@@ -91,7 +31,7 @@ mod tests {
     #[test]
     fn factory_empty_string_returns_none() {
         let cfg = TunnelConfig {
-            provider: String::new(),
+            tunnel_provider: String::new(),
             ..TunnelConfig::default()
         };
         let t = create_tunnel(&cfg).unwrap();
@@ -101,10 +41,117 @@ mod tests {
     #[test]
     fn factory_unknown_provider_errors() {
         let cfg = TunnelConfig {
-            provider: "wireguard".into(),
+            tunnel_provider: "wireguard".into(),
             ..TunnelConfig::default()
         };
-        assert_tunnel_err(&cfg, "Unknown tunnel provider");
+        assert_tunnel_err(&cfg, "Unknown tunnel_provider");
+    }
+
+    #[test]
+    fn factory_cloudflare_missing_config_errors() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "cloudflare".into(),
+            ..TunnelConfig::default()
+        };
+        assert_tunnel_err(&cfg, "[tunnel.cloudflare]");
+    }
+
+    #[test]
+    fn factory_cloudflare_with_config_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "cloudflare".into(),
+            cloudflare: Some(CloudflareTunnelConfig {
+                token: "test-token".into(),
+            }),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "cloudflare");
+    }
+
+    #[test]
+    fn factory_tailscale_defaults_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "tailscale".into(),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "tailscale");
+    }
+
+    #[test]
+    fn factory_ngrok_missing_config_errors() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "ngrok".into(),
+            ..TunnelConfig::default()
+        };
+        assert_tunnel_err(&cfg, "[tunnel.ngrok]");
+    }
+
+    #[test]
+    fn factory_ngrok_with_config_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "ngrok".into(),
+            ngrok: Some(NgrokTunnelConfig {
+                auth_token: "tok".into(),
+                domain: None,
+            }),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "ngrok");
+    }
+
+    #[test]
+    fn factory_custom_missing_config_errors() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "custom".into(),
+            ..TunnelConfig::default()
+        };
+        assert_tunnel_err(&cfg, "[tunnel.custom]");
+    }
+
+    #[test]
+    fn factory_custom_with_config_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "custom".into(),
+            custom: Some(CustomTunnelConfig {
+                start_command: "echo tunnel".into(),
+                health_url: None,
+                url_pattern: None,
+            }),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "custom");
+    }
+
+    #[test]
+    fn factory_pinggy_missing_config_errors() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "pinggy".into(),
+            ..TunnelConfig::default()
+        };
+        assert_tunnel_err(&cfg, "[tunnel.pinggy]");
+    }
+
+    #[test]
+    fn factory_pinggy_with_config_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "pinggy".into(),
+            pinggy: Some(PinggyTunnelConfig {
+                token: Some("tok".into()),
+                region: None,
+            }),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "pinggy");
     }
 
     #[test]
@@ -132,6 +179,86 @@ mod tests {
         assert_eq!(url, "http://127.0.0.1:8080");
     }
 
+    #[test]
+    fn cloudflare_tunnel_name() {
+        let t = CloudflareTunnel::new("tok".into());
+        assert_eq!(t.name(), "cloudflare");
+        assert!(t.public_url().is_none());
+    }
+
+    #[test]
+    fn tailscale_tunnel_name() {
+        let t = TailscaleTunnel::new(false, None);
+        assert_eq!(t.name(), "tailscale");
+        assert!(t.public_url().is_none());
+    }
+
+    #[test]
+    fn tailscale_funnel_mode() {
+        let t = TailscaleTunnel::new(true, Some("myhost".into()));
+        assert_eq!(t.name(), "tailscale");
+    }
+
+    #[test]
+    fn ngrok_tunnel_name() {
+        let t = NgrokTunnel::new("tok".into(), None);
+        assert_eq!(t.name(), "ngrok");
+        assert!(t.public_url().is_none());
+    }
+
+    #[test]
+    fn ngrok_with_domain() {
+        let t = NgrokTunnel::new("tok".into(), Some("my.ngrok.io".into()));
+        assert_eq!(t.name(), "ngrok");
+    }
+
+    #[test]
+    fn custom_tunnel_name() {
+        let t = CustomTunnel::new("echo hi".into(), None, None);
+        assert_eq!(t.name(), "custom");
+        assert!(t.public_url().is_none());
+    }
+
+    #[test]
+    fn factory_openvpn_missing_config_errors() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "openvpn".into(),
+            ..TunnelConfig::default()
+        };
+        assert_tunnel_err(&cfg, "[tunnel.openvpn]");
+    }
+
+    #[test]
+    fn factory_openvpn_with_config_ok() {
+        let cfg = TunnelConfig {
+            tunnel_provider: "openvpn".into(),
+            openvpn: Some(OpenVpnTunnelConfig {
+                config_file: "client.ovpn".into(),
+                auth_file: None,
+                advertise_address: None,
+                connect_timeout_secs: 30,
+                extra_args: vec![],
+            }),
+            ..TunnelConfig::default()
+        };
+        let t = create_tunnel(&cfg).unwrap();
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().name(), "openvpn");
+    }
+
+    #[test]
+    fn openvpn_tunnel_name() {
+        let t = OpenVpnTunnel::new("client.ovpn".into(), None, None, 30, vec![]);
+        assert_eq!(t.name(), "openvpn");
+        assert!(t.public_url().is_none());
+    }
+
+    #[tokio::test]
+    async fn openvpn_health_false_before_start() {
+        let tunnel = OpenVpnTunnel::new("client.ovpn".into(), None, None, 30, vec![]);
+        assert!(!tunnel.health_check().await);
+    }
+
     #[tokio::test]
     async fn kill_shared_no_process_is_ok() {
         let proc = new_shared_process();
@@ -145,8 +272,17 @@ mod tests {
     async fn kill_shared_terminates_and_clears_child() {
         let proc = new_shared_process();
 
-        let child = Command::new("sleep")
-            .arg("30")
+        let mut cmd = if cfg!(target_os = "windows") {
+            let mut c = Command::new("ping");
+            c.args(["-n", "30", "127.0.0.1"]);
+            c
+        } else {
+            let mut c = Command::new("sleep");
+            c.args(["30"]);
+            c
+        };
+
+        let child = cmd
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -164,5 +300,48 @@ mod tests {
 
         let guard = proc.lock().await;
         assert!(guard.is_none());
+    }
+
+    #[tokio::test]
+    async fn cloudflare_health_false_before_start() {
+        let tunnel = CloudflareTunnel::new("tok".into());
+        assert!(!tunnel.health_check().await);
+    }
+
+    #[tokio::test]
+    async fn ngrok_health_false_before_start() {
+        let tunnel = NgrokTunnel::new("tok".into(), None);
+        assert!(!tunnel.health_check().await);
+    }
+
+    #[tokio::test]
+    async fn tailscale_health_false_before_start() {
+        let tunnel = TailscaleTunnel::new(false, None);
+        assert!(!tunnel.health_check().await);
+    }
+
+    #[tokio::test]
+    async fn custom_health_false_before_start_without_health_url() {
+        let tunnel = CustomTunnel::new("echo hi".into(), None, Some("https://".into()));
+        assert!(!tunnel.health_check().await);
+    }
+
+    #[test]
+    fn pinggy_tunnel_name() {
+        let t = PinggyTunnel::new(Some("tok".into()), None);
+        assert_eq!(t.name(), "pinggy");
+        assert!(t.public_url().is_none());
+    }
+
+    #[test]
+    fn pinggy_without_token() {
+        let t = PinggyTunnel::new(None, None);
+        assert_eq!(t.name(), "pinggy");
+    }
+
+    #[tokio::test]
+    async fn pinggy_health_false_before_start() {
+        let tunnel = PinggyTunnel::new(None, None);
+        assert!(!tunnel.health_check().await);
     }
 }

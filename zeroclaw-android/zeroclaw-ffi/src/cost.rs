@@ -56,6 +56,54 @@ pub enum FfiBudgetStatus {
     },
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Returns the current cost summary for session, day, and month.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// cost tracking is disabled, [`crate::FfiError::SpawnError`] on tracker or
+    /// serialisation failure, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_cost_summary() -> FfiCostSummary = get_cost_summary_inner
+);
+
+crate::ffi_export!(
+    /// Returns the cost for a specific day in USD.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// cost tracking is disabled, [`crate::FfiError::SpawnError`] on invalid date
+    /// or tracker failure, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_daily_cost(year: i32, month: u32, day: u32) -> f64 = get_daily_cost_inner
+);
+
+crate::ffi_export!(
+    /// Returns the cost for a specific month in USD.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// cost tracking is disabled, [`crate::FfiError::SpawnError`] on tracker
+    /// failure, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_monthly_cost(year: i32, month: u32) -> f64 = get_monthly_cost_inner
+);
+
+crate::ffi_export!(
+    /// Checks whether an estimated cost fits within configured budget limits.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running or
+    /// cost tracking is disabled, [`crate::FfiError::SpawnError`] on tracker
+    /// failure, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn check_budget(estimated_cost_usd: f64) -> FfiBudgetStatus = check_budget_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 /// Returns the current cost summary via the gateway REST API.
 pub(crate) fn get_cost_summary_inner() -> Result<FfiCostSummary, FfiError> {
     let json = gateway_client::gateway_get("/api/cost")?;
@@ -97,7 +145,7 @@ pub(crate) fn get_cost_summary_inner() -> Result<FfiCostSummary, FfiError> {
 /// today, or zero otherwise.
 pub(crate) fn get_daily_cost_inner(year: i32, month: u32, day: u32) -> Result<f64, FfiError> {
     // Verify daemon is running before doing anything.
-    let _ = crate::runtime::get_gateway_port()?;
+    let _ = crate::runtime::gateway_port_inner()?;
 
     let today = chrono::Utc::now().date_naive();
     let requested =
@@ -120,7 +168,7 @@ pub(crate) fn get_daily_cost_inner(year: i32, month: u32, day: u32) -> Result<f6
 /// month matches the current month, or zero otherwise.
 pub(crate) fn get_monthly_cost_inner(year: i32, month: u32) -> Result<f64, FfiError> {
     // Verify daemon is running before doing anything.
-    let _ = crate::runtime::get_gateway_port()?;
+    let _ = crate::runtime::gateway_port_inner()?;
 
     let now = chrono::Utc::now();
     #[allow(clippy::cast_possible_wrap)]

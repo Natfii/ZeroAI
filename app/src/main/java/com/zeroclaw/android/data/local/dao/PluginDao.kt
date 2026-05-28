@@ -10,6 +10,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.zeroclaw.android.data.local.entity.PluginEntity
 import kotlinx.coroutines.flow.Flow
@@ -173,4 +174,44 @@ interface PluginDao {
      */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAllIgnoreConflicts(entities: List<PluginEntity>)
+
+    /**
+     * Deletes any plugin row whose ID is not in [validIds].
+     *
+     * Used to purge retired official plugins on app start so deprecated
+     * entries (`official-transcription`, `official-query-classification`,
+     * defunct community channels, etc.) disappear from the Hub without a
+     * destructive DB migration.
+     *
+     * @param validIds IDs that are still recognised by this build.
+     * @return Number of rows deleted.
+     */
+    @Query("DELETE FROM plugins WHERE id NOT IN (:validIds)")
+    suspend fun deleteIdsNotIn(validIds: List<String>): Int
+
+    /**
+     * Atomically reconciles official plugin rows in one transaction:
+     *   1. Deletes rows whose IDs are not in [validIds].
+     *   2. Inserts [missing] rows (ignore-on-conflict).
+     *   3. Applies [enabledStates] via [setEnabled] for each entry.
+     *
+     * Wrapped in `@Transaction` so a coroutine cancellation between steps
+     * cannot leave the Hub mid-purge or with stale toggles. The repository
+     * owns the *policy* (what is valid / missing / enabled) and the DAO
+     * owns the *atomicity*.
+     */
+    @Transaction
+    suspend fun reconcileOfficialRows(
+        validIds: List<String>,
+        missing: List<PluginEntity>,
+        enabledStates: Map<String, Boolean>,
+    ) {
+        deleteIdsNotIn(validIds)
+        if (missing.isNotEmpty()) {
+            insertAllIgnoreConflicts(missing)
+        }
+        for ((id, enabled) in enabledStates) {
+            setEnabled(id, enabled)
+        }
+    }
 }

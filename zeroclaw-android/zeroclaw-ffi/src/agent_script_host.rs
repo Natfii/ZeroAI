@@ -7,7 +7,7 @@
 //! (Nano is text-only), and skips the dangerous-capability approval gate
 //! (which uses `blocking_recv` and would deadlock inside an async context).
 
-use zeroclaw::scripting::{ScriptError, ScriptHost, ScriptOperation, ScriptValue};
+use zeroai::scripting::{ScriptError, ScriptHost, ScriptOperation, ScriptValue};
 
 /// A [`ScriptHost`] that routes LLM calls to on-device Nano and delegates
 /// all other operations to [`dispatch_common_operation`](crate::repl::dispatch_common_operation).
@@ -57,7 +57,7 @@ impl ScriptHost for AgentScriptHost {
                         capability: "model.chat".to_string(),
                     });
                 }
-                let message = crate::repl::string_arg(&args, "message")?;
+                let message = crate::repl_args::string_arg(&args, "message")?;
                 let result = crate::runtime::send_message_routed_inner(message, "nano".to_string())
                     .map_err(|e| ScriptError::HostError {
                         operation: operation.display_name().to_string(),

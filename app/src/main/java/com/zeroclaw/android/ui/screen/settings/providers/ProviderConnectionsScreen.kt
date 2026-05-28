@@ -197,7 +197,7 @@ private fun ProviderConnectionsHeader() {
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                text = "Manage Google account, ChatGPT, and Claude Code logins separately from manual API keys. Provider routes live in Agents, and Google apps live in Hub > Apps or Google Account.",
+                text = "Manage ChatGPT logins separately from manual API keys. Provider routes live in Agents.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

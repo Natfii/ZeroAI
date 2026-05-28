@@ -580,17 +580,23 @@ class DoctorValidator(
     /**
      * Builds a minimal TOML config string for validating a single agent.
      *
-     * @param agent The agent to build TOML for.
-     * @return TOML string suitable for [validateConfig].
+     * Used by Doctor / per-agent validation paths to round-trip a candidate
+     * agent through [validateConfig]. After the V3 model-provider-ref
+     * refactor, the agent block just references `<type>.default`; the
+     * caller's TOML is already expected to include a matching
+     * `[providers.models.<type>.default]` entry (or the V1-globals fold
+     * that synthesizes one).
      */
     private fun buildAgentToml(agent: Agent): String {
+        val resolvedType =
+            ConfigTomlBuilder.stripColonUrl(
+                ConfigTomlBuilder.resolveProvider(agent.provider, ""),
+            )
         val entry =
             AgentTomlEntry(
                 name = agent.name,
-                provider = ConfigTomlBuilder.resolveProvider(agent.provider, ""),
-                model = agent.modelName,
-                systemPrompt = agent.systemPrompt,
-                temperature = agent.temperature,
+                modelProviderRef =
+                    if (resolvedType.isBlank()) "" else "$resolvedType.default",
                 maxDepth = agent.maxDepth,
             )
         return "default_temperature = 0.7\n" + ConfigTomlBuilder.buildAgentsToml(listOf(entry))

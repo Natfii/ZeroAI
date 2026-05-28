@@ -277,13 +277,17 @@ object AieosDerivationEngine {
      *
      * This is used when the user skips personality configuration entirely.
      *
+     * @param agentName Name to assign to the fallback persona. Defaults to
+     *   `"Sick Zero"` for fresh installs that haven't picked a name yet;
+     *   callers re-running onboarding pass the existing agent name so
+     *   skipping personality a second time doesn't clobber it.
      * @return A JSON string with doctor_needed forced to true.
      */
-    fun deriveSkipFallback(): String {
+    fun deriveSkipFallback(agentName: String = "Sick Zero"): String {
         val json =
             derive(
                 PersonalityStepState(
-                    agentName = "Sick Zero",
+                    agentName = agentName,
                     archetype = PersonalityArchetype.CHILL_COMPANION,
                     skipped = true,
                 ),

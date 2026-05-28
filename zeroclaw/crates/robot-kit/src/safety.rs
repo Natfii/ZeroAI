@@ -19,10 +19,11 @@
 use crate::config::{RobotConfig, SafetyConfig};
 use crate::traits::ToolResult;
 use anyhow::Result;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use portable_atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 /// Safety events broadcast to all listeners
 #[derive(Debug, Clone)]
@@ -151,11 +152,14 @@ impl SafetyMonitor {
                 ));
             }
             // Allow reduced distance
-            tracing::warn!(
-                "Reducing {} distance from {:.2}m to {:.2}m due to obstacle",
-                direction,
-                distance,
-                safe_distance
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+                &format!(
+                    "Reducing {} distance from {:.2}m to {:.2}m due to obstacle",
+                    direction, distance, safe_distance
+                )
             );
         }
 
@@ -193,7 +197,12 @@ impl SafetyMonitor {
 
     /// Trigger emergency stop
     pub async fn emergency_stop(&self, reason: &str) {
-        tracing::error!("EMERGENCY STOP: {}", reason);
+        ::zeroclaw_log::record!(
+            ERROR,
+            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
+                .with_outcome(::zeroclaw_log::EventOutcome::Failure),
+            &format!("EMERGENCY STOP: {}", reason)
+        );
         self.state.estop_active.store(true, Ordering::SeqCst);
         self.state.can_move.store(false, Ordering::SeqCst);
         *self.state.block_reason.write().await = Some(reason.to_string());
@@ -205,7 +214,11 @@ impl SafetyMonitor {
 
     /// Reset emergency stop (requires explicit action)
     pub async fn reset_estop(&self) {
-        tracing::info!("E-STOP RESET");
+        ::zeroclaw_log::record!(
+            INFO,
+            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+            "E-STOP RESET"
+        );
         self.state.estop_active.store(false, Ordering::SeqCst);
         self.state.can_move.store(true, Ordering::SeqCst);
         *self.state.block_reason.write().await = None;
@@ -243,7 +256,12 @@ impl SafetyMonitor {
 
     /// Report bump sensor triggered
     pub async fn bump_detected(&self, sensor: &str) {
-        tracing::warn!("BUMP DETECTED: {}", sensor);
+        ::zeroclaw_log::record!(
+            WARN,
+            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+            &format!("BUMP DETECTED: {}", sensor)
+        );
 
         // Immediate stop
         self.state.can_move.store(false, Ordering::SeqCst);
@@ -302,7 +320,7 @@ impl SafetyMonitor {
                 _ = tokio::time::sleep(Duration::from_secs(1)) => {
                     // Check for sensor timeout
                     if last_sensor_update.elapsed() > Duration::from_secs(5) {
-                        tracing::warn!("Sensor data stale - blocking movement");
+                        ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_outcome(::zeroclaw_log::EventOutcome::Unknown), "Sensor data stale - blocking movement");
                         self.state.can_move.store(false, Ordering::SeqCst);
                         *self.state.block_reason.write().await =
                             Some("Sensor data stale".to_string());
@@ -318,7 +336,7 @@ impl SafetyMonitor {
 
                         let elapsed = Duration::from_millis(now_ms - last_cmd_ms);
                         if elapsed > watchdog_timeout {
-                            tracing::info!("Watchdog timeout - no commands for {:?}", elapsed);
+                            ::zeroclaw_log::record!(INFO, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note), &format!("Watchdog timeout - no commands for {:?}", elapsed));
                             let _ = self.event_tx.send(SafetyEvent::WatchdogTimeout);
                             // Don't block movement, just notify
                         }
@@ -387,9 +405,13 @@ impl crate::traits::Tool for SafeDrive {
                 modified_args["speed"] = serde_json::json!(original_speed * speed_mult);
 
                 if speed_mult < 1.0 {
-                    tracing::info!(
-                        "Safety: Reducing speed to {:.0}% due to obstacle proximity",
-                        speed_mult * 100.0
+                    ::zeroclaw_log::record!(
+                        INFO,
+                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
+                        &format!(
+                            "Safety: Reducing speed to {:.0}% due to obstacle proximity",
+                            speed_mult * 100.0
+                        )
                     );
                 }
 

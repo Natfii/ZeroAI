@@ -49,15 +49,6 @@ private const val COLOR_OLLAMA = 0xFF000000
 /** Brand color for OpenRouter provider. */
 private const val COLOR_OPENROUTER = 0xFF6467F2
 
-/** Brand color for xAI. */
-private const val COLOR_XAI = 0xFF1D1D1F
-
-/** Brand color for DeepSeek. */
-private const val COLOR_DEEPSEEK = 0xFF4D6BFE
-
-/** Brand color for Qwen (Alibaba). */
-private const val COLOR_QWEN = 0xFF615EF0
-
 /**
  * Pre-computed brand background colors keyed by provider ID.
  *
@@ -71,9 +62,6 @@ private val PROVIDER_BRAND_COLORS: Map<String, Color> =
         "google-gemini" to Color(COLOR_GOOGLE),
         "ollama" to Color(COLOR_OLLAMA),
         "openrouter" to Color(COLOR_OPENROUTER),
-        "xai" to Color(COLOR_XAI),
-        "deepseek" to Color(COLOR_DEEPSEEK),
-        "qwen" to Color(COLOR_QWEN),
     )
 
 /** Luminance threshold below which white text is used, ensuring 4.5:1 contrast. */

@@ -31,7 +31,7 @@ const API_TIMEOUT_SECS: u64 = 30;
 
 /// Performs an HTTP GET against the gateway and returns the parsed JSON body.
 pub(crate) fn gateway_get(path: &str) -> Result<serde_json::Value, FfiError> {
-    let port = crate::runtime::get_gateway_port()?;
+    let port = crate::runtime::gateway_port_inner()?;
     let handle = crate::runtime::get_or_create_runtime()?;
     let url = format!("http://127.0.0.1:{port}{path}");
 
@@ -53,7 +53,7 @@ pub(crate) fn gateway_post(
     path: &str,
     body: &serde_json::Value,
 ) -> Result<serde_json::Value, FfiError> {
-    let port = crate::runtime::get_gateway_port()?;
+    let port = crate::runtime::gateway_port_inner()?;
     let handle = crate::runtime::get_or_create_runtime()?;
     let url = format!("http://127.0.0.1:{port}{path}");
 
@@ -74,7 +74,7 @@ pub(crate) fn gateway_post(
 
 /// Performs an HTTP DELETE against the gateway and returns the parsed JSON body.
 pub(crate) fn gateway_delete(path: &str) -> Result<serde_json::Value, FfiError> {
-    let port = crate::runtime::get_gateway_port()?;
+    let port = crate::runtime::gateway_port_inner()?;
     let handle = crate::runtime::get_or_create_runtime()?;
     let url = format!("http://127.0.0.1:{port}{path}");
 

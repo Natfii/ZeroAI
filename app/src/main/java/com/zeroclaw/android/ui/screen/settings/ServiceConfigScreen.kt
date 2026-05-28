@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.data.MemoryBackendCatalog
 import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.ui.component.ReasoningEffortDropdown
 import com.zeroclaw.android.ui.component.SectionHeader
@@ -60,9 +61,6 @@ private const val RETRIES_MAX = 10
 
 /** Maximum cost warning threshold percentage. */
 private const val WARN_PERCENT_MAX = 100
-
-/** Available memory backend options. */
-private val MEMORY_BACKENDS = listOf("sqlite", "none", "markdown", "lucid")
 
 /**
  * Service configuration sub-screen for host, port, auto-start,
@@ -373,11 +371,11 @@ private fun MemorySection(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
-            for (backend in MEMORY_BACKENDS) {
+            for (entry in MemoryBackendCatalog.userSelectable) {
                 DropdownMenuItem(
-                    text = { Text(backend) },
+                    text = { Text(entry.label) },
                     onClick = {
-                        viewModel.updateMemoryBackend(backend)
+                        viewModel.updateMemoryBackend(entry.id)
                         expanded = false
                     },
                 )

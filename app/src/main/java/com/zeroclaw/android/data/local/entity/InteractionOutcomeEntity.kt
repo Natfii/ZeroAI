@@ -15,7 +15,10 @@ import androidx.room.PrimaryKey
  * Feeds the provider leaderboard and improvement suggestions.
  *
  * @property id Auto-generated primary key.
- * @property routeHint The RouteHint active during this interaction.
+ * @property routeHint Classifier hint active during this interaction.
+ *   Historically tied to the now-removed cascade router; kept as a free-form
+ *   string column so existing rows survive and future routing experiments
+ *   can reuse the slot.
  * @property provider Provider used (e.g. "anthropic").
  * @property model Model used (e.g. "claude-sonnet-4-20250514").
  * @property outcome Classified outcome (SUCCESS, FAILURE, RETRY, DEGRADED, NEUTRAL).

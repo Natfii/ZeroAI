@@ -15,7 +15,6 @@ import com.zeroclaw.android.model.ApiKey
 import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.DiagnosticCheck
 import com.zeroclaw.android.model.DoctorSummary
-import com.zeroclaw.android.service.AgentTomlEntry
 import com.zeroclaw.android.service.ConfigTomlBuilder
 import com.zeroclaw.android.service.DoctorValidator
 import com.zeroclaw.android.service.GlobalTomlConfig
@@ -296,47 +295,10 @@ class DoctorViewModel(
             reliabilityApiKeysJson = settings.reliabilityApiKeysJson,
         )
 
-    /**
-     * Resolves all enabled agents into TOML agent sections.
-     *
-     * @return TOML string with per-agent sections, or empty if no agents qualify.
-     */
-    private suspend fun buildAgentsToml(): String {
-        val authProfiles = AuthProfileStore.listStandalone(app)
-        val allAgents = app.agentRepository.agents.first()
-        val entries =
-            SlotAwareAgentConfig
-                .orderedConfiguredAgents(allAgents)
-                .map { agent ->
-                    val agentKey =
-                        app.apiKeyRepository.getByProviderFresh(
-                            agent.provider,
-                        )
-                    if (
-                        !SlotAwareAgentConfig.hasUsableProviderCredentials(
-                            provider = agent.provider,
-                            apiKey = agentKey,
-                            authProfiles = authProfiles,
-                        )
-                    ) {
-                        return@map null
-                    }
-                    AgentTomlEntry(
-                        name = SlotAwareAgentConfig.configName(agent),
-                        provider =
-                            ConfigTomlBuilder.resolveProvider(
-                                SlotAwareAgentConfig.configProvider(agent),
-                                agentKey?.baseUrl.orEmpty(),
-                            ),
-                        model = agent.modelName,
-                        apiKey = agentKey?.key.orEmpty(),
-                        systemPrompt = agent.systemPrompt,
-                        temperature = agent.temperature,
-                        maxDepth = agent.maxDepth,
-                    )
-                }.filterNotNull()
-        return ConfigTomlBuilder.buildAgentsToml(entries)
-    }
+    /** Delegates to [AgentTomlAssembler] — the single source of truth. */
+    private suspend fun buildAgentsToml(): String =
+        com.zeroclaw.android.service.AgentTomlAssembler
+            .assemble(app)
 }
 
 /**

@@ -72,6 +72,127 @@ pub struct FfiDiscordSyncStatus {
     pub message_count: i64,
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Fetches the guilds the bot is a member of from the Discord REST API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if `bot_token` is empty,
+    /// [`crate::FfiError::SpawnError`] on HTTP or parse failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_fetch_bot_guilds(bot_token: String) -> Vec<FfiDiscordGuild> = discord_fetch_bot_guilds_inner
+);
+
+crate::ffi_export!(
+    /// Fetches text channels from a Discord guild via the REST API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if arguments are empty,
+    /// [`crate::FfiError::SpawnError`] on HTTP or parse failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_fetch_guild_channels(bot_token: String, guild_id: String) -> Vec<FfiDiscordChannel> = discord_fetch_guild_channels_inner
+);
+
+crate::ffi_export!(
+    /// Validates a Discord user by fetching their profile from the REST API.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if arguments are empty,
+    /// [`crate::FfiError::SpawnError`] on HTTP or parse failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_validate_user(bot_token: String, user_id: String) -> FfiDiscordUser = discord_validate_user_inner
+);
+
+crate::ffi_export!(
+    /// Configures a Discord channel for archiving.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_configure_channel(
+        channel_id: String,
+        guild_id: String,
+        channel_name: String,
+        backfill_depth: String,
+    ) -> () = discord_configure_channel_inner
+);
+
+crate::ffi_export!(
+    /// Removes a channel and all its archived data from the Discord archive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_remove_channel(channel_id: String) -> () = discord_remove_channel_inner
+);
+
+crate::ffi_export!(
+    /// Links a Discord DM user ID in the shared Discord runtime state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if `user_id` is empty or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_link_dm_user(user_id: String) -> () = discord_link_dm_user_inner
+);
+
+crate::ffi_export!(
+    /// Clears the linked Discord DM user from the shared Discord runtime state.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_unlink_dm_user() -> () = discord_unlink_dm_user_inner
+);
+
+crate::ffi_export!(
+    /// Searches the Discord archive using FTS5 full-text search.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if `query` is empty,
+    /// [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on search failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_search_history(
+        query: String,
+        channel_id: Option<String>,
+        days_back: Option<i64>,
+        limit: Option<u32>,
+    ) -> Vec<FfiDiscordSearchResult> = discord_search_history_inner
+);
+
+crate::ffi_export!(
+    /// Returns sync status for a specific archived Discord channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_get_sync_status(channel_id: String) -> FfiDiscordSyncStatus = discord_get_sync_status_inner
+);
+
+crate::ffi_export!(
+    /// Triggers a background backfill task for a Discord channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::ConfigError`] if the channel is not configured,
+    /// [`crate::FfiError::SpawnError`] on runtime failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn discord_trigger_backfill(channel_id: String) -> () = discord_trigger_backfill_inner
+);
+
 // ── Inner implementations ────────────────────────────────────────────
 
 /// Fetches the guilds the bot is a member of from the Discord REST API.
@@ -322,7 +443,11 @@ pub(crate) fn discord_link_dm_user_inner(user_id: String) -> Result<(), FfiError
             detail: "user_id must not be empty".into(),
         });
     }
-    zeroclaw::channels::set_linked_discord_dm_user(Some(user_id));
+    // Disabled: `channels::set_linked_discord_dm_user` was removed
+    // upstream during the channels-crate split (zeroclaw v0.8.0-beta-1).
+    // DM-link state no longer propagates into the channel router; the
+    // Android caller treats this as a best-effort hint.
+    let _ = user_id;
     Ok(())
 }
 
@@ -331,7 +456,9 @@ pub(crate) fn discord_link_dm_user_inner(user_id: String) -> Result<(), FfiError
 /// Safe to call whether or not the daemon is currently running.
 #[allow(clippy::unnecessary_wraps)]
 pub(crate) fn discord_unlink_dm_user_inner() -> Result<(), FfiError> {
-    zeroclaw::channels::set_linked_discord_dm_user(None);
+    // Disabled: see `discord_link_dm_user_inner` — the underlying
+    // `set_linked_discord_dm_user` was removed upstream during the
+    // channels-crate split.
     Ok(())
 }
 
@@ -438,7 +565,7 @@ pub(crate) fn discord_trigger_backfill_inner(channel_id: String) -> Result<(), F
 
     let depth = channel_config.backfill_depth.clone();
 
-    let cutoff = zeroclaw::channels::discord_backfill::depth_to_cutoff(&depth).ok_or_else(
+    let cutoff = zeroai::channels::discord_backfill::depth_to_cutoff(&depth).ok_or_else(
         || FfiError::ConfigError {
             detail: format!(
                 "backfill depth '{depth}' does not require backfill (set to 'none' or unrecognised)"
@@ -449,9 +576,7 @@ pub(crate) fn discord_trigger_backfill_inner(channel_id: String) -> Result<(), F
     // Get bot token from daemon config.
     let bot_token = crate::runtime::with_daemon_config(|config| {
         config
-            .channels_config
-            .discord
-            .as_ref()
+            .channels.discord.values().next()
             .map(|dc| dc.bot_token.clone())
     })?
     .ok_or_else(|| FfiError::ConfigError {
@@ -463,7 +588,7 @@ pub(crate) fn discord_trigger_backfill_inner(channel_id: String) -> Result<(), F
 
     handle.spawn(async move {
         let client = reqwest::Client::new();
-        let result = zeroclaw::channels::discord_backfill::run_backfill(
+        let result = zeroai::channels::discord_backfill::run_backfill(
             &client,
             &bot_token,
             &archive,
@@ -499,7 +624,7 @@ pub(crate) fn discord_trigger_backfill_inner(channel_id: String) -> Result<(), F
 ///
 /// Returns [`FfiError::StateError`] if the daemon is not running or the
 /// archive was not initialised (Discord not configured at startup).
-fn get_archive() -> Result<Arc<zeroclaw::memory::discord_archive::DiscordArchive>, FfiError> {
+fn get_archive() -> Result<Arc<zeroai::memory::discord_archive::DiscordArchive>, FfiError> {
     let guard = lock_daemon();
     let state = guard.as_ref().ok_or_else(|| FfiError::StateError {
         detail: "daemon not running".into(),

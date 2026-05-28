@@ -148,13 +148,7 @@ internal class TestSettingsRepository : SettingsRepository {
 
     override suspend fun setWebSearchGoogleCx(value: String) { /* no-op */ }
 
-    override fun getTwitterBrowseHandle(): String? = null
-
-    override suspend fun setTwitterBrowseHandle(handle: String?) { /* no-op */ }
-
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) = _settings.update { it.copy(twitterBrowseEnabled = enabled) }
-
-    override suspend fun setTwitterBrowseCookieString(cookieString: String) = _settings.update { it.copy(twitterBrowseCookieString = cookieString) }
 
     override suspend fun setTwitterBrowseMaxItems(max: Long) = _settings.update { it.copy(twitterBrowseMaxItems = max) }
 
@@ -165,8 +159,6 @@ internal class TestSettingsRepository : SettingsRepository {
     override suspend fun setMemoryQdrantCollection(collection: String) = _settings.update { it.copy(memoryQdrantCollection = collection) }
 
     override suspend fun setMemoryQdrantApiKey(key: String) = _settings.update { it.copy(memoryQdrantApiKey = key) }
-
-    override suspend fun setQueryClassificationEnabled(enabled: Boolean) = _settings.update { it.copy(queryClassificationEnabled = enabled) }
 
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) = _settings.update { it.copy(skillsOpenSkillsEnabled = enabled) }
 
@@ -217,16 +209,6 @@ internal class TestSettingsRepository : SettingsRepository {
     override suspend fun setGatewayBearerToken(token: String) { /* no-op */ }
 
     override suspend fun getGatewayBearerToken(): String = ""
-
-    override suspend fun setTranscriptionEnabled(enabled: Boolean) = _settings.update { it.copy(transcriptionEnabled = enabled) }
-
-    override suspend fun setTranscriptionApiUrl(url: String) = _settings.update { it.copy(transcriptionApiUrl = url) }
-
-    override suspend fun setTranscriptionModel(model: String) = _settings.update { it.copy(transcriptionModel = model) }
-
-    override suspend fun setTranscriptionLanguage(language: String) = _settings.update { it.copy(transcriptionLanguage = language) }
-
-    override suspend fun setTranscriptionMaxDurationSecs(secs: Long) = _settings.update { it.copy(transcriptionMaxDurationSecs = secs) }
 
     override suspend fun setMultimodalMaxImages(max: Int) = _settings.update { it.copy(multimodalMaxImages = max) }
 

@@ -40,6 +40,10 @@ const ZEROCLAW_PORT: u16 = 42617;
 /// Default OpenClaw gateway HTTP port.
 const OPENCLAW_PORT: u16 = 18789;
 
+/// Default Hermes Agent gateway HTTP port (NousResearch/hermes-agent
+/// `gateway/platforms/api_server.py::DEFAULT_PORT`).
+const HERMES_PORT: u16 = 8642;
+
 // ── FFI record types ─────────────────────────────────────────────────
 
 /// Result of querying the Tailscale local API for tailnet membership.
@@ -124,9 +128,63 @@ pub enum TailnetServiceKind {
     Zeroclaw,
     /// OpenClaw gateway (port 18789).
     OpenClaw,
+    /// Hermes Agent gateway by Nous Research (port 8642).
+    Hermes,
 }
 
 // ── Inner implementations ────────────────────────────────────────────
+
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Attempts to query the Tailscale local API for peer auto-discovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::NetworkError`] if the Tailscale daemon is
+    /// unreachable, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn tailnet_auto_discover() -> TailnetAutoDiscoverResult = tailnet_auto_discover_inner
+);
+
+crate::ffi_export!(
+    /// Probes a list of peer addresses for known services (Ollama, zeroclaw).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::NetworkError`] if the HTTP client cannot be
+    /// built, or [`crate::FfiError::InternalPanic`] if native code panics.
+    fn tailnet_probe_services(peer_addresses: Vec<String>) -> Vec<TailnetPeer> = tailnet_probe_services_inner
+);
+
+crate::ffi_export!(
+    /// Sends a message to a peer agent and returns the response text.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] for malformed IP / unsupported kind,
+    /// [`crate::FfiError::NetworkError`] on connection or timeout failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn peer_send_message(
+        ip: String,
+        port: u16,
+        kind: TailnetServiceKind,
+        token: Option<String>,
+        message: String,
+    ) -> String = peer_send_message_inner
+);
+
+crate::ffi_export!(
+    /// Sends a formatted response back through a Rust-managed channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::NetworkError`] on channel dispatch failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn peer_send_channel_response(channel: PeerChannelKind, recipient: String, message: String) -> () = peer_send_channel_response_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
 
 /// Queries the Tailscale local API for tailnet membership and online peers.
 ///
@@ -263,6 +321,9 @@ pub(crate) fn tailnet_probe_services_inner(
                 if let Some(svc) = probe_openclaw(&client, host, port).await {
                     services.push(svc);
                 }
+                if let Some(svc) = probe_hermes(&client, host, port).await {
+                    services.push(svc);
+                }
             } else {
                 // No explicit port: probe all standard ports concurrently.
                 let mut handles = Vec::new();
@@ -282,6 +343,11 @@ pub(crate) fn tailnet_probe_services_inner(
                 let oh = host.to_string();
                 handles.push(tokio::spawn(async move {
                     probe_openclaw(&oc, &oh, OPENCLAW_PORT).await
+                }));
+                let hc = client.clone();
+                let hh = host.to_string();
+                handles.push(tokio::spawn(async move {
+                    probe_hermes(&hc, &hh, HERMES_PORT).await
                 }));
 
                 for handle in handles {
@@ -329,7 +395,8 @@ async fn probe_ai_server(
     let ollama_url = format!("http://{host}:{port}/api/tags");
     if let Ok(resp) = client.get(&ollama_url).send().await
         && resp.status().is_success()
-        && let Ok(json) = resp.json::<serde_json::Value>().await
+        && let Ok(body) = read_capped_body(resp).await
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
         && json.get("models").and_then(|v| v.as_array()).is_some()
     {
         let model_count = json["models"].as_array().map_or(0, Vec::len);
@@ -346,7 +413,8 @@ async fn probe_ai_server(
     let openai_url = format!("http://{host}:{port}/v1/models");
     if let Ok(resp) = client.get(&openai_url).send().await
         && resp.status().is_success()
-        && let Ok(json) = resp.json::<serde_json::Value>().await
+        && let Ok(body) = read_capped_body(resp).await
+        && let Ok(json) = serde_json::from_str::<serde_json::Value>(&body)
         && let Some(data) = json.get("data").and_then(|v| v.as_array())
     {
         let kind = port_to_kind(port)?;
@@ -374,7 +442,16 @@ async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Opti
         return None;
     }
     let json: serde_json::Value = resp.json().await.ok()?;
-    let version = json["version"].as_str().map(cap_version_string);
+    // Upstream `/health` shape: `{status, paired, require_pairing,
+    // runtime:{uptime_seconds, components}}`. No `version` field at any
+    // level. Expose uptime as the human label so the awareness line has
+    // something concrete to show ("zeroclaw daemon (uptime 12h)" beats
+    // "zeroclaw daemon ()").
+    let version = json
+        .get("runtime")
+        .and_then(|r| r.get("uptime_seconds"))
+        .and_then(|u| u.as_u64())
+        .map(format_uptime);
     let auth_required = json["require_pairing"].as_bool().unwrap_or(true);
     Some(TailnetService {
         kind: TailnetServiceKind::Zeroclaw,
@@ -383,6 +460,25 @@ async fn probe_zeroclaw(client: &reqwest::Client, host: &str, port: u16) -> Opti
         healthy: true,
         auth_required,
     })
+}
+
+/// Renders an uptime in seconds as a short human-readable label
+/// (`"34s"`, `"12m"`, `"4h"`, `"3d"`). Caller uses it as the version
+/// substitute in awareness UI for the upstream zeroclaw daemon, whose
+/// `/health` response has no version field.
+fn format_uptime(secs: u64) -> String {
+    const MINUTE: u64 = 60;
+    const HOUR: u64 = 60 * MINUTE;
+    const DAY: u64 = 24 * HOUR;
+    if secs >= DAY {
+        format!("uptime {}d", secs / DAY)
+    } else if secs >= HOUR {
+        format!("uptime {}h", secs / HOUR)
+    } else if secs >= MINUTE {
+        format!("uptime {}m", secs / MINUTE)
+    } else {
+        format!("uptime {secs}s")
+    }
 }
 
 /// Caps a string at 64 characters for safe storage/display.
@@ -395,11 +491,11 @@ fn cap_version_string(s: &str) -> String {
 
 /// Probes for an OpenClaw gateway on the given host and port.
 ///
-/// Detection uses a tiered approach:
-/// 1. Check for `x-openclaw-version` response header (definitive)
-/// 2. Parse response as JSON and check `name`/`title` fields (fallback)
-///
-/// Returns `None` if neither signal is present.
+/// Upstream OpenClaw does **not** emit an `x-openclaw-version` header
+/// (an earlier audit assumed it did — false). Detection now relies on
+/// a structured `GET /` body that names itself: OpenClaw's control UI
+/// JSON contains `name` or `title` with "openclaw" in it. Body is
+/// capped at 4 KB to keep the probe cheap.
 async fn probe_openclaw(client: &reqwest::Client, host: &str, port: u16) -> Option<TailnetService> {
     let url = format!("http://{host}:{port}/");
     let resp = client.get(&url).send().await.ok()?;
@@ -407,52 +503,33 @@ async fn probe_openclaw(client: &reqwest::Client, host: &str, port: u16) -> Opti
         return None;
     }
 
-    // Tier 1: definitive header
-    let header_version = resp
-        .headers()
-        .get("x-openclaw-version")
-        .and_then(|v| v.to_str().ok())
-        .map(cap_version_string);
-
-    if let Some(ref ver) = header_version {
-        return Some(TailnetService {
-            kind: TailnetServiceKind::OpenClaw,
-            port,
-            version: Some(ver.clone()),
-            healthy: true,
-            auth_required: true,
-        });
-    }
-
-    // Tier 2: structured JSON body (cap at 4KB)
     let body = resp.text().await.ok()?;
     let truncated = &body[..body.len().min(4096)];
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(truncated) {
-        let name_match = json
-            .get("name")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| s.to_lowercase().contains("openclaw"));
-        let title_match = json
-            .get("title")
-            .and_then(|v| v.as_str())
-            .is_some_and(|s| s.to_lowercase().contains("openclaw"));
+    let json = serde_json::from_str::<serde_json::Value>(truncated).ok()?;
 
-        if name_match || title_match {
-            let version = json
-                .get("version")
-                .and_then(|v| v.as_str())
-                .map(cap_version_string);
-            return Some(TailnetService {
-                kind: TailnetServiceKind::OpenClaw,
-                port,
-                version,
-                healthy: true,
-                auth_required: true,
-            });
-        }
+    let name_match = json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.to_lowercase().contains("openclaw"));
+    let title_match = json
+        .get("title")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.to_lowercase().contains("openclaw"));
+    if !(name_match || title_match) {
+        return None;
     }
 
-    None
+    let version = json
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(cap_version_string);
+    Some(TailnetService {
+        kind: TailnetServiceKind::OpenClaw,
+        port,
+        version,
+        healthy: true,
+        auth_required: true,
+    })
 }
 
 /// Maps a port number to the expected [`TailnetServiceKind`].
@@ -467,8 +544,53 @@ fn port_to_kind(port: u16) -> Option<TailnetServiceKind> {
         8080 => Some(TailnetServiceKind::LocalAi),
         42617 => Some(TailnetServiceKind::Zeroclaw),
         18789 => Some(TailnetServiceKind::OpenClaw),
+        8642 => Some(TailnetServiceKind::Hermes),
         _ => None,
     }
+}
+
+/// Probes for a Hermes Agent gateway on the given host and port.
+///
+/// Hermes' `/health` returns `{"status": "ok", "platform": "hermes-agent"}`;
+/// the `platform` field is the definitive signal. The richer
+/// `/health/detailed` endpoint adds `gateway_state`, `active_agents`,
+/// and platforms — we surface `active_agents` as the version label so
+/// the awareness UI shows something concrete.
+async fn probe_hermes(client: &reqwest::Client, host: &str, port: u16) -> Option<TailnetService> {
+    let url = format!("http://{host}:{port}/health");
+    let resp = client.get(&url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = read_capped_body(resp).await.ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let platform = json.get("platform").and_then(|v| v.as_str())?;
+    if !platform.eq_ignore_ascii_case("hermes-agent") {
+        return None;
+    }
+
+    // Best-effort fetch of /health/detailed for the version label. Skip
+    // silently on failure — basic detection already succeeded.
+    let detailed_url = format!("http://{host}:{port}/health/detailed");
+    let version = match client.get(&detailed_url).send().await {
+        Ok(r) if r.status().is_success() => {
+            read_capped_body(r)
+                .await
+                .ok()
+                .and_then(|b| serde_json::from_str::<serde_json::Value>(&b).ok())
+                .and_then(|j| j.get("active_agents").and_then(|n| n.as_u64()))
+                .map(|n| format!("{n} active agent(s)"))
+        }
+        _ => None,
+    };
+
+    Some(TailnetService {
+        kind: TailnetServiceKind::Hermes,
+        port,
+        version,
+        healthy: true,
+        auth_required: false,
+    })
 }
 
 // ── Peer messaging ───────────────────────────────────────────────────
@@ -589,8 +711,14 @@ async fn send_to_openclaw(
     message: &str,
 ) -> Result<String, FfiError> {
     let url = format!("http://{addr}:{port}/v1/chat/completions");
+    // Upstream OpenClaw routes through its configured agent and
+    // validates `model` against the operator's allowlist. A literal
+    // `"openclaw"` string is never in any default allowlist, so we
+    // omit the field and let OpenClaw fall back to the agent's default
+    // model. If a deployment expects an explicit alias the user must
+    // configure it OpenClaw-side; sending no `model` is the safest
+    // default.
     let body = serde_json::json!({
-        "model": "openclaw",
         "messages": [{"role": "user", "content": message}]
     });
 

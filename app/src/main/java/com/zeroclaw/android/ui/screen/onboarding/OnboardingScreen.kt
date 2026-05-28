@@ -26,6 +26,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -34,6 +35,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.data.channel.ChannelSetupSpecs
@@ -44,6 +48,7 @@ import com.zeroclaw.android.ui.component.setup.ChannelSetupFlow
 import com.zeroclaw.android.ui.component.setup.MemoryConfigFlow
 import com.zeroclaw.android.ui.screen.onboarding.state.ChannelSubFlowState
 import com.zeroclaw.android.ui.screen.onboarding.steps.ActivationStep
+import com.zeroclaw.android.ui.screen.onboarding.steps.OnDeviceAiStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.PermissionsStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.ProviderStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.SecurityStep
@@ -167,6 +172,8 @@ fun OnboardingScreen(
                     WelcomeStep()
                 OnboardingCoordinator.STEP_PROVIDER ->
                     ProviderStepCollector(coordinator)
+                OnboardingCoordinator.STEP_ON_DEVICE_AI ->
+                    OnDeviceAiStepCollector(coordinator)
                 OnboardingCoordinator.STEP_CHANNELS ->
                     ChannelStepCollector(coordinator)
                 OnboardingCoordinator.STEP_SECURITY ->
@@ -359,6 +366,41 @@ private fun ProviderStepCollector(coordinator: OnboardingCoordinator) {
         oauthEmail = state.oauthEmail,
         onOAuthLogin = { coordinator.startOAuthLogin(context) },
         onOAuthDisconnect = { coordinator.disconnectOAuth() },
+    )
+}
+
+/**
+ * Collects the on-device AI state and delegates to [OnDeviceAiStep].
+ *
+ * Triggers an availability refresh whenever the host lifecycle enters
+ * `RESUMED`, so the state machine recovers if the user backgrounds
+ * the app to install AI Core / enroll in Developer Preview and comes
+ * back. The handler internally cancels any stale download collector
+ * before issuing the new probe, so this is safe to call repeatedly.
+ *
+ * @param coordinator The [OnboardingCoordinator] owning the state.
+ */
+@Composable
+private fun OnDeviceAiStepCollector(coordinator: OnboardingCoordinator) {
+    val state by coordinator.onDeviceAiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer =
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    coordinator.refreshOnDeviceAi()
+                }
+            }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    OnDeviceAiStep(
+        state = state,
+        onDownload = coordinator::startOnDeviceDownload,
+        onInstallAiCore = coordinator::openAiCoreInstall,
+        onTogglePreview = coordinator::setOnDeviceUsePreview,
+        onEnrollPreview = coordinator::openOnDevicePreviewEnrollment,
+        showPreviewSection = false,
     )
 }
 

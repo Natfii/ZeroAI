@@ -722,7 +722,7 @@ pub(crate) fn get_render_frame() -> Result<super::types::TtyRenderFrame, FfiErro
     });
 
     let snapshot = backend.snapshot_for_render();
-    Ok(super::session::snapshot_to_frame(snapshot))
+    Ok(super::render::snapshot_to_frame(snapshot))
 }
 
 /// Resizes the remote PTY to the given dimensions.

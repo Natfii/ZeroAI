@@ -23,7 +23,6 @@ import com.zeroclaw.ffi.registerScriptTriggers
 import com.zeroclaw.ffi.registerWebRenderer
 import com.zeroclaw.ffi.scaffoldWorkspace
 import com.zeroclaw.ffi.sendMessage
-import com.zeroclaw.ffi.sendMessageRouted
 import com.zeroclaw.ffi.setWebFetchUserAgent
 import com.zeroclaw.ffi.startDaemon
 import com.zeroclaw.ffi.stopDaemon
@@ -512,64 +511,6 @@ class DaemonServiceBridge(
             }
             throw e
         }
-
-    /** Message classifier for provider routing. Lazily initialized after daemon start. */
-    private var messageClassifier: MessageClassifier? = null
-
-    /**
-     * Initializes the message classifier with current device capabilities.
-     *
-     * Call after daemon startup when Nano model availability is known.
-     *
-     * @param nanoClassifier The Nano classifier if the model is available, or `null`.
-     * @param isForeground Lambda returning `true` when the app is in the foreground.
-     */
-    fun initClassifier(
-        nanoClassifier: NanoClassifier?,
-        isForeground: () -> Boolean,
-    ) {
-        messageClassifier =
-            MessageClassifier(
-                nanoClassifier = nanoClassifier,
-                isForeground = isForeground,
-            )
-    }
-
-    /**
-     * Classifies a message and sends it with a route hint.
-     *
-     * If the classifier is not initialized, falls back to [send] without
-     * a route hint.
-     *
-     * @param message The user message to classify and send.
-     * @return The response from the daemon.
-     * @throws FfiException If the daemon returns an error.
-     */
-    @Throws(FfiException::class)
-    suspend fun sendRouted(message: String): String {
-        val classifier = messageClassifier
-        if (classifier == null) return send(message)
-
-        val hint = classifier.classify(message)
-        Log.d(TAG, "sendRouted: hint=${hint.ffiValue}")
-        return try {
-            withContext(ioDispatcher) {
-                sendMessageRouted(message, hint.ffiValue)
-            }
-        } catch (e: FfiException) {
-            val detail = e.errorDetail()
-            val errorType = ApiKeyErrorClassifier.classify(detail)
-            if (errorType != null) {
-                _keyRejections.tryEmit(
-                    KeyRejectionEvent(
-                        detail = detail,
-                        errorType = errorType,
-                    ),
-                )
-            }
-            throw e
-        }
-    }
 
     /**
      * Scaffolds the workspace directory with identity template files.

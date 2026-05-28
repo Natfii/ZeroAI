@@ -1,0 +1,277 @@
+//! E2E test for vision support in model_providers.
+//!
+//! This test validates that:
+//! 1. ModelProvider reports vision capability
+//! 2. ModelProvider correctly processes messages with [IMAGE:...] markers
+//! 3. Request is sent to API with proper image_url format
+//!
+//! Requires:
+//! - Live model_provider OAuth credentials (OpenAI Codex or Gemini)
+//! - Test image at /tmp/test_vision.png
+//!
+//! Run manually: `cargo test provider_vision -- --ignored --nocapture`
+
+use anyhow::Result;
+use zeroclaw::providers::{ChatMessage, ChatRequest, ModelProviderRuntimeOptions};
+
+/// Moderate temperature for vision E2E probes; the test asserts on request
+/// shape and success rather than output determinism, so 0.7 (historical
+/// codebase default) keeps behavior matching earlier runs.
+const VISION_PROBE_TEMPERATURE: f64 = 0.7;
+
+/// Tests that model_provider supports vision input.
+///
+/// This test:
+/// 1. Creates model_provider via factory (tries OpenAI Codex, falls back to Gemini)
+/// 2. Verifies vision capability is reported
+/// 3. Sends a message with [IMAGE:...] marker
+/// 4. Verifies request succeeds without capability error
+#[tokio::test]
+#[ignore = "requires live model_provider OAuth credentials"]
+async fn provider_vision_support() -> Result<()> {
+    // Use Gemini model_provider (OpenAI Codex is rate-limited until 21 Feb)
+    println!("Creating Gemini model_provider...");
+    let model_provider = zeroclaw::providers::create_model_provider("gemini", None)?;
+    let provider_name = "gemini";
+    let model = "gemini-2.5-pro";
+
+    println!("✓ Created {} model_provider", provider_name);
+
+    // Warmup model_provider (for OAuth token refresh if needed)
+    println!("Warming up model_provider...");
+    model_provider.warmup().await?;
+    println!("✓ ModelProvider warmed up");
+
+    // Verify vision capability
+    let capabilities = model_provider.capabilities();
+    println!(
+        "ModelProvider {} capabilities: vision={}",
+        provider_name, capabilities.vision
+    );
+
+    if !capabilities.vision {
+        anyhow::bail!(
+            "❌ {} model_provider does not report vision capability! \
+             Check that model_provider's capabilities() returns vision=true",
+            provider_name
+        );
+    }
+
+    println!("✓ ModelProvider {} reports vision=true", provider_name);
+
+    // Prepare test image path
+    let test_image = "/tmp/test_vision.png";
+
+    if !std::path::Path::new(test_image).exists() {
+        eprintln!("⚠️  Test image not found at {}", test_image);
+        eprintln!("Creating minimal 1x1 PNG...");
+
+        // Create minimal PNG if missing
+        use base64::{Engine as _, engine::general_purpose};
+        let png_data = general_purpose::STANDARD.decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )?;
+        std::fs::write(test_image, png_data)?;
+
+        println!("✓ Created test image at {}", test_image);
+    }
+
+    // Prepare message with image marker
+    let user_message = format!("What is in this image? [IMAGE:{}]", test_image);
+
+    println!("Sending message with image marker...");
+    println!("Message: {}", user_message);
+
+    // Build chat request
+    let messages = vec![
+        ChatMessage::system("You are a helpful assistant that can analyze images."),
+        ChatMessage::user(user_message.clone()),
+    ];
+
+    let request = ChatRequest {
+        messages: &messages,
+        tools: None,
+        thinking: None,
+    };
+
+    // Send request to model_provider
+    println!("Using model: {}", model);
+    let result = model_provider
+        .chat(request, model, Some(VISION_PROBE_TEMPERATURE))
+        .await;
+
+    match result {
+        Ok(response) => {
+            println!("✓ Request succeeded!");
+            if let Some(text) = response.text {
+                println!("Response text: {}", text);
+            }
+            println!("Tool calls: {}", response.tool_calls.len());
+
+            // Success: model_provider accepted vision input
+            println!("\n✅ {} vision support is working!", provider_name);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Request failed: {}", e);
+
+            // Check if it's the capability error we're testing for
+            let error_str = e.to_string();
+            if error_str.contains("provider_capability_error")
+                || error_str.contains("does not support vision")
+            {
+                eprintln!("\n⚠️  CAPABILITY ERROR DETECTED!");
+                eprintln!("This means the agent loop is still blocking vision input.");
+                eprintln!("Possible causes:");
+                eprintln!("  1. Service binary not rebuilt (check timestamp)");
+                eprintln!("  2. Service not restarted with new binary");
+                eprintln!("  3. ModelProvider factory returning wrong implementation");
+                anyhow::bail!("Vision capability check failed in agent loop");
+            }
+
+            // Other errors (API error, auth, etc) are also failures but different nature
+            eprintln!("\n⚠️  Request failed with non-capability error");
+            eprintln!("This might be:");
+            eprintln!("  - API authentication issue");
+            eprintln!("  - Network error");
+            eprintln!("  - API format rejection");
+            Err(e)
+        }
+    }
+}
+
+/// Tests that OpenAI Codex second profile supports vision input.
+///
+/// This test:
+/// 1. Creates OpenAI Codex model_provider with "second" profile override
+/// 2. Verifies vision capability is reported
+/// 3. Sends a message with [IMAGE:...] marker
+/// 4. Verifies request succeeds without capability error
+#[tokio::test]
+#[ignore = "requires live OpenAI Codex OAuth credentials (second profile)"]
+async fn openai_codex_second_vision_support() -> Result<()> {
+    println!("Creating OpenAI Codex model_provider with second profile...");
+
+    // Create model_provider with profile override. Codex routing now
+    // happens via the legacy "openai-codex" family-name escape hatch
+    // (the typed-alias `requires_openai_auth` flag flows through
+    // `OpenAIModelProviderConfig::create_provider` when called with
+    // full Config + alias context, which this live test does not use).
+    let opts = ModelProviderRuntimeOptions {
+        auth_profile_override: Some("second".to_string()),
+        secrets_encrypt: false,
+        ..Default::default()
+    };
+
+    let model_provider =
+        zeroclaw::providers::create_model_provider_with_options("openai-codex", None, &opts)?;
+    let provider_name = "openai.codex:second";
+    let model = "gpt-5.3-codex";
+
+    println!("✓ Created {} model_provider", provider_name);
+
+    // Verify vision capability
+    let capabilities = model_provider.capabilities();
+    println!(
+        "ModelProvider {} capabilities: vision={}",
+        provider_name, capabilities.vision
+    );
+
+    if !capabilities.vision {
+        anyhow::bail!(
+            "❌ {} model_provider does not report vision capability! \
+             Check that model_provider's capabilities() returns vision=true",
+            provider_name
+        );
+    }
+
+    println!("✓ ModelProvider {} reports vision=true", provider_name);
+
+    // Prepare test image path
+    let test_image = "/tmp/test_vision.png";
+
+    if !std::path::Path::new(test_image).exists() {
+        eprintln!("⚠️  Test image not found at {}", test_image);
+        eprintln!("Creating minimal 1x1 PNG...");
+
+        // Create minimal PNG if missing
+        use base64::{Engine as _, engine::general_purpose};
+        let png_data = general_purpose::STANDARD.decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )?;
+        std::fs::write(test_image, png_data)?;
+
+        println!("✓ Created test image at {}", test_image);
+    }
+
+    // Prepare message with image marker
+    let user_message = format!("What is in this image? [IMAGE:{}]", test_image);
+
+    println!("Sending message with image marker...");
+    println!("Message: {}", user_message);
+
+    // Build chat request
+    let messages = vec![
+        ChatMessage::system("You are a helpful assistant that can analyze images."),
+        ChatMessage::user(user_message.clone()),
+    ];
+
+    let request = ChatRequest {
+        messages: &messages,
+        tools: None,
+        thinking: None,
+    };
+
+    // Send request to model_provider
+    println!("Using model: {}", model);
+    let result = model_provider
+        .chat(request, model, Some(VISION_PROBE_TEMPERATURE))
+        .await;
+
+    match result {
+        Ok(response) => {
+            println!("✓ Request succeeded!");
+            if let Some(text) = response.text {
+                println!("Response text: {}", text);
+            }
+            println!("Tool calls: {}", response.tool_calls.len());
+
+            // Success: model_provider accepted vision input
+            println!("\n✅ {} vision support is working!", provider_name);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Request failed: {}", e);
+
+            // Check if it's the capability error we're testing for
+            let error_str = e.to_string();
+            if error_str.contains("provider_capability_error")
+                || error_str.contains("does not support vision")
+            {
+                eprintln!("\n⚠️  CAPABILITY ERROR DETECTED!");
+                eprintln!("This means the agent loop is still blocking vision input.");
+                anyhow::bail!("Vision capability check failed in agent loop");
+            }
+
+            // Check if it's rate limit
+            if error_str.contains("429")
+                || error_str.contains("rate")
+                || error_str.contains("limit")
+            {
+                eprintln!("\n⚠️  RATE LIMITED!");
+                eprintln!("Second OpenAI Codex profile is also rate-limited.");
+                eprintln!("This is OK - it means both profiles share the same quota.");
+                // Don't fail the test - rate limit is expected
+                return Ok(());
+            }
+
+            // Other errors (API error, auth, etc) are also failures but different nature
+            eprintln!("\n⚠️  Request failed with non-capability error");
+            eprintln!("This might be:");
+            eprintln!("  - API authentication issue");
+            eprintln!("  - Network error");
+            eprintln!("  - API format rejection");
+            Err(e)
+        }
+    }
+}

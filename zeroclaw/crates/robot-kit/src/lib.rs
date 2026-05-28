@@ -82,7 +82,7 @@
 //! The safety system runs as an independent task and can override any
 //! AI decision. This prevents collisions even if the LLM hallucinates.
 
-// Missing docs are temporarily allowed while the public API is being documented
+// TODO: Re-enable once all public items are documented
 // #![warn(missing_docs)]
 #![allow(missing_docs)]
 #![warn(clippy::all)]
@@ -115,7 +115,7 @@ pub use sense::SenseTool;
 pub use speak::SpeakTool;
 
 #[cfg(feature = "safety")]
-pub use safety::{preflight_check, SafeDrive, SafetyEvent, SafetyMonitor, SensorReading};
+pub use safety::{SafeDrive, SafetyEvent, SafetyMonitor, SensorReading, preflight_check};
 
 /// Crate version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

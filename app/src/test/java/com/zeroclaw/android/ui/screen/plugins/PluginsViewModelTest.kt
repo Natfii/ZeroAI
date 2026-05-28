@@ -191,11 +191,9 @@ private class TestPluginRepository(
         // no-op
     }
 
-    override suspend fun syncOfficialPluginStates(settings: com.zeroclaw.android.model.AppSettings) {
-        // no-op
-    }
-
-    override suspend fun upsertMissingOfficialPlugins() {
+    override suspend fun reconcileOfficialPlugins(
+        settings: com.zeroclaw.android.model.AppSettings,
+    ) {
         // no-op
     }
 }

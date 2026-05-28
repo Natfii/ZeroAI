@@ -67,6 +67,57 @@ fn lock_renderer() -> std::sync::MutexGuard<'static, Option<Arc<dyn WebRenderer>
     })
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Unregisters the current WebView renderer.
+    ///
+    /// After this call, JavaScript-heavy pages will not be rendered via
+    /// WebView and the fetch tool will return the raw HTTP response
+    /// instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn unregister_web_renderer() -> () = unregister_web_renderer_inner
+);
+
+crate::ffi_export!(
+    /// Registers a Kotlin-side WebView renderer for JavaScript-heavy pages.
+    ///
+    /// The renderer is called from Rust when the HTTP fetch tool encounters
+    /// a page that requires client-side JavaScript execution (Cloudflare
+    /// challenges, SPA content). Only one renderer can be registered at a
+    /// time; a new registration replaces the previous one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn register_web_renderer(renderer: Box<dyn WebRenderer>) -> () = register_web_renderer_boxed
+);
+
+crate::ffi_export!(
+    /// Sets the device-authentic User-Agent string for the web_fetch tool.
+    /// No-op upstream stub; preserved for ABI stability.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn set_web_fetch_user_agent(user_agent: String) -> () = set_web_fetch_user_agent_inner
+);
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn register_web_renderer_boxed(
+    renderer: Box<dyn WebRenderer>,
+) -> Result<(), FfiError> {
+    register_web_renderer_inner(Arc::from(renderer))
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn set_web_fetch_user_agent_inner(_user_agent: String) -> Result<(), FfiError> {
+    Ok(())
+}
+
 /// Registers a Kotlin-side web renderer.
 ///
 /// Only one renderer can be registered at a time. A new renderer replaces
@@ -114,8 +165,13 @@ pub(crate) fn try_render_page(
 /// the tool registry.
 pub(crate) struct FfiWebViewFallback;
 
-impl zeroclaw::tools::web_fetch::WebViewFallback for FfiWebViewFallback {
-    fn render_page(&self, url: &str, timeout_ms: u64) -> Result<String, String> {
+// Disabled: the `WebViewFallback` trait was removed from
+// `tools::web_fetch` upstream (zeroclaw v0.8.0-beta-1). The adapter is
+// preserved (and still constructed by `runtime.rs`) so the Android
+// side can re-wire it when upstream re-introduces a fallback hook.
+impl FfiWebViewFallback {
+    #[allow(dead_code)]
+    pub(crate) fn render_page(&self, url: &str, timeout_ms: u64) -> Result<String, String> {
         match try_render_page(url, timeout_ms) {
             Some(Ok(text)) => Ok(text),
             Some(Err(e)) => Err(e.to_string()),

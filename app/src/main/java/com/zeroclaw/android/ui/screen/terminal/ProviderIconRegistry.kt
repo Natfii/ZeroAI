@@ -32,6 +32,15 @@ object ProviderIconRegistry {
     /** Provider identifier used for on-device Nano responses. */
     const val NANO_PROVIDER = "nano"
 
+    /**
+     * Provider identifier for on-device LiteRT-LM responses
+     * (Gemma 4 E2B/E4B-it, Phi-4-mini-instruct, …). Distinct from
+     * [NANO_PROVIDER] so users can tell whether a reply came from
+     * the 4K auxiliary Gemini Nano or from the larger, daemon-
+     * loaded local model.
+     */
+    const val LITERTLM_PROVIDER = "litertlm"
+
     /** Fallback attribution when the provider is unknown. */
     private val FALLBACK =
         ProviderAttribution(
@@ -66,6 +75,11 @@ object ProviderIconRegistry {
                 ProviderAttribution(
                     icon = R.drawable.ic_provider_nano,
                     name = "Nano",
+                ),
+            LITERTLM_PROVIDER to
+                ProviderAttribution(
+                    icon = R.drawable.ic_provider_litertlm,
+                    name = "On-device",
                 ),
         )
 

@@ -10,7 +10,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
-import com.zeroclaw.android.data.email.EmailConfigState
 import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.ChannelType
 import com.zeroclaw.android.model.ConnectedChannel
@@ -82,12 +81,16 @@ class AppsCatalogViewModel(
         combine(
             app.channelConfigRepository.channels,
             settingsRepository.settings,
-            emailConfigRepository.observe(),
-        ) { channels, settings, emailConfig ->
+        ) { channels, settings ->
+            // Twitter tile restored 2026-05-27: ships a local
+            // `twitter_read_profile` Rust tool that hits X's public
+            // syndication endpoint (replacing the upstream tool that
+            // was deleted during the workspace split). Email tile
+            // still dropped — upstream `tools::email` is gone and we
+            // haven't re-implemented it locally.
             buildList {
                 add(twitterItem(settings))
                 add(clawBoyItem())
-                add(emailItem(emailConfig))
                 add(googleMessagesItem())
                 add(tailscaleItem(settings))
                 ChannelType.entries.forEach { type ->
@@ -96,26 +99,23 @@ class AppsCatalogViewModel(
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000L), emptyList())
 
-    /** Twitter browse tool catalog item, always shown at the top of the WEB category. */
-    private fun twitterItem(settings: AppSettings): AppCatalogItem {
-        val hasCookie = settings.twitterBrowseCookieString.isNotBlank()
-        val isEnabled = settings.twitterBrowseEnabled
-        return AppCatalogItem(
+    /**
+     * Twitter read-only tile.
+     *
+     * Anonymous: the tool hits `syndication.twitter.com` (the public embed
+     * endpoint), so there is no auth state to surface — only enabled/disabled.
+     */
+    private fun twitterItem(settings: AppSettings): AppCatalogItem =
+        AppCatalogItem(
             id = "twitter_browse",
             category = AppCatalogCategory.WEB,
             title = "X / Twitter",
-            description = "Let your AI companion browse X/Twitter in read-only mode",
-            statusLabel =
-                when {
-                    !hasCookie -> "Not connected yet"
-                    isEnabled -> "Read-only browsing active"
-                    else -> "Connected but disabled"
-                },
-            actionLabel = if (hasCookie) "Manage X" else "Connect X",
+            description = "Read recent public tweets from any X account",
+            statusLabel = if (settings.twitterBrowseEnabled) "Active" else "Disabled",
+            actionLabel = "Configure",
             destination = AppCatalogDestination.TOOL_CONFIG,
             destinationKey = "twitter_browse",
         )
-    }
 
     /**
      * ClawBoy emulator catalog item, shown in the WEB category.
@@ -145,31 +145,6 @@ class AppsCatalogViewModel(
             actionLabel = "Configure",
             destination = AppCatalogDestination.TOOL_CONFIG,
             destinationKey = "clawboy",
-        )
-    }
-
-    /**
-     * Email integration catalog item.
-     *
-     * Shows current configuration status based on whether the address
-     * is configured and whether the integration is enabled.
-     */
-    private fun emailItem(emailConfig: EmailConfigState): AppCatalogItem {
-        val hasAddress = emailConfig.address.isNotBlank()
-        return AppCatalogItem(
-            id = "email",
-            category = AppCatalogCategory.WEB,
-            title = "Email",
-            description = "Let your AI agent read and send email",
-            statusLabel =
-                when {
-                    !hasAddress -> "Not configured yet"
-                    emailConfig.isEnabled -> "Active"
-                    else -> "Configured but disabled"
-                },
-            actionLabel = if (hasAddress) "Manage Email" else "Configure Email",
-            destination = AppCatalogDestination.TOOL_CONFIG,
-            destinationKey = "email",
         )
     }
 

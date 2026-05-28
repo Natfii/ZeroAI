@@ -75,6 +75,118 @@ fn parse_job_json(obj: &serde_json::Value) -> FfiCronJob {
     }
 }
 
+// ── FFI exports ────────────────────────────────────────────────────────────
+
+crate::ffi_export!(
+    /// Lists all cron jobs registered with the running daemon.
+    ///
+    /// Requires the daemon to be running so the cron SQLite database is accessible.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database access failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn list_cron_jobs() -> Vec<FfiCronJob> = list_cron_jobs_inner
+);
+
+crate::ffi_export!(
+    /// Retrieves a single cron job by its identifier.
+    ///
+    /// Returns `None` if no job with the given `id` exists.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database access failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn get_cron_job(id: String) -> Option<FfiCronJob> = get_cron_job_inner
+);
+
+crate::ffi_export!(
+    /// Adds a new recurring cron job with the given expression and command.
+    ///
+    /// The `expression` must be a valid cron expression (e.g. `"0 0/5 * * *"`).
+    /// The `command` is the prompt or action the scheduler will execute.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on invalid expression or database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn add_cron_job(expression: String, command: String) -> FfiCronJob = add_cron_job_inner
+);
+
+crate::ffi_export!(
+    /// Adds a one-shot job that fires once after the given delay.
+    ///
+    /// The `delay` string uses human-readable durations (e.g. `"5m"`, `"2h"`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on invalid delay or database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn add_one_shot_job(delay: String, command: String) -> FfiCronJob = add_one_shot_job_inner
+);
+
+crate::ffi_export!(
+    /// Adds a one-shot cron job that fires at a specific RFC 3339 timestamp.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on invalid timestamp or database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn add_cron_job_at(timestamp_rfc3339: String, command: String) -> FfiCronJob = add_cron_job_at_inner
+);
+
+crate::ffi_export!(
+    /// Adds a fixed-interval repeating cron job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] on database failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn add_cron_job_every(interval_ms: u64, command: String) -> FfiCronJob = add_cron_job_every_inner
+);
+
+crate::ffi_export!(
+    /// Removes a cron job by its identifier.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] if the job does not exist or database fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn remove_cron_job(id: String) -> () = remove_cron_job_inner
+);
+
+crate::ffi_export!(
+    /// Pauses a cron job so it will not fire until resumed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] if the job does not exist or database fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn pause_cron_job(id: String) -> () = pause_cron_job_inner
+);
+
+crate::ffi_export!(
+    /// Resumes a previously paused cron job.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::StateError`] if the daemon is not running,
+    /// [`crate::FfiError::SpawnError`] if the job does not exist or database fails, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn resume_cron_job(id: String) -> () = resume_cron_job_inner
+);
+
+// ── Inner implementations ──────────────────────────────────────────────────
+
 /// Lists all cron jobs registered with the daemon.
 pub(crate) fn list_cron_jobs_inner() -> Result<Vec<FfiCronJob>, FfiError> {
     let json = gateway_client::gateway_get("/api/cron")?;
@@ -168,7 +280,7 @@ pub(crate) fn remove_cron_job_inner(id: String) -> Result<(), FfiError> {
 /// placeholder that returns an error until the upstream API is extended.
 pub(crate) fn pause_cron_job_inner(id: String) -> Result<(), FfiError> {
     // Verify the daemon is running (gateway_get will check this).
-    let _ = crate::runtime::get_gateway_port()?;
+    let _ = crate::runtime::gateway_port_inner()?;
     Err(FfiError::StateError {
         detail: format!(
             "pause_job not available via gateway API (job {id}); \
@@ -182,7 +294,7 @@ pub(crate) fn pause_cron_job_inner(id: String) -> Result<(), FfiError> {
 /// The gateway does not expose a dedicated resume endpoint. This is a
 /// placeholder that returns an error until the upstream API is extended.
 pub(crate) fn resume_cron_job_inner(id: String) -> Result<(), FfiError> {
-    let _ = crate::runtime::get_gateway_port()?;
+    let _ = crate::runtime::gateway_port_inner()?;
     Err(FfiError::StateError {
         detail: format!(
             "resume_job not available via gateway API (job {id}); \

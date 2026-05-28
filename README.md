@@ -2,10 +2,8 @@
 
 ![banner](https://github.com/user-attachments/assets/eca832d2-c90b-4aed-867b-06d69cc19a7f)
 
-
-
 <p align="center">                                                                                                                                                                                                            <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white"/>
-    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                                 
+    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                               
     <img alt="Target SDK" src="https://img.shields.io/badge/target%20SDK-35-brightgreen"/>
     <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.0-7F52FF?logo=kotlin&logoColor=white"/>
     <img alt="Rust" src="https://img.shields.io/badge/Rust-FFI-DEA584?logo=rust&logoColor=black"/>
@@ -15,20 +13,20 @@
 
 <p align="center">
     <img alt="UniFFI" src="https://img.shields.io/badge/bridge-UniFFI-blueviolet"/>
-    <img alt="Providers" src="https://img.shields.io/badge/providers-OpenAI%20%7C%20Anthropic%20%7C%20Gemini%20%7C%20xAI%20%7C%20DeepSeek%20%7C%20Qwen%20%7C%20Ollama%20%7C%20OpenRouter-blue"/>
-    <img alt="Channels" src="https://img.shields.io/badge/channels-Telegram%20%7C%20Discord%20%7C%20Email%20%7C%20Messages%20%7C%20CLI-blue"/>
+    <img alt="Providers" src="https://img.shields.io/badge/providers-OpenAI%20%7C%20Anthropic%20%7C%20Gemini%20%7C%20Ollama%20%7C%20OpenRouter-blue"/>
+    <img alt="Channels" src="https://img.shields.io/badge/channels-Telegram%20%7C%20Discord%20%7C%20Messages%20%7C%20Terminal-blue"/>
+    <img alt="On-device" src="https://img.shields.io/badge/on--device-Gemma%204%20E2B%20via%20LiteRT--LM-FFA000"/>
   </p>
 
 **Zero** is an Android AI agent app built with Kotlin, Rust, and UniFFI. It runs a
 long-lived on-device service, exposes tools through a native [Zeroclaw] Rust core, and provides a Compose UI for configuring and operating the agent.
 
-
 <p align="Center"><img src="https://github.com/user-attachments/assets/429db2eb-602b-4696-a414-46dc8dd744e0" alt="Zero screenshots" width="30%" /> <img src="https://github.com/user-attachments/assets/f32adefc-98d3-4772-9824-27c602f04c80" alt="Zero screenshots" width="30%" /> <img src="https://github.com/user-attachments/assets/85b797be-0b92-45ff-9394-0ada640fa7b7" alt="Zero screenshots" width="30%" /> </p>
 
 ## Project status
 
-- Experimental and actively evolving. Releases and commits on paused while I decide on memory, and can do longer term tests with local LLMs. 
-- Built for Android 9+ and validated most heavily on recent Pixel hardware. Other
+- Experimental and actively evolving.
+- Built for recent Pixel hardware. Other
   devices and OEM builds may need additional validation.
 - Large portions of the project were created with AI-assisted tooling and are still being
   audited and hardened.
@@ -68,12 +66,10 @@ Zero is designed to be private by default, configurable, and capable of running 
 
 ### Providers
 
+- **On-device** — Gemma 4 E2B-it via LiteRT-LM (CPU on Tensor G5, GPU on Mali/Adreno)
 - OpenAI
 - Anthropic
 - Google Gemini
-- xAI (Grok)
-- DeepSeek
-- Qwen (Alibaba DashScope) — International, China, and US regional endpoints
 - Ollama
 - OpenRouter
 
@@ -81,8 +77,7 @@ Zero is designed to be private by default, configurable, and capable of running 
 
 - Telegram
 - Discord
-- Email
-- Google Messages
+- Google Messages (Beta)
 - in-app Terminal / REPL
 
 That means your in-app Zero can live inside the app, speak through connected channels, and keep working through the daemon/runtime model.
@@ -93,8 +88,7 @@ That means your in-app Zero can live inside the app, speak through connected cha
 - web fetch
 - HTTP requests
 - vision / multimodal support
-- smart message routing + provider cascade
-- Twitter/X browsing via authenticated cookies
+- Twitter/X
 - **eval_script** — sandboxed Rhai scripting (agent writes and runs scripts during its own reasoning)
 
 ### Core systems
@@ -132,15 +126,14 @@ Once in TTY mode (`@tty`), connect to any SSH server:
 
 <p>
  <img align="right" src="https://github.com/user-attachments/assets/7ac0c143-4902-4d0b-b3ec-77ea14cffb5e" width="30%" />
-</p> 
-
+</p>
 
 ```
 /ssh user@hostname
-/ssh user@hostname -p 2222     
-```  
+/ssh user@hostname -p 2222   
+```
 
-Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.   
+Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.
 
 Manage SSH keys in **Settings > SSH Keys** (generate Ed25519/RSA, import from file, copy public key).
 
@@ -150,8 +143,7 @@ Connect your Zero to external channels so it can respond on your behalf:
 
 - **Telegram** — link a bot token, Zero replies in your Telegram chats
 - **Discord** — link a bot token, Zero joins your Discord servers
-- **Email** — IMAP/SMTP, Zero reads and drafts email responses
-- **Google Messages** — experimental Bugle protocol bridge
+- **Google Messages** — experimental read-only Bugle protocol bridge
 
 Configure channels in **Hub > Apps**.
 

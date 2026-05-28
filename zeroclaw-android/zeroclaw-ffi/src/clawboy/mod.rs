@@ -8,6 +8,7 @@
 pub mod bridge;
 pub mod chat;
 pub mod emulator;
+pub mod exports;
 pub mod journal;
 pub mod memory_map;
 pub mod prompts;
