@@ -28,6 +28,24 @@ crate::ffi_export!(
 );
 
 crate::ffi_export!(
+    /// Configures the local shell environment for the bundled `ssh` client.
+    ///
+    /// Creates a `bin/` directory under `files_dir`, symlinks `ssh` to the
+    /// bundled `libssh.so` in `native_lib_dir`, and records the paths so
+    /// every spawned shell gets `bin` on its `PATH` and `files_dir` as
+    /// `HOME` (where `~/.ssh` host keys persist). Call once at startup,
+    /// before creating any session.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::IoError`] if the directory or symlink
+    /// cannot be created, or [`crate::FfiError::InternalPanic`] if native
+    /// code panics.
+    fn tty_configure_shell(native_lib_dir: String, files_dir: String) -> ()
+        = tty_configure_shell_inner
+);
+
+crate::ffi_export!(
     /// Destroys the running local shell PTY session.
     ///
     /// Sends `SIGHUP` then `SIGKILL` to the child process and closes
@@ -141,6 +159,13 @@ crate::ffi_export!(
 
 pub(crate) fn tty_create_inner(cols: u32, rows: u32) -> Result<(), FfiError> {
     tty::session::create(cols as u16, rows as u16)
+}
+
+pub(crate) fn tty_configure_shell_inner(
+    native_lib_dir: String,
+    files_dir: String,
+) -> Result<(), FfiError> {
+    tty::session::configure_shell(&native_lib_dir, &files_dir)
 }
 
 pub(crate) fn tty_destroy_inner() -> Result<(), FfiError> {

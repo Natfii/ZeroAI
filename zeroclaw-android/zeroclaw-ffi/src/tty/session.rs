@@ -45,6 +45,22 @@ static RENDER_DIRTY: AtomicBool = AtomicBool::new(false);
 static RENDER_CONDVAR: std::sync::LazyLock<(Mutex<()>, Condvar)> =
     std::sync::LazyLock::new(|| (Mutex::new(()), Condvar::new()));
 
+/// Shell environment configuration for the bundled `ssh` client.
+///
+/// Recorded once via [`configure_shell`] before any session is spawned;
+/// the value is populated pre-fork, so the forked child reads it to put
+/// the `bin` directory (containing the `ssh` symlink) on `PATH` and use
+/// the app's files directory as `HOME`.
+static SHELL_CONFIG: std::sync::OnceLock<ShellConfig> = std::sync::OnceLock::new();
+
+/// Resolved shell environment paths recorded by [`configure_shell`].
+struct ShellConfig {
+    /// Directory prepended to `PATH`, containing the `ssh` symlink.
+    bin_dir: String,
+    /// Value for the child's `HOME` (where `~/.ssh` host keys persist).
+    home_dir: String,
+}
+
 // ── Session state ───────────────────────────────────────────────────
 
 /// Mutable state for a running local shell PTY session.
@@ -73,6 +89,38 @@ const WRITE_CHANNEL_CAPACITY: usize = 256;
 
 /// Default line capacity for the [`LineRingBuffer`] backing PTY output.
 const DEFAULT_LINE_CAPACITY: usize = 2000;
+
+/// Configures the shell environment for the bundled `ssh` client.
+///
+/// Creates `<files_dir>/bin`, (re)creates an `ssh` symlink in it pointing
+/// at `<native_lib_dir>/libssh.so`, and records the paths in
+/// [`SHELL_CONFIG`] so spawned shells get `bin` on `PATH` and `files_dir`
+/// as `HOME`. Safe to call on every startup: the symlink is refreshed (the
+/// native library path changes on app update) while the recorded paths are
+/// set once.
+///
+/// # Errors
+///
+/// Returns [`FfiError::IoError`] if the directory or symlink cannot be
+/// created.
+pub(crate) fn configure_shell(native_lib_dir: &str, files_dir: &str) -> Result<(), FfiError> {
+    let bin_dir = format!("{files_dir}/bin");
+    std::fs::create_dir_all(&bin_dir).map_err(|e| FfiError::IoError {
+        detail: format!("failed to create shell bin dir: {e}"),
+    })?;
+    let ssh_link = format!("{bin_dir}/ssh");
+    let ssh_target = format!("{native_lib_dir}/libssh.so");
+    // Refresh the symlink because the native library path changes on update.
+    let _ = std::fs::remove_file(&ssh_link);
+    std::os::unix::fs::symlink(&ssh_target, &ssh_link).map_err(|e| FfiError::IoError {
+        detail: format!("failed to symlink ssh: {e}"),
+    })?;
+    let _ = SHELL_CONFIG.set(ShellConfig {
+        bin_dir,
+        home_dir: files_dir.to_owned(),
+    });
+    Ok(())
+}
 
 // ── Mutex helper ────────────────────────────────────────────────────
 
@@ -601,10 +649,18 @@ fn run_child(slave_fd: OwnedFd) -> ! {
         // prompt), so an environment value has no effect. The clean `$ `
         // prompt is instead injected into the PTY after spawn — see the
         // parent branch in `spawn_local_shell`.
-        // HOME is set by the Android app layer via the data_dir. We
-        // use a sensible default here; the Kotlin caller can override
-        // via environment if needed.
-        if std::env::var("HOME").is_err() {
+        // The Android app records the bundled-ssh bin dir and files dir
+        // via `configure_shell`. When present, prepend `bin` (which holds
+        // the `ssh` symlink) to PATH and use the app files dir as HOME so
+        // the bundled `ssh` resolves and `~/.ssh` host keys persist.
+        if let Some(config) = SHELL_CONFIG.get() {
+            std::env::set_var("HOME", &config.home_dir);
+            let existing = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var(
+                "PATH",
+                format!("{}:/system/bin:/system/xbin:{}", config.bin_dir, existing),
+            );
+        } else if std::env::var("HOME").is_err() {
             std::env::set_var("HOME", "/data/local/tmp");
         }
     }

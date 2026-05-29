@@ -77,13 +77,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -94,6 +91,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -330,7 +328,8 @@ fun TerminalScreen(
                             altActive = ttyAltActive,
                             onClose = terminalViewModel::switchToRepl,
                             onKeyPress = terminalViewModel::ttyHandleSpecialKey,
-                            onTextInput = terminalViewModel::ttyWriteText,
+                            onTextInput = terminalViewModel::ttyOnText,
+                            onInputBytes = terminalViewModel::ttyWriteBytes,
                             onAnswerHostKey = terminalViewModel::sshAnswerHostKey,
                             onSubmitPassword = terminalViewModel::sshSubmitPassword,
                             onSubmitKey = terminalViewModel::sshSubmitKey,
@@ -351,7 +350,6 @@ fun TerminalScreen(
                                 terminalViewModel.clearSelection()
                             },
                             onPaste = { terminalViewModel.pasteFromClipboard(context) },
-                            onPasteText = terminalViewModel::pasteText,
                             onConfirmPaste = terminalViewModel::confirmPaste,
                             onCancelPaste = terminalViewModel::cancelPaste,
                             onSelectionStart = terminalViewModel::startWordSelection,
@@ -1222,7 +1220,8 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param altActive Whether the Alt modifier is toggled on.
  * @param onClose Callback to close the TTY session and return to REPL.
  * @param onKeyPress Callback for special key presses from [TtyKeyRow].
- * @param onTextInput Callback for text typed via the software keyboard.
+ * @param onTextInput Callback for printable text typed via the software keyboard, sent to the PTY.
+ * @param onInputBytes Callback for raw control bytes (backspace, forward delete) from the input proxy.
  * @param onFontSizeChange Invoked with the new font size after a pinch-to-zoom gesture.
  * @param onSizeChanged Invoked with the new `(cols, rows, widthPx, heightPx)` grid dimensions
  *   and canvas pixel size when the canvas size or font metrics change.
@@ -1238,8 +1237,6 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param pendingPaste Text awaiting paste confirmation, or `null` when no confirmation is needed.
  * @param onCopy Callback invoked when the user taps Copy in the selection action bar.
  * @param onPaste Callback invoked when the user taps Paste in the action bar.
- * @param onPasteText Callback invoked with intercepted text from the input field that contains
- *   control characters and should be routed through the paste safety flow.
  * @param onConfirmPaste Callback to confirm and send a pending unsafe paste.
  * @param onCancelPaste Callback to cancel a pending paste and clear selection state.
  * @param onSelectionStart Callback invoked at the start of a long-press selection gesture.
@@ -1266,6 +1263,7 @@ fun TtySessionContent(
     onClose: () -> Unit,
     onKeyPress: (TtySpecialKey) -> Unit,
     onTextInput: (String) -> Unit,
+    onInputBytes: (ByteArray) -> Unit = {},
     onFontSizeChange: (Float) -> Unit,
     onSizeChanged: (cols: Int, rows: Int, widthPx: Int, heightPx: Int) -> Unit,
     onAnswerHostKey: (Boolean) -> Unit = {},
@@ -1280,7 +1278,6 @@ fun TtySessionContent(
     pendingPaste: String? = null,
     onCopy: () -> Unit = {},
     onPaste: () -> Unit = {},
-    onPasteText: (String) -> Unit = {},
     onConfirmPaste: () -> Unit = {},
     onCancelPaste: () -> Unit = {},
     onSelectionStart: (col: Int, row: Int) -> Unit = { _, _ -> },
@@ -1290,9 +1287,8 @@ fun TtySessionContent(
     onMouseEvent: (UByte, UByte, Float, Float, UInt) -> Unit = { _, _, _, _, _ -> },
     terminalTitle: String? = null,
 ) {
-    val focusRequester = remember { FocusRequester() }
+    val inputView = remember { mutableStateOf<TtyKeyInputView?>(null) }
     val isPowerSave = LocalPowerSaveMode.current
-    val keyboardController = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
     val ttyFallbackBg = themedReplBackground()
     val ttyFallbackFg = themedRoleColor(BlockRole.RESPONSE)
@@ -1324,8 +1320,13 @@ fun TtySessionContent(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(Unit) {
-        focusRequester.requestFocus()
+    // Raise the soft keyboard when the surface appears (matching the prior
+    // text-field behaviour), but never while an SSH auth dialog owns the IME.
+    LaunchedEffect(inputView.value, session) {
+        val authActive =
+            session is TtySessionUiState.HostKeyVerification ||
+                session is TtySessionUiState.SshAuthRequired
+        if (!authActive) inputView.value?.showKeyboard()
     }
 
     Column(
@@ -1461,7 +1462,7 @@ fun TtySessionContent(
                     fontSize = fontSize,
                     gridCols = gridCols,
                     onFontSizeChange = onFontSizeChange,
-                    onTap = { focusRequester.requestFocus() },
+                    onTap = { inputView.value?.showKeyboard() },
                     cursorVisible = blinkPhase,
                     selectionProvider = { selection },
                     selectionHighlightArgb = selectionHighlightColor,
@@ -1502,7 +1503,7 @@ fun TtySessionContent(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                        ) { focusRequester.requestFocus() },
+                        ) { inputView.value?.showKeyboard() },
             ) {
                 items(
                     count = outputLines.size,
@@ -1519,23 +1520,28 @@ fun TtySessionContent(
             }
         }
 
-        TtyInputRow(
-            ctrlActive = ctrlActive,
-            altActive = altActive,
-            focusRequester = focusRequester,
-            onTextInput = onTextInput,
-            onPasteText = onPasteText,
-            modifier = Modifier.fillMaxWidth(),
+        // Invisible 1.dp input proxy: owns the IME and forwards every keystroke
+        // to the PTY so the shell's own line editor handles cursor movement. It
+        // is never in the touch path, so the canvas keeps its tap/zoom/selection.
+        AndroidView(
+            factory = { ctx ->
+                TtyKeyInputView(ctx).apply {
+                    onText = onTextInput
+                    onNamedKey = onKeyPress
+                    onBytes = onInputBytes
+                    inputView.value = this
+                }
+            },
+            modifier = Modifier.size(1.dp),
         )
 
         TtyKeyRow(
             onKeyPress = onKeyPress,
             onToggleKeyboard = {
                 if (imeVisible) {
-                    keyboardController?.hide()
+                    inputView.value?.hideKeyboard()
                 } else {
-                    focusRequester.requestFocus()
-                    keyboardController?.show()
+                    inputView.value?.showKeyboard()
                 }
             },
             ctrlActive = ctrlActive,

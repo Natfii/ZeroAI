@@ -101,6 +101,7 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -626,11 +627,45 @@ class TerminalViewModel(
                 app.daemonBridge.serviceState.value == ServiceState.RUNNING,
             )
 
+    /**
+     * Serial queue of raw PTY input writes.
+     *
+     * All terminal input (typed text, key-row sequences, and paste) is
+     * funnelled through this unbounded channel and drained by a single
+     * consumer started in [init], guaranteeing the bytes reach the PTY in
+     * submission order. The previous approach launched a coroutine per
+     * write, which raced under rapid input and could transpose adjacent
+     * bytes.
+     */
+    private val ttyInputWrites = Channel<ByteArray>(Channel.UNLIMITED)
+
     init {
         repository.clear()
         loadInitialTheme()
         initAgentSession()
         observeDaemonRestarts()
+        startTtyInputWriter()
+    }
+
+    /**
+     * Drains [ttyInputWrites] to the PTY in submission order for the
+     * lifetime of the ViewModel.
+     *
+     * Bytes enqueued while no PTY session is active fail at the FFI layer
+     * and are logged; this is harmless because input is only enqueued from
+     * TTY surfaces.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun startTtyInputWriter() {
+        viewModelScope.launch(Dispatchers.IO) {
+            for (bytes in ttyInputWrites) {
+                try {
+                    ttyWrite(bytes)
+                } catch (e: Exception) {
+                    logRepository.append(LogSeverity.WARN, TAG, "TTY write failed: ${e.message}")
+                }
+            }
+        }
     }
 
     /**
@@ -754,6 +789,7 @@ class TerminalViewModel(
     @Suppress("TooGenericExceptionCaught")
     override fun onCleared() {
         super.onCleared()
+        ttyInputWrites.close()
         sshPollJob?.cancel()
         try {
             ttyDisconnectSsh()
@@ -852,23 +888,16 @@ class TerminalViewModel(
     }
 
     /**
-     * Sends raw bytes to the active PTY session.
+     * Enqueues raw bytes for the active PTY session.
+     *
+     * The bytes are written by a single serial consumer
+     * ([startTtyInputWriter]) so concurrent callers (typing, the key row,
+     * and paste) preserve order rather than racing on [Dispatchers.IO].
      *
      * @param bytes Raw byte data to write to the PTY input.
      */
-    @Suppress("TooGenericExceptionCaught")
     fun ttyWriteBytes(bytes: ByteArray) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                ttyWrite(bytes)
-            } catch (e: Exception) {
-                logRepository.append(
-                    LogSeverity.WARN,
-                    TAG,
-                    "TTY write failed: ${e.message}",
-                )
-            }
-        }
+        ttyInputWrites.trySend(bytes)
     }
 
     /**
@@ -897,6 +926,35 @@ class TerminalViewModel(
             return
         }
         ttyWriteBytes(text.toByteArray(Charsets.UTF_8))
+    }
+
+    /**
+     * Forwards printable text from the soft keyboard to the active PTY.
+     *
+     * Text containing carriage returns, newlines, or escapes is routed
+     * through the paste-safety check ([pasteText]) so multi-line clipboard
+     * content cannot silently execute commands. A single character is
+     * transformed by any sticky modifier: Ctrl maps a letter to its C0
+     * control code (e.g. `c` -> `0x03`), Alt prefixes it with `ESC`. The
+     * modifier is consumed after one character, matching the [TtyKeyRow]
+     * semantics. All other text is written as UTF-8 bytes.
+     *
+     * @param text The text typed or committed by the IME.
+     */
+    fun ttyOnText(text: String) {
+        if (text.isEmpty()) return
+        val ctrl = _ttyCtrlActive.value
+        val alt = _ttyAltActive.value
+        val bytes = encodeTypedText(text, ctrl, alt)
+        if (bytes == null) {
+            pasteText(text)
+            return
+        }
+        if ((ctrl || alt) && text.length == 1) {
+            _ttyCtrlActive.value = false
+            _ttyAltActive.value = false
+        }
+        ttyWriteBytes(bytes)
     }
 
     /**
@@ -1286,31 +1344,27 @@ class TerminalViewModel(
 
     @Suppress("TooGenericExceptionCaught")
     private fun executePaste(text: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val bracketed =
-                try {
-                    ttyIsBracketedPasteActive()
-                } catch (_: Exception) {
-                    false
-                }
-            val safeText =
-                if (bracketed) {
-                    text.replace("\u001b[201~", "")
-                } else {
-                    text
-                }
-            val payload =
-                if (bracketed) {
-                    "\u001b[200~$safeText\u001b[201~"
-                } else {
-                    safeText
-                }
+        // Enqueue synchronously (same FIFO path as typed input) so a paste is
+        // never reordered relative to keystrokes already in the write channel.
+        val bracketed =
             try {
-                ttyWrite(payload.toByteArray(Charsets.UTF_8))
+                ttyIsBracketedPasteActive()
             } catch (_: Exception) {
-                // PTY write failure — logged by FFI layer
+                false
             }
-        }
+        val safeText =
+            if (bracketed) {
+                text.replace("\u001b[201~", "")
+            } else {
+                text
+            }
+        val payload =
+            if (bracketed) {
+                "\u001b[200~$safeText\u001b[201~"
+            } else {
+                safeText
+            }
+        ttyInputWrites.trySend(payload.toByteArray(Charsets.UTF_8))
         clearSelection()
     }
 
@@ -4188,6 +4242,46 @@ class TerminalViewModel(
             // punctuation keys, so the literal byte is sent — masking them
             // would emit surprising control codes (e.g. Ctrl+| -> 0x1C).
             return if (alt && raw.size == 1) byteArrayOf(0x1B, raw[0]) else raw
+        }
+
+        /**
+         * Encodes printable [text] from the soft keyboard into PTY bytes,
+         * applying any sticky modifier.
+         *
+         * Returns `null` when the text must instead be routed through the
+         * paste-safety flow — that is, when it contains a carriage return,
+         * newline, or escape (multi-line clipboard content that could execute
+         * commands). A single character with Ctrl active maps the `@`-`_` and
+         * letter range to its C0 control code (e.g. `c` -> `0x03`) and sends
+         * any other character literally; with Alt active it is prefixed with
+         * `ESC`. All other text is encoded as UTF-8.
+         *
+         * @param text The typed or committed text.
+         * @param ctrl Whether the Ctrl modifier is active.
+         * @param alt Whether the Alt modifier is active.
+         * @return The encoded bytes, or `null` if the text needs paste safety.
+         */
+        @Suppress("MagicNumber", "ReturnCount")
+        fun encodeTypedText(
+            text: String,
+            ctrl: Boolean,
+            alt: Boolean,
+        ): ByteArray? {
+            if (text.isEmpty()) return ByteArray(0)
+            if (text.any { it == '\r' || it == '\n' || it.code == 0x1B }) return null
+            if (text.length == 1) {
+                val char = text[0]
+                if (ctrl) {
+                    val upper = char.uppercaseChar().code
+                    return if (upper in 0x40..0x5F) {
+                        byteArrayOf((upper and 0x1F).toByte())
+                    } else {
+                        text.toByteArray(Charsets.UTF_8)
+                    }
+                }
+                if (alt) return byteArrayOf(0x1B) + text.toByteArray(Charsets.UTF_8)
+            }
+            return text.toByteArray(Charsets.UTF_8)
         }
 
         /**

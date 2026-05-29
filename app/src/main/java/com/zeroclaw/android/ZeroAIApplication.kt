@@ -374,6 +374,27 @@ class ZeroAIApplication :
             .build()
     }
 
+    /**
+     * Records the bundled `ssh` client configuration (PATH/HOME plus the
+     * `ssh` symlink to libssh.so) for the in-app shell.
+     *
+     * Called synchronously from [onCreate] so the configuration exists before
+     * any terminal session can spawn a shell. The filesystem work is one
+     * directory plus one symlink, so it is safe to run on the main thread at
+     * startup.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun configureBundledSsh() {
+        try {
+            com.zeroclaw.ffi.ttyConfigureShell(
+                applicationInfo.nativeLibraryDir,
+                filesDir.absolutePath,
+            )
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "Bundled ssh configure failed: ${e.message}")
+        }
+    }
+
     @Suppress("LongMethod", "TooGenericExceptionCaught")
     override fun onCreate() {
         super.onCreate()
@@ -382,6 +403,7 @@ class ZeroAIApplication :
         System.loadLibrary("zeroclaw")
         com.zeroclaw.ffi.initLogging()
         verifyCrateVersion()
+        configureBundledSsh()
 
         daemonBridge = DaemonServiceBridge(filesDir.absolutePath)
         settingsRepository = DataStoreSettingsRepository(this)
