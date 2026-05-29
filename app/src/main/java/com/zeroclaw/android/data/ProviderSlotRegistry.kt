@@ -65,7 +65,7 @@ object ProviderSlotRegistry {
             ),
         )
 
-    // Slot display order (2026-05-25): local-first. Ollama leads because
+    // Slot display order (2026-05-25): local-first. Ollama branding leads because
     // it's the only fully-local option (also covers LM Studio / vLLM /
     // LocalAI via the OpenAI-compat fallback in ModelFetcher). Cloud
     // APIs follow in alphabetical+popularity order.
@@ -78,7 +78,7 @@ object ProviderSlotRegistry {
         listOf(
             ProviderSlot(
                 slotId = "ollama",
-                displayName = "Ollama / Local",
+                displayName = "Local",
                 credentialType = SlotCredentialType.URL_KEY,
                 baseOrder = 0,
                 rustProvider = "ollama",

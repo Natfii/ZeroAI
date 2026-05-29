@@ -27,11 +27,13 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -42,16 +44,12 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Hearing
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -68,6 +66,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -80,24 +79,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.model.ProcessedImage
@@ -107,7 +104,7 @@ import com.zeroclaw.android.ui.component.LoadingIndicator
 import com.zeroclaw.android.ui.component.MiniZeroMascot
 import com.zeroclaw.android.ui.component.MiniZeroMascotState
 import com.zeroclaw.android.ui.component.VoiceFab
-import com.zeroclaw.android.ui.screen.terminal.theme.TerminalTheme
+import com.zeroclaw.android.ui.screen.terminal.theme.LocalTerminalTheme
 import com.zeroclaw.android.ui.screen.terminal.theme.TerminalThemePicker
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import com.zeroclaw.android.util.LocalPowerSaveMode
@@ -272,6 +269,7 @@ fun TerminalScreen(
     val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
     val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
     val currentTheme by terminalViewModel.currentTheme.collectAsStateWithLifecycle()
+    val showThemePicker by terminalViewModel.showThemePicker.collectAsStateWithLifecycle()
     val ttyCursorBlinking by terminalViewModel.ttyCursorBlinking.collectAsStateWithLifecycle()
     val ttyCursorPosition by terminalViewModel.ttyCursorPosition.collectAsStateWithLifecycle()
     val ttyGridCols by terminalViewModel.ttyGridCols.collectAsStateWithLifecycle()
@@ -281,81 +279,90 @@ fun TerminalScreen(
     val ttyTitle by terminalViewModel.terminalTitle.collectAsStateWithLifecycle()
     val isPowerSave = LocalPowerSaveMode.current
 
-    Crossfade(
-        targetState = terminalMode,
-        modifier = modifier,
-        animationSpec = if (isPowerSave) snap() else tween(),
-        label = "terminal-mode",
-    ) { mode ->
-        when (mode) {
-            is TerminalMode.Repl -> {
-                TerminalContent(
-                    state = state,
-                    streamingState = streamingState,
-                    onDeviceWarmupLabel = onDeviceWarmupLabel,
-                    isDaemonRunning = isDaemonRunning,
-                    voiceState = voiceState,
-                    speakRepliesEnabled = speakRepliesEnabled,
-                    onSubmit = terminalViewModel::submitInput,
-                    onAttachImages = terminalViewModel::attachImages,
-                    onRemoveImage = terminalViewModel::removeImage,
-                    onCancelAgent = terminalViewModel::cancelAgentTurn,
-                    onVoiceTap = terminalViewModel::toggleVoice,
-                    onVoiceLongPress = terminalViewModel::stopVoice,
-                    onSpeakRepliesChanged = terminalViewModel::setSpeakRepliesEnabled,
-                    onCanvasAction = terminalViewModel::handleCanvasAction,
-                    peerAliases = peerAliases,
-                    edgeMargin = edgeMargin,
-                )
-            }
+    CompositionLocalProvider(LocalTerminalTheme provides currentTheme) {
+        Column(modifier = modifier.fillMaxSize()) {
+            TerminalModeToggleBar(
+                isShellMode = terminalMode is TerminalMode.Tty,
+                onSelectRepl = terminalViewModel::switchToRepl,
+                onSelectShell = terminalViewModel::switchToTty,
+                onOpenTheme = terminalViewModel::openThemePicker,
+                edgeMargin = edgeMargin,
+                modifier = Modifier.zIndex(1f),
+            )
+            Crossfade(
+                targetState = terminalMode,
+                modifier = Modifier.weight(1f),
+                animationSpec = if (isPowerSave) snap() else tween(),
+                label = "terminal-mode",
+            ) { mode ->
+                when (mode) {
+                    is TerminalMode.Repl -> {
+                        TerminalContent(
+                            state = state,
+                            streamingState = streamingState,
+                            onDeviceWarmupLabel = onDeviceWarmupLabel,
+                            isDaemonRunning = isDaemonRunning,
+                            voiceState = voiceState,
+                            speakRepliesEnabled = speakRepliesEnabled,
+                            onSubmit = terminalViewModel::submitInput,
+                            onAttachImages = terminalViewModel::attachImages,
+                            onRemoveImage = terminalViewModel::removeImage,
+                            onCancelAgent = terminalViewModel::cancelAgentTurn,
+                            onVoiceTap = terminalViewModel::toggleVoice,
+                            onVoiceLongPress = terminalViewModel::stopVoice,
+                            onSpeakRepliesChanged = terminalViewModel::setSpeakRepliesEnabled,
+                            onCanvasAction = terminalViewModel::handleCanvasAction,
+                            peerAliases = peerAliases,
+                            edgeMargin = edgeMargin,
+                        )
+                    }
 
-            is TerminalMode.Tty -> {
-                TtySessionContent(
-                    session = mode.session,
-                    outputLines = ttyOutputLines,
-                    frameProvider = { ttyRenderFrameState.value },
-                    hasFrame = hasFrame,
-                    fontSize = ttyFontSize,
-                    onFontSizeChange = terminalViewModel::setTtyFontSize,
-                    onSizeChanged = terminalViewModel::onTtyGridSizeChanged,
-                    ctrlActive = ttyCtrlActive,
-                    altActive = ttyAltActive,
-                    onClose = terminalViewModel::switchToRepl,
-                    onKeyPress = terminalViewModel::ttyHandleSpecialKey,
-                    onTextInput = terminalViewModel::ttyWriteText,
-                    onAnswerHostKey = terminalViewModel::sshAnswerHostKey,
-                    onSubmitPassword = terminalViewModel::sshSubmitPassword,
-                    onSubmitKey = terminalViewModel::sshSubmitKey,
-                    onDisconnect = terminalViewModel::sshDisconnect,
-                    themes = terminalViewModel.allThemes(),
-                    currentThemeName = currentTheme?.name,
-                    onApplyTheme = terminalViewModel::applyTheme,
-                    cursorBlinking = ttyCursorBlinking,
-                    cursorPosition = ttyCursorPosition,
-                    gridCols = ttyGridCols,
-                    selection = ttySelection,
-                    showPasteBar = showPasteBar,
-                    pendingPaste = pendingPaste,
-                    onCopy = {
-                        val sel = ttySelection ?: return@TtySessionContent
-                        val frame =
-                            terminalViewModel.ttyRenderFrame.value
-                                ?: return@TtySessionContent
-                        val text = extractSelectedText(sel, frame.rows)
-                        copyToClipboard(context, text, "Terminal")
-                        terminalViewModel.clearSelection()
-                    },
-                    onPaste = { terminalViewModel.pasteFromClipboard(context) },
-                    onPasteText = terminalViewModel::pasteText,
-                    onConfirmPaste = terminalViewModel::confirmPaste,
-                    onCancelPaste = terminalViewModel::cancelPaste,
-                    onSelectionStart = terminalViewModel::startWordSelection,
-                    onSelectionUpdate = terminalViewModel::updateSelectionEnd,
-                    onSelectionClear = terminalViewModel::clearSelection,
-                    mouseTrackingActive = { terminalViewModel.isMouseTrackingActive() },
-                    onMouseEvent = terminalViewModel::submitMouseEvent,
-                    terminalTitle = ttyTitle,
-                )
+                    is TerminalMode.Tty -> {
+                        TtySessionContent(
+                            session = mode.session,
+                            outputLines = ttyOutputLines,
+                            frameProvider = { ttyRenderFrameState.value },
+                            hasFrame = hasFrame,
+                            fontSize = ttyFontSize,
+                            onFontSizeChange = terminalViewModel::setTtyFontSize,
+                            onSizeChanged = terminalViewModel::onTtyGridSizeChanged,
+                            ctrlActive = ttyCtrlActive,
+                            altActive = ttyAltActive,
+                            onClose = terminalViewModel::switchToRepl,
+                            onKeyPress = terminalViewModel::ttyHandleSpecialKey,
+                            onTextInput = terminalViewModel::ttyWriteText,
+                            onAnswerHostKey = terminalViewModel::sshAnswerHostKey,
+                            onSubmitPassword = terminalViewModel::sshSubmitPassword,
+                            onSubmitKey = terminalViewModel::sshSubmitKey,
+                            onDisconnect = terminalViewModel::sshDisconnect,
+                            cursorBlinking = ttyCursorBlinking,
+                            cursorPosition = ttyCursorPosition,
+                            gridCols = ttyGridCols,
+                            selection = ttySelection,
+                            showPasteBar = showPasteBar,
+                            pendingPaste = pendingPaste,
+                            onCopy = {
+                                val sel = ttySelection ?: return@TtySessionContent
+                                val frame =
+                                    terminalViewModel.ttyRenderFrame.value
+                                        ?: return@TtySessionContent
+                                val text = extractSelectedText(sel, frame.rows)
+                                copyToClipboard(context, text, "Terminal")
+                                terminalViewModel.clearSelection()
+                            },
+                            onPaste = { terminalViewModel.pasteFromClipboard(context) },
+                            onPasteText = terminalViewModel::pasteText,
+                            onConfirmPaste = terminalViewModel::confirmPaste,
+                            onCancelPaste = terminalViewModel::cancelPaste,
+                            onSelectionStart = terminalViewModel::startWordSelection,
+                            onSelectionUpdate = terminalViewModel::updateSelectionEnd,
+                            onSelectionClear = terminalViewModel::clearSelection,
+                            mouseTrackingActive = { terminalViewModel.isMouseTrackingActive() },
+                            onMouseEvent = terminalViewModel::submitMouseEvent,
+                            terminalTitle = ttyTitle,
+                        )
+                    }
+                }
             }
         }
     }
@@ -377,6 +384,15 @@ fun TerminalScreen(
             onDenyAll = terminalViewModel::denyAllScriptCapabilities,
             onConfirm = terminalViewModel::confirmScriptPermissionRequest,
             onDismiss = terminalViewModel::dismissScriptPermissionRequest,
+        )
+    }
+
+    if (showThemePicker) {
+        TerminalThemePicker(
+            themes = terminalViewModel.allThemes(),
+            currentThemeName = currentTheme?.name,
+            onSelect = terminalViewModel::applyTheme,
+            onDismiss = terminalViewModel::dismissThemePicker,
         )
     }
 }
@@ -489,12 +505,14 @@ internal fun TerminalContent(
         }
     }
 
+    val surfaceColor = themedReplBackground()
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
+                    .background(surfaceColor)
                     .imePadding(),
         ) {
             LazyColumn(
@@ -760,6 +778,11 @@ private fun TerminalInputBar(
 ) {
     val canSend = (value.isNotBlank() || hasImages) && !isLoading
 
+    val accentColor = themedRoleColor(BlockRole.INPUT_PROMPT)
+    val textColor = themedRoleColor(BlockRole.INPUT_TEXT)
+    val dimColor = themedRoleColor(BlockRole.SYSTEM)
+    val containerColor = themedReplBackground()
+
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -777,9 +800,9 @@ private fun TerminalInputBar(
                 contentDescription = null,
                 tint =
                     if (!isLoading) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        dimColor
                     } else {
-                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        textColor.copy(alpha = 0.38f)
                     },
             )
         }
@@ -788,26 +811,32 @@ private fun TerminalInputBar(
             onValueChange = onValueChange,
             textStyle =
                 TerminalTypography.bodyMedium.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = textColor,
                 ),
             prefix = {
                 Text(
                     text = "> ",
                     style = TerminalTypography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = accentColor,
                 )
             },
             placeholder = {
                 Text(
                     text = "Type a command or message",
                     style = TerminalTypography.bodyMedium,
+                    color = dimColor,
                 )
             },
             singleLine = true,
             colors =
                 OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    cursorColor = accentColor,
+                    focusedBorderColor = accentColor,
+                    unfocusedBorderColor = dimColor,
+                    focusedContainerColor = containerColor,
+                    unfocusedContainerColor = containerColor,
                 ),
             modifier = Modifier.weight(1f),
         )
@@ -825,9 +854,9 @@ private fun TerminalInputBar(
                 contentDescription = null,
                 tint =
                     if (canSend) {
-                        MaterialTheme.colorScheme.primary
+                        accentColor
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        dimColor
                     },
             )
         }
@@ -1166,18 +1195,6 @@ private fun WelcomeHeader(
     }
 }
 
-/** Vertical padding around the TTY input field. */
-private const val TTY_INPUT_V_PAD_DP = 4
-
-/** Horizontal padding around the TTY input field. */
-private const val TTY_INPUT_H_PAD_DP = 8
-
-/** Terminal text color — green on dark background. */
-private const val TTY_TEXT_GREEN = 0xFF4AF626
-
-/** Terminal background color — near-black. */
-private const val TTY_BG_COLOR = 0xFF1A1A2E
-
 /** Default grid column count when no render frame is available yet. */
 private const val TTY_DEFAULT_GRID_COLS = 80
 
@@ -1213,9 +1230,6 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
  * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
  * @param onDisconnect Callback to disconnect and dismiss the current SSH auth prompt.
- * @param themes All available terminal color themes shown in the [TerminalThemePicker] dialog.
- * @param currentThemeName Name of the currently active theme, or null if none is set.
- * @param onApplyTheme Callback invoked with the chosen [TerminalTheme] when the user selects one.
  * @param cursorBlinking Whether the cursor is in blinking mode; drives the blink [LaunchedEffect].
  * @param cursorPosition Stable `"col-row"` string key; resets the blink phase when the cursor moves.
  * @param gridCols Current grid column count from the latest render frame, or the default.
@@ -1224,7 +1238,7 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param pendingPaste Text awaiting paste confirmation, or `null` when no confirmation is needed.
  * @param onCopy Callback invoked when the user taps Copy in the selection action bar.
  * @param onPaste Callback invoked when the user taps Paste in the action bar.
- * @param onPasteText Callback invoked with intercepted text from [BasicTextField] that contains
+ * @param onPasteText Callback invoked with intercepted text from the input field that contains
  *   control characters and should be routed through the paste safety flow.
  * @param onConfirmPaste Callback to confirm and send a pending unsafe paste.
  * @param onCancelPaste Callback to cancel a pending paste and clear selection state.
@@ -1238,6 +1252,7 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param terminalTitle Terminal title set by OSC 0/2, or `null` if unset.
  *   Displayed in [TtyStatusBar] alongside the connection status.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Suppress("LongParameterList")
 @Composable
 fun TtySessionContent(
@@ -1257,9 +1272,6 @@ fun TtySessionContent(
     onSubmitPassword: (CharArray) -> Unit = {},
     @Suppress("UnusedParameter") onSubmitKey: (String) -> Unit = {},
     onDisconnect: () -> Unit = {},
-    themes: List<TerminalTheme> = emptyList(),
-    currentThemeName: String? = null,
-    onApplyTheme: (TerminalTheme) -> Unit = {},
     cursorBlinking: Boolean = false,
     cursorPosition: String = "",
     gridCols: Int = TTY_DEFAULT_GRID_COLS,
@@ -1278,10 +1290,12 @@ fun TtySessionContent(
     onMouseEvent: (UByte, UByte, Float, Float, UInt) -> Unit = { _, _, _, _, _ -> },
     terminalTitle: String? = null,
 ) {
-    var inputText by remember { mutableStateOf("") }
-    var showThemePicker by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val isPowerSave = LocalPowerSaveMode.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
+    val ttyFallbackBg = themedReplBackground()
+    val ttyFallbackFg = themedRoleColor(BlockRole.RESPONSE)
 
     // Send focus gained/lost events to the terminal for DEC 1004
     // focus reporting. Uses ON_START/ON_STOP (not ON_RESUME/ON_PAUSE)
@@ -1308,15 +1322,6 @@ fun TtySessionContent(
             }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-
-    if (showThemePicker) {
-        TerminalThemePicker(
-            themes = themes,
-            currentThemeName = currentThemeName,
-            onSelect = onApplyTheme,
-            onDismiss = { showThemePicker = false },
-        )
     }
 
     LaunchedEffect(Unit) {
@@ -1421,13 +1426,14 @@ fun TtySessionContent(
         }
         var canvasSize by remember { mutableStateOf(IntSize.Zero) }
         val density = LocalDensity.current
+        val gridContext = LocalContext.current
 
         LaunchedEffect(canvasSize, fontSize) {
             if (canvasSize.width > 0 && canvasSize.height > 0) {
                 val fontSizePx = with(density) { fontSize.sp.toPx() }
                 val paint =
                     android.graphics.Paint().apply {
-                        typeface = android.graphics.Typeface.MONOSPACE
+                        typeface = ttyTypeface(gridContext)
                         textSize = fontSizePx
                     }
                 val cellWidth = paint.measureText("X")
@@ -1492,7 +1498,7 @@ fun TtySessionContent(
                     Modifier
                         .weight(1f)
                         .fillMaxWidth()
-                        .background(Color(TTY_BG_COLOR))
+                        .background(ttyFallbackBg)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -1504,7 +1510,7 @@ fun TtySessionContent(
                 ) { index ->
                     Text(
                         text = outputLines[index],
-                        color = Color(TTY_TEXT_GREEN),
+                        color = ttyFallbackFg,
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = 8.dp),
@@ -1513,106 +1519,25 @@ fun TtySessionContent(
             }
         }
 
-        Surface(
-            color = Color(TTY_BG_COLOR),
+        TtyInputRow(
+            ctrlActive = ctrlActive,
+            altActive = altActive,
+            focusRequester = focusRequester,
+            onTextInput = onTextInput,
+            onPasteText = onPasteText,
             modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier =
-                    Modifier.padding(
-                        horizontal = TTY_INPUT_H_PAD_DP.dp,
-                        vertical = TTY_INPUT_V_PAD_DP.dp,
-                    ),
-            ) {
-                Text(
-                    text =
-                        buildString {
-                            if (ctrlActive) append("[Ctrl] ")
-                            if (altActive) append("[Alt] ")
-                            append("\$ ")
-                        },
-                    color = Color(TTY_TEXT_GREEN),
-                    fontFamily = FontFamily.Monospace,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { newValue ->
-                        val inserted = newValue.length - inputText.length
-                        val hasControlChars =
-                            newValue.any {
-                                it == '\r' || it == '\n' || it == '\u001b'
-                            }
-
-                        if (hasControlChars && inserted > 1) {
-                            // Paste-like input with control chars — route through safety
-                            val pastedText =
-                                if (newValue.startsWith(inputText)) {
-                                    newValue.removePrefix(inputText)
-                                } else {
-                                    newValue
-                                }
-                            onPasteText(pastedText)
-                            inputText = ""
-                        } else if (newValue.contains('\n')) {
-                            val text = newValue.replace("\n", "")
-                            if (text.isNotEmpty()) {
-                                onTextInput(text + "\r")
-                            }
-                            inputText = ""
-                        } else {
-                            inputText = newValue
-                        }
-                    },
-                    textStyle =
-                        MaterialTheme.typography.bodySmall.copy(
-                            color = Color(TTY_TEXT_GREEN),
-                            fontFamily = FontFamily.Monospace,
-                        ),
-                    cursorBrush = SolidColor(Color(TTY_TEXT_GREEN)),
-                    maxLines = 1,
-                    modifier =
-                        Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .semantics {
-                                contentDescription = "Terminal input"
-                            },
-                    keyboardOptions =
-                        KeyboardOptions(
-                            imeAction = ImeAction.Send,
-                            autoCorrect = false,
-                            keyboardType = KeyboardType.Ascii,
-                        ),
-                    keyboardActions =
-                        KeyboardActions(
-                            onSend = {
-                                if (inputText.isNotEmpty()) {
-                                    onTextInput(inputText + "\r")
-                                    inputText = ""
-                                }
-                            },
-                        ),
-                )
-                IconButton(
-                    onClick = { showThemePicker = true },
-                    modifier =
-                        Modifier.semantics {
-                            contentDescription = "Choose terminal theme"
-                        },
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Palette,
-                        contentDescription = null,
-                        tint = Color(TTY_TEXT_GREEN),
-                    )
-                }
-            }
-        }
+        )
 
         TtyKeyRow(
             onKeyPress = onKeyPress,
+            onToggleKeyboard = {
+                if (imeVisible) {
+                    keyboardController?.hide()
+                } else {
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+            },
             ctrlActive = ctrlActive,
             altActive = altActive,
             modifier = Modifier.fillMaxWidth(),

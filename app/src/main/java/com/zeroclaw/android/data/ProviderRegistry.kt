@@ -186,7 +186,7 @@ object ProviderRegistry {
                 iconUrl = faviconUrl("ollama.com"),
                 modelListUrl = "http://localhost:11434/api/tags",
                 modelListFormat = ModelListFormat.OLLAMA,
-                helpText = "URL is optional \u2014 defaults to localhost:11434",
+                helpText = "URL is not optional",
             ),
         )
 }

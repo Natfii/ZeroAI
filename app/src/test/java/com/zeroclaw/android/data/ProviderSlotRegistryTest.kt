@@ -42,7 +42,7 @@ class ProviderSlotRegistryTest {
     fun findsKnownSlotAndRejectsUnknown() {
         val slot = ProviderSlotRegistry.findById("ollama")
         assertNotNull(slot)
-        assertEquals("Ollama / Local", slot?.displayName)
+        assertEquals("Local", slot?.displayName)
         assertNull(ProviderSlotRegistry.findById("gemini-oauth"))
         assertNull(ProviderSlotRegistry.findById("missing-slot"))
         // Dropped provider IDs no longer resolve.

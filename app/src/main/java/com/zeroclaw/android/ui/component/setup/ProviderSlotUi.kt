@@ -233,7 +233,7 @@ fun providerSlotCardDescription(slot: ProviderSlot): String =
         "anthropic-api" -> "Use a direct Anthropic API key."
         "claude-code" ->
             "Connect your Claude account. Live daemon routing still uses the Anthropic API slot today."
-        "ollama" -> "Point Zero at your local Ollama server and choose a model."
+        "ollama" -> "Point Zero at your local server and choose a model."
         else -> slot.displayName
     }
 

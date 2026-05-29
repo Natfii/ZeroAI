@@ -4,17 +4,37 @@
 
 package com.zeroclaw.android.ui.screen.terminal
 
+import android.content.Context
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
+import androidx.core.content.res.ResourcesCompat
+import com.zeroclaw.android.R
 
 /** Default monospace font size for the TTY renderer. */
 val TTY_DEFAULT_FONT_SIZE: TextUnit = 14.sp
+
+/**
+ * Returns the shared monospace [Typeface] for the TTY renderer.
+ *
+ * Loads the bundled JetBrains Mono so the GPU terminal matches the REPL
+ * scrollback and renders unambiguous glyphs (0/O, 1/l/I). Falls back to
+ * the system monospace face if the bundled font fails to load. Both the
+ * render Paint and the grid-sizing Paint must use this so the column
+ * count derived from glyph width matches what is actually drawn.
+ *
+ * @param context Context used to resolve the bundled font resource.
+ * @return JetBrains Mono, or [Typeface.MONOSPACE] as a fallback.
+ */
+fun ttyTypeface(context: Context): Typeface =
+    runCatching { ResourcesCompat.getFont(context, R.font.jetbrains_mono_regular) }
+        .getOrNull() ?: Typeface.MONOSPACE
 
 /** Minimum font size the user may select for the TTY renderer. */
 val TTY_MIN_FONT_SIZE: TextUnit = 8.sp
@@ -65,13 +85,14 @@ fun rememberFontState(
     gridCols: Int = 80,
 ): TtyFontState {
     val density = LocalDensity.current
+    val context = LocalContext.current
 
-    return remember(fontSize, density, gridCols) {
+    return remember(fontSize, density, gridCols, context) {
         val textSizePx = with(density) { fontSize.toPx() }
         val paint =
             Paint().apply {
                 isAntiAlias = true
-                typeface = Typeface.MONOSPACE
+                typeface = ttyTypeface(context)
                 textSize = textSizePx
             }
 

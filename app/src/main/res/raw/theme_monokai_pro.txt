@@ -1,7 +1,7 @@
 background = #2d2a2e
 foreground = #fcfcfa
-cursor-color = #fcfcfa
-palette = 0=#403e41
+cursor-color = #c1c0c0
+palette = 0=#2d2a2e
 palette = 1=#ff6188
 palette = 2=#a9dc76
 palette = 3=#ffd866

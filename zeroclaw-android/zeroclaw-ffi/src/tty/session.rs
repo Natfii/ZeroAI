@@ -311,6 +311,28 @@ pub(crate) fn resize(cols: u16, rows: u16) -> Result<(), FfiError> {
         });
     }
 
+    // Resize the VT grid to match the PTY winsize. Without this the ghostty
+    // terminal stays at its initial grid size while only the PTY winsize
+    // tracks the canvas, so a shrunk canvas (e.g. the soft keyboard up)
+    // renders blank rows: the render frame keeps reporting the original row
+    // count and the visible window slices off the top-anchored content. The
+    // SSH path already does this in `tty::ssh::resize`.
+    {
+        let mut backend = session.backend.lock().unwrap_or_else(|e| {
+            tracing::warn!(
+                target: "tty::session",
+                "backend mutex poisoned during resize; recovering: {e}"
+            );
+            e.into_inner()
+        });
+        if let Err(e) = backend.resize(cols, rows) {
+            tracing::warn!(
+                target: "tty::session",
+                "backend resize error: {e}"
+            );
+        }
+    }
+
     tracing::debug!(
         target: "tty::session",
         cols,
@@ -487,6 +509,16 @@ fn spawn_local_shell(cols: u16, rows: u16) -> Result<TtySession, FfiError> {
                 write_loop(master_raw_fd, write_rx).await;
             });
 
+            // Apply a clean `$ ` prompt. Android's `/system/etc/mkshrc`
+            // installs a verbose exit-code prompt (`127|:/ $`) that ignores
+            // any inherited `PS1`, so override it from inside the shell once
+            // it starts reading. The trailing clear (screen + scrollback +
+            // home) wipes the echoed assignment and the system rc's first
+            // prompt so only the clean prompt remains on screen.
+            let _ = write_tx.try_send(
+                b"PS1='$ '; print -n '\\033[H\\033[2J\\033[3J'\r".to_vec(),
+            );
+
             return Ok(TtySession {
                 _master_fd: pty.master,
                 child_pid: child,
@@ -563,6 +595,12 @@ fn run_child(slave_fd: OwnedFd) -> ! {
     unsafe {
         std::env::set_var("TERM", "xterm-256color");
         std::env::set_var("COLORTERM", "truecolor");
+        // NOTE: PS1 is intentionally NOT set here. Android's
+        // `/system/etc/mkshrc` is sourced for interactive shells and
+        // overrides any inherited `PS1` (giving the `127|:/ $` exit-code
+        // prompt), so an environment value has no effect. The clean `$ `
+        // prompt is instead injected into the PTY after spawn — see the
+        // parent branch in `spawn_local_shell`.
         // HOME is set by the Android app layer via the data_dir. We
         // use a sensible default here; the Kotlin caller can override
         // via environment if needed.

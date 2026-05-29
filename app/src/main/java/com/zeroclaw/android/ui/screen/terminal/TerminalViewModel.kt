@@ -368,6 +368,11 @@ class TerminalViewModel(
     /** The currently active terminal color theme. */
     val currentTheme: StateFlow<TerminalTheme?> = _currentTheme.asStateFlow()
 
+    private val _showThemePicker = MutableStateFlow(false)
+
+    /** Whether the terminal theme picker dialog is currently visible. */
+    val showThemePicker: StateFlow<Boolean> = _showThemePicker.asStateFlow()
+
     private val _ttyFontSize = MutableStateFlow(TTY_DEFAULT_FONT_SIZE)
 
     /**
@@ -623,8 +628,25 @@ class TerminalViewModel(
 
     init {
         repository.clear()
+        loadInitialTheme()
         initAgentSession()
         observeDaemonRestarts()
+    }
+
+    /**
+     * Loads the persisted terminal theme into [currentTheme] on startup.
+     *
+     * Resolves [_currentTheme] from the saved selection so REPL composables
+     * can match the TTY palette before any TTY session exists. Only the
+     * observable state is set here; the backend palette ([ttySetPalette]) is
+     * not pushed because no PTY session is active in REPL mode — that happens
+     * in [startTtyPolling] when a session is created.
+     */
+    private fun loadInitialTheme() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val name = themeRepository.selectedThemeName.first()
+            _currentTheme.value = themeRepository.themeByName(name)
+        }
     }
 
     /**
@@ -1018,7 +1040,15 @@ class TerminalViewModel(
                 val textLines = _ttyOutputLines.value
                 buildFallbackFrame(textLines)
             }
-        if (nextFrame.dirtyState == TtyDirtyState.CLEAN && _ttyRenderFrame.value != null) {
+        val current = _ttyRenderFrame.value
+        // A CLEAN frame has no cell-content damage, but the cursor may still
+        // have moved (Left/Right within a line, Home/End, an app repositioning
+        // it). Dropping those frames froze the on-screen cursor and made the
+        // arrow keys look dead, so still emit when the cursor changed.
+        if (nextFrame.dirtyState == TtyDirtyState.CLEAN &&
+            current != null &&
+            current.cursor == nextFrame.cursor
+        ) {
             return
         }
         _ttyRenderFrame.value = nextFrame
@@ -1057,6 +1087,16 @@ class TerminalViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             themeRepository.setSelectedTheme(theme.name)
         }
+    }
+
+    /** Opens the terminal theme picker dialog, usable from REPL or TTY mode. */
+    fun openThemePicker() {
+        _showThemePicker.value = true
+    }
+
+    /** Dismisses the terminal theme picker dialog without changing the theme. */
+    fun dismissThemePicker() {
+        _showThemePicker.value = false
     }
 
     /** Returns all available terminal themes for the theme picker. */
@@ -2702,6 +2742,7 @@ class TerminalViewModel(
         when (action) {
             "help" -> showHelp()
             "clear" -> clearTerminal()
+            "theme" -> openThemePicker()
             "camera" -> showCameraSheet()
             "screenshot" -> handleScreenshot()
             "location" -> handleLocation()
@@ -4109,32 +4150,108 @@ class TerminalViewModel(
             ctrl: Boolean = false,
             alt: Boolean = false,
         ): ByteArray {
+            // Cursor + Home/End: standard CSI keys with xterm modifier params.
+            val csiFinal =
+                when (key) {
+                    TtySpecialKey.UP -> 'A'
+                    TtySpecialKey.DOWN -> 'B'
+                    TtySpecialKey.RIGHT -> 'C'
+                    TtySpecialKey.LEFT -> 'D'
+                    TtySpecialKey.HOME -> 'H'
+                    TtySpecialKey.END -> 'F'
+                    else -> null
+                }
+            if (csiFinal != null) return encodeCsiFinal(csiFinal, ctrl, alt)
+
+            val tildeNum =
+                when (key) {
+                    TtySpecialKey.PAGE_UP -> 5
+                    TtySpecialKey.PAGE_DOWN -> 6
+                    else -> null
+                }
+            if (tildeNum != null) return encodeCsiTilde(tildeNum, ctrl, alt)
+
             val raw =
                 when (key) {
                     TtySpecialKey.TAB -> byteArrayOf(0x09)
                     TtySpecialKey.ESC -> byteArrayOf(0x1B)
-                    TtySpecialKey.UP -> byteArrayOf(0x1B, 0x5B, 0x41)
-                    TtySpecialKey.DOWN -> byteArrayOf(0x1B, 0x5B, 0x42)
-                    TtySpecialKey.RIGHT -> byteArrayOf(0x1B, 0x5B, 0x43)
-                    TtySpecialKey.LEFT -> byteArrayOf(0x1B, 0x5B, 0x44)
-                    TtySpecialKey.HOME -> byteArrayOf(0x1b, 0x5b, 0x48) // ESC [ H
-                    TtySpecialKey.END -> byteArrayOf(0x1b, 0x5b, 0x46) // ESC [ F
-                    TtySpecialKey.PAGE_UP -> byteArrayOf(0x1b, 0x5b, 0x35, 0x7e) // ESC [ 5 ~
-                    TtySpecialKey.PAGE_DOWN -> byteArrayOf(0x1b, 0x5b, 0x36, 0x7e) // ESC [ 6 ~
+                    TtySpecialKey.ENTER -> byteArrayOf(0x0D) // CR
                     TtySpecialKey.PIPE -> "|".toByteArray(Charsets.UTF_8)
                     TtySpecialKey.SLASH -> "/".toByteArray(Charsets.UTF_8)
                     TtySpecialKey.TILDE -> "~".toByteArray(Charsets.UTF_8)
                     TtySpecialKey.DASH -> "-".toByteArray(Charsets.UTF_8)
-                    TtySpecialKey.ENTER -> byteArrayOf(0x0D) // CR
-                    TtySpecialKey.CTRL, TtySpecialKey.ALT -> return byteArrayOf()
+                    // CTRL/ALT are sticky toggles and never reach the PTY.
+                    else -> byteArrayOf()
                 }
-            if (ctrl && raw.size == 1 && raw[0] in 0x40..0x7E) {
-                return byteArrayOf((raw[0].toInt() and 0x1F).toByte())
+            // Alt prefixes a single-byte key with ESC (meta). Ctrl has no
+            // standard distinct sequence for Tab/Esc/Enter or these
+            // punctuation keys, so the literal byte is sent — masking them
+            // would emit surprising control codes (e.g. Ctrl+| -> 0x1C).
+            return if (alt && raw.size == 1) byteArrayOf(0x1B, raw[0]) else raw
+        }
+
+        /**
+         * xterm modifier code for the given modifier state: `1 + Σ(weights)`
+         * where Alt contributes 2 and Ctrl contributes 4. A value of `1`
+         * means no modifier (the base sequence is used unchanged).
+         */
+        @Suppress("MagicNumber")
+        private fun csiModifier(
+            ctrl: Boolean,
+            alt: Boolean,
+        ): Int = 1 + (if (alt) 2 else 0) + (if (ctrl) 4 else 0)
+
+        /**
+         * Encodes a CSI sequence terminated by a final letter (cursor and
+         * Home/End keys: `A`/`B`/`C`/`D`/`H`/`F`).
+         *
+         * Unmodified emits `ESC [ <final>`; with Ctrl/Alt active it emits the
+         * xterm-modified form `ESC [ 1 ; <mod> <final>` (e.g. Ctrl+Up =
+         * `ESC[1;5A`).
+         *
+         * @param final The CSI final byte identifying the key.
+         * @param ctrl Whether the Ctrl modifier is active.
+         * @param alt Whether the Alt modifier is active.
+         * @return The encoded byte sequence.
+         */
+        @Suppress("MagicNumber")
+        private fun encodeCsiFinal(
+            final: Char,
+            ctrl: Boolean,
+            alt: Boolean,
+        ): ByteArray {
+            val mod = csiModifier(ctrl, alt)
+            return if (mod == 1) {
+                byteArrayOf(0x1B) + "[$final".toByteArray(Charsets.US_ASCII)
+            } else {
+                byteArrayOf(0x1B) + "[1;$mod$final".toByteArray(Charsets.US_ASCII)
             }
-            if (alt && raw.size == 1) {
-                return byteArrayOf(0x1B, raw[0])
+        }
+
+        /**
+         * Encodes a tilde-terminated CSI sequence (Page Up = `5`, Page Down =
+         * `6`).
+         *
+         * Unmodified emits `ESC [ <num> ~`; with Ctrl/Alt active it emits
+         * `ESC [ <num> ; <mod> ~` (e.g. Ctrl+PgUp = `ESC[5;5~`).
+         *
+         * @param num The numeric parameter identifying the key.
+         * @param ctrl Whether the Ctrl modifier is active.
+         * @param alt Whether the Alt modifier is active.
+         * @return The encoded byte sequence.
+         */
+        @Suppress("MagicNumber")
+        private fun encodeCsiTilde(
+            num: Int,
+            ctrl: Boolean,
+            alt: Boolean,
+        ): ByteArray {
+            val mod = csiModifier(ctrl, alt)
+            return if (mod == 1) {
+                byteArrayOf(0x1B) + "[$num~".toByteArray(Charsets.US_ASCII)
+            } else {
+                byteArrayOf(0x1B) + "[$num;$mod~".toByteArray(Charsets.US_ASCII)
             }
-            return raw
         }
 
         /**

@@ -7,9 +7,13 @@
 package com.zeroclaw.android.navigation
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -21,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -62,7 +67,7 @@ private val topLevelRoutes = TopLevelDestination.entries.map { it.route::class }
  *   macrobenchmark tests.
  * @param viewModel The [DaemonViewModel] for daemon state.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ZeroAIAppShell(
     windowWidthSizeClass: WindowWidthSizeClass,
@@ -123,6 +128,17 @@ fun ZeroAIAppShell(
     val edgeMargin =
         if (windowWidthSizeClass == WindowWidthSizeClass.Compact) 16.dp else 24.dp
 
+    // Hide the navigation bar/rail while the soft keyboard is up so screens
+    // with a bottom input (the terminal, chat) sit flush above the keyboard
+    // instead of floating a nav-bar's height above it, and to reclaim space.
+    val imeVisible = WindowInsets.isImeVisible
+    val navLayoutType =
+        when {
+            imeVisible -> NavigationSuiteType.None
+            windowWidthSizeClass == WindowWidthSizeClass.Compact -> NavigationSuiteType.NavigationBar
+            else -> NavigationSuiteType.NavigationRail
+        }
+
     Box(modifier = Modifier.fillMaxSize()) {
         if (isOnboarding) {
             Scaffold { innerPadding ->
@@ -130,12 +146,13 @@ fun ZeroAIAppShell(
                     navController = navController,
                     startDestination = startDestination,
                     edgeMargin = edgeMargin,
-                    modifier = Modifier.padding(innerPadding),
+                    modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding),
                     daemonViewModel = viewModel,
                 )
             }
         } else if (isTopLevel) {
             NavigationSuiteScaffold(
+                layoutType = navLayoutType,
                 navigationSuiteItems = {
                     TopLevelDestination.entries.forEach { destination ->
                         val selected =
@@ -182,7 +199,7 @@ fun ZeroAIAppShell(
                         navController = navController,
                         startDestination = startDestination,
                         edgeMargin = edgeMargin,
-                        modifier = Modifier.padding(innerPadding),
+                        modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding),
                         daemonViewModel = viewModel,
                     )
                 }
@@ -212,7 +229,7 @@ fun ZeroAIAppShell(
                     navController = navController,
                     startDestination = startDestination,
                     edgeMargin = edgeMargin,
-                    modifier = Modifier.padding(innerPadding),
+                    modifier = Modifier.padding(innerPadding).consumeWindowInsets(innerPadding),
                     daemonViewModel = viewModel,
                 )
             }

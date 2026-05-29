@@ -8,8 +8,11 @@ package com.zeroclaw.android.ui.screen.agents
 
 import com.zeroclaw.android.data.repository.AgentRepository
 import com.zeroclaw.android.model.Agent
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -142,4 +145,9 @@ private class TestAgentRepository(
             current.map { if (it.id == id) it.copy(isEnabled = !it.isEnabled) else it }
         }
     }
+
+    override fun isAgentEnabled(id: String): Flow<Boolean> =
+        _agents
+            .map { agents -> agents.any { it.id == id && it.isEnabled } }
+            .distinctUntilChanged()
 }

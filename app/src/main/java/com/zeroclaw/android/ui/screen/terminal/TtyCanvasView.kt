@@ -28,28 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.TextUnitType
 import com.zeroclaw.ffi.TtyCursorStyle
-import com.zeroclaw.ffi.TtyDirtyState
 import com.zeroclaw.ffi.TtyRenderFrame
-import com.zeroclaw.ffi.TtyRenderRow
-
-// ── CachedRow for damage tracking ──────────────────────────────────────
-
-/**
- * Per-row snapshot used for damage tracking.
- *
- * When a row is drawn fresh, its text and styles are cached here so
- * that on subsequent CLEAN or PARTIAL frames the row can be redrawn
- * from cache without re-extracting style information.
- *
- * @property text Concatenated UTF-8 cell text for the row.
- * @property styles Packed style longs, one per column.
- * @property charOffsets Byte offset of each column's first char in [text].
- */
-private class CachedRow(
-    var text: String = "",
-    var styles: LongArray = LongArray(0),
-    var charOffsets: IntArray = IntArray(0),
-)
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -137,8 +116,8 @@ private const val UNDERLINE_STYLE_DASHED = 5
  * [frameProvider]. The frame lambda is evaluated during the draw phase
  * only, avoiding recomposition when the frame changes. Run batching
  * groups consecutive same-styled cells into a single drawTextRun call.
- * Per-row [CachedRow] damage tracking skips unchanged rows on PARTIAL
- * and CLEAN dirty states.
+ * Every visible row is painted directly from the live frame each draw
+ * (no per-row cache), so content always reflects the latest frame.
  *
  * Pinch-to-zoom adjusts font size via [onFontSizeChange], clamped to
  * [[TTY_MIN_FONT_SIZE], [TTY_MAX_FONT_SIZE]]. Tap gestures notify
@@ -200,8 +179,6 @@ fun TtyCanvasView(
 ) {
     val fontState = rememberFontState(fontSize.sp, gridCols)
     var currentFontSize by remember { mutableFloatStateOf(fontSize) }
-
-    val rowCache = remember { mutableListOf<CachedRow>() }
 
     val cursorPaint = remember { Paint().apply { isAntiAlias = true } }
 
@@ -345,71 +322,43 @@ fun TtyCanvasView(
 
                         val totalRows = minOf(frame.numRows.toInt(), frame.rows.size)
                         val visibleRows = minOf(totalRows, gridRows)
-                        val startRow = totalRows - visibleRows
 
-                        // Ensure row cache has enough slots.
-                        while (rowCache.size < visibleRows) {
-                            rowCache.add(CachedRow())
-                        }
+                        // Anchor the visible window to the cursor row. `frame.rows`
+                        // is the VT viewport (the cursor row is viewport-relative
+                        // from the top), so at steady state the grid equals the
+                        // canvas and startRow is 0. The only time it differs is the
+                        // brief lag while a canvas resize (e.g. the soft keyboard
+                        // animating in) propagates to the VT grid: the draw sees the
+                        // smaller canvas before the grid shrinks, so the frame still
+                        // reports more rows than fit. Anchoring on the cursor keeps
+                        // the active line (and the content around it) on screen
+                        // during that lag instead of slicing off the top and
+                        // flashing blank. Clamped so the window stays in range.
+                        val cursorRow = frame.cursor.row.toInt()
+                        val maxStartRow = (totalRows - visibleRows).coerceAtLeast(0)
+                        val startRow = (cursorRow - visibleRows + 1).coerceIn(0, maxStartRow)
 
                         // Clear background.
                         nativeCanvas.drawColor(defaultBgArgb)
 
-                        val dirty = frame.dirtyState
-
+                        // Paint each visible row straight from the live frame (no
+                        // per-row cache — a previous cache keyed by on-screen index
+                        // aliased stale rows as startRow shifted). Drawing directly
+                        // from the frame is damage-free; run batching in drawRowImpl
+                        // keeps it cheap, and the ViewModel only emits frames on change.
                         for (i in 0 until visibleRows) {
                             val row = frame.rows[startRow + i]
-                            val cached = rowCache[i]
-
-                            when (dirty) {
-                                TtyDirtyState.CLEAN -> {
-                                    drawCachedRow(
-                                        nativeCanvas,
-                                        cached,
-                                        i,
-                                        gridColsComputed,
-                                        fontState,
-                                        defaultBgArgb,
-                                        defaultFgArgb,
-                                    )
-                                }
-                                TtyDirtyState.FULL -> {
-                                    drawFreshRow(
-                                        nativeCanvas,
-                                        row,
-                                        cached,
-                                        i,
-                                        gridColsComputed,
-                                        fontState,
-                                        defaultBgArgb,
-                                        defaultFgArgb,
-                                    )
-                                }
-                                TtyDirtyState.PARTIAL -> {
-                                    if (row.dirty) {
-                                        drawFreshRow(
-                                            nativeCanvas,
-                                            row,
-                                            cached,
-                                            i,
-                                            gridColsComputed,
-                                            fontState,
-                                            defaultBgArgb,
-                                            defaultFgArgb,
-                                        )
-                                    } else {
-                                        drawCachedRow(
-                                            nativeCanvas,
-                                            cached,
-                                            i,
-                                            gridColsComputed,
-                                            fontState,
-                                            defaultBgArgb,
-                                            defaultFgArgb,
-                                        )
-                                    }
-                                }
-                            }
+                            drawRowImpl(
+                                nativeCanvas,
+                                row.text,
+                                row.styles.toLongArray(),
+                                row.charOffsets.map { it.toInt() }.toIntArray(),
+                                i,
+                                gridColsComputed,
+                                fontState,
+                                defaultBgArgb,
+                                defaultFgArgb,
+                            )
                         }
 
                         // Selection highlight.
@@ -444,9 +393,9 @@ fun TtyCanvasView(
                             cursorPaint.style = Paint.Style.FILL
                         }
 
-                        // Cursor.
+                        // Cursor. Offset by startRow to match the row drawing above.
                         val cursor = frame.cursor
-                        val cursorScreenRow = cursor.row.toInt()
+                        val cursorScreenRow = cursor.row.toInt() - startRow
                         if (cursorVisible &&
                             cursor.visible &&
                             cursorScreenRow in 0 until visibleRows
@@ -469,80 +418,6 @@ fun TtyCanvasView(
 }
 
 // ── Row drawing (fresh from TtyRenderRow) ──────────────────────────────
-
-/**
- * Draws a row directly from [TtyRenderRow] data, using run batching
- * to group consecutive same-styled cells into single drawTextRun calls.
- *
- * Converts FFI [List] types to primitive arrays, draws the row via
- * [drawRowImpl], then stores the result in [cache] for future CLEAN/PARTIAL frames.
- *
- * @param canvas The native [Canvas] to draw into.
- * @param row The [TtyRenderRow] from the current [TtyRenderFrame].
- * @param cache The [CachedRow] slot to update with the drawn content.
- * @param rowIdx Zero-based screen row index for Y-coordinate calculation.
- * @param cols Visible column count for clipping.
- * @param fontState Metrics and paint for the current font size.
- * @param defaultBgArgb Terminal default background color.
- * @param defaultFgArgb Terminal default foreground color.
- */
-@Suppress("LongParameterList")
-private fun drawFreshRow(
-    canvas: Canvas,
-    row: TtyRenderRow,
-    cache: CachedRow,
-    rowIdx: Int,
-    cols: Int,
-    fontState: TtyFontState,
-    defaultBgArgb: Int,
-    defaultFgArgb: Int,
-) {
-    val stylesArray = row.styles.toLongArray()
-    val offsetsArray = row.charOffsets.map { it.toInt() }.toIntArray()
-    drawRowImpl(
-        canvas,
-        row.text,
-        stylesArray,
-        offsetsArray,
-        rowIdx,
-        cols,
-        fontState,
-        defaultBgArgb,
-        defaultFgArgb,
-    )
-    cache.text = row.text
-    cache.styles = stylesArray
-    cache.charOffsets = offsetsArray
-}
-
-// ── Row drawing (from CachedRow) ───────────────────────────────────────
-
-/**
- * Draws a row from [CachedRow] cache data, used for CLEAN rows and
- * non-dirty rows during PARTIAL updates.
- */
-@Suppress("LongParameterList")
-private fun drawCachedRow(
-    canvas: Canvas,
-    cached: CachedRow,
-    rowIdx: Int,
-    cols: Int,
-    fontState: TtyFontState,
-    defaultBgArgb: Int,
-    defaultFgArgb: Int,
-) {
-    drawRowImpl(
-        canvas,
-        cached.text,
-        cached.styles,
-        cached.charOffsets,
-        rowIdx,
-        cols,
-        fontState,
-        defaultBgArgb,
-        defaultFgArgb,
-    )
-}
 
 // ── Shared row drawing implementation ──────────────────────────────────
 

@@ -3,7 +3,7 @@
 ![banner](https://github.com/user-attachments/assets/eca832d2-c90b-4aed-867b-06d69cc19a7f)
 
 <p align="center">                                                                                                                                                                                                            <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white"/>
-    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                               
+    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                           
     <img alt="Target SDK" src="https://img.shields.io/badge/target%20SDK-35-brightgreen"/>
     <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.0-7F52FF?logo=kotlin&logoColor=white"/>
     <img alt="Rust" src="https://img.shields.io/badge/Rust-FFI-DEA584?logo=rust&logoColor=black"/>
@@ -118,11 +118,11 @@ The **Terminal** tab is your in-app command center. Type messages to talk to you
 - `/help` — list available commands
 - `/nano <prompt>` — on-device Gemini Nano inference
 - `/cost` — current session cost summary
-- `@tty` — switch to the full TTY terminal mode
+- `Shell Button` — switch to the full TTY terminal mode
 
 ### SSH from your phone
 
-Once in TTY mode (`@tty`), connect to any SSH server:
+Once in TTY mode, connect to any SSH server:
 
 <p>
  <img align="right" src="https://github.com/user-attachments/assets/7ac0c143-4902-4d0b-b3ec-77ea14cffb5e" width="30%" />
@@ -149,7 +149,7 @@ Configure channels in **Hub > Apps**.
 
 ### ClawBoy
 
-A Game Boy emulator that your Zero plays autonomously. Start a game by chatting "play pokemon" in the Terminal, Telegram, or Discord. Watch the AI make decisions in real-time through the Hub viewer.
+A Game Boy emulator that your Zero plays autonomously. Start a game by chatting "play clawboy" in the Terminal, Telegram, or Discord. Watch the AI make decisions in real-time through the Hub viewer. ROM file not provided.
 
 ## Architecture
 

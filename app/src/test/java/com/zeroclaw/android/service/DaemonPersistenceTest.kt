@@ -76,6 +76,7 @@ class DaemonPersistenceTest {
     ): SharedPreferences =
         mockk {
             every { edit() } returns editor
+            every { contains(any()) } answers { store.containsKey(firstArg()) }
             every { getBoolean(any(), any()) } answers {
                 store[firstArg()] as? Boolean ?: secondArg()
             }

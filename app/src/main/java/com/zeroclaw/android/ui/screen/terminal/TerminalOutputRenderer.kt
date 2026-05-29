@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.zeroclaw.android.ui.canvas.CanvasFrame
 import com.zeroclaw.android.ui.canvas.detectCanvasBlock
 import com.zeroclaw.android.ui.canvas.parseCanvasJson
+import com.zeroclaw.android.ui.screen.terminal.theme.LocalTerminalTheme
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import org.json.JSONArray
 import org.json.JSONObject
@@ -130,6 +131,10 @@ private fun InputBlock(
 ) {
     val isCommand = block.text.startsWith("/")
     val description = if (isCommand) "Command: ${block.text}" else "Message: ${block.text}"
+    val theme = LocalTerminalTheme.current
+    val promptColor = theme?.colorForRole(BlockRole.INPUT_PROMPT) ?: MaterialTheme.colorScheme.primary
+    val textColor = theme?.colorForRole(BlockRole.INPUT_TEXT) ?: MaterialTheme.colorScheme.onSurface
+    val labelColor = theme?.colorForRole(BlockRole.STRUCTURED) ?: MaterialTheme.colorScheme.onSurfaceVariant
 
     CopyableBlockLayout(
         onCopy = { onCopy(block.text) },
@@ -151,10 +156,10 @@ private fun InputBlock(
         ) {
             val annotatedPrompt =
                 buildAnnotatedString {
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary)) {
+                    withStyle(SpanStyle(color = promptColor)) {
                         append("> ")
                     }
-                    withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurface)) {
+                    withStyle(SpanStyle(color = textColor)) {
                         append(block.text)
                     }
                 }
@@ -166,7 +171,7 @@ private fun InputBlock(
                 Text(
                     text = "  [image: $imageName]",
                     style = TerminalTypography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = labelColor,
                 )
             }
         }
@@ -240,7 +245,9 @@ private fun ResponseBlock(
                 Text(
                     text = plainText,
                     style = TerminalTypography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color =
+                        LocalTerminalTheme.current?.colorForRole(BlockRole.RESPONSE)
+                            ?: MaterialTheme.colorScheme.onSurface,
                 )
             }
 
@@ -269,18 +276,19 @@ private fun ResponseBlock(
  */
 @Composable
 private fun CanvasFallbackCodeBlock(json: String) {
+    val theme = LocalTerminalTheme.current
     Text(
         text = json,
         style =
             TerminalTypography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace,
             ),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = theme?.colorForRole(BlockRole.STRUCTURED) ?: MaterialTheme.colorScheme.onSurfaceVariant,
         modifier =
             Modifier
                 .fillMaxWidth()
                 .background(
-                    MaterialTheme.colorScheme.surfaceVariant,
+                    theme?.replBackground() ?: MaterialTheme.colorScheme.surfaceVariant,
                     RoundedCornerShape(CANVAS_FALLBACK_CORNER_DP.dp),
                 ).padding(CANVAS_FALLBACK_PADDING_DP.dp)
                 .semantics {
@@ -306,11 +314,12 @@ private fun StructuredBlock(
     onCopy: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    val theme = LocalTerminalTheme.current
+    val borderColor = theme?.replBorder() ?: MaterialTheme.colorScheme.outlineVariant
     val formattedContent = remember(block.json) { formatStructuredJson(block.json) }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = theme?.replBackground() ?: MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(STRUCTURED_CORNER_DP.dp),
         modifier =
             modifier
@@ -339,7 +348,7 @@ private fun StructuredBlock(
             Text(
                 text = formattedContent,
                 style = TerminalTypography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = theme?.colorForRole(BlockRole.RESPONSE) ?: MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -376,7 +385,7 @@ private fun ErrorBlock(
         Text(
             text = "Error: ${block.message}",
             style = TerminalTypography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
+            color = LocalTerminalTheme.current?.colorForRole(BlockRole.ERROR) ?: MaterialTheme.colorScheme.error,
         )
     }
 }
@@ -412,7 +421,7 @@ private fun SystemBlock(
         Text(
             text = block.text,
             style = TerminalTypography.bodySmall,
-            color = MaterialTheme.colorScheme.outline,
+            color = LocalTerminalTheme.current?.colorForRole(BlockRole.SYSTEM) ?: MaterialTheme.colorScheme.outline,
         )
     }
 }
@@ -459,7 +468,7 @@ private fun CopyableBlockLayout(
             Icon(
                 imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = LocalTerminalTheme.current?.colorForRole(BlockRole.SYSTEM) ?: MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(COPY_ICON_SIZE_DP.dp),
             )
         }

@@ -325,7 +325,7 @@ private fun OnDeviceLargeModelCard(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "LiteRT-LM · Gemma 4 / Phi-4",
+                    text = "LiteRT-LM · Gemma 4",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

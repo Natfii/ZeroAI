@@ -4,6 +4,7 @@
 
 package com.zeroclaw.android.data.repository
 
+import com.zeroclaw.android.data.OnDeviceLargeAgent
 import com.zeroclaw.android.data.ProviderSlotRegistry
 import com.zeroclaw.android.data.local.dao.AgentDao
 import com.zeroclaw.android.data.local.entity.AgentEntity
@@ -22,8 +23,8 @@ import org.junit.jupiter.api.Test
 @DisplayName("RoomAgentRepository provider slots")
 class RoomAgentRepositoryProviderSlotTest {
     @Test
-    @DisplayName("ensureProviderSlots inserts all fixed slots as disabled seed rows")
-    fun `ensureProviderSlots inserts all fixed slots as disabled seed rows`() =
+    @DisplayName("ensureProviderSlots inserts all fixed slots plus the on-device seed, disabled")
+    fun `ensureProviderSlots inserts all fixed slots plus the on-device seed`() =
         runTest {
             val dao = mockk<AgentDao>(relaxUnitFun = true)
             every { dao.observeAll() } returns flowOf(emptyList())
@@ -34,7 +35,8 @@ class RoomAgentRepositoryProviderSlotTest {
             coVerify {
                 dao.insertIgnore(
                     match { entities ->
-                        entities.size == ProviderSlotRegistry.all().size &&
+                        entities.size == ProviderSlotRegistry.all().size + 1 &&
+                            entities.any { it.id == OnDeviceLargeAgent.ID } &&
                             entities.all { entity ->
                                 entity.id == entity.slotId &&
                                     entity.name.isNotBlank() &&

@@ -810,6 +810,11 @@ object CommandRegistry {
                 toExpression = { null },
             ),
             SlashCommand(
+                name = "theme",
+                description = "Choose the terminal color theme",
+                toExpression = { null },
+            ),
+            SlashCommand(
                 name = "help",
                 description = "Show available commands",
                 toExpression = { null },

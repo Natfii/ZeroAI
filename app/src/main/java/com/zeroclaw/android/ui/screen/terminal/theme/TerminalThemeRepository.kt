@@ -40,19 +40,13 @@ class TerminalThemeRepository(
             "Catppuccin Latte" to R.raw.theme_catppuccin_latte,
             "Dracula" to R.raw.theme_dracula,
             "Tokyo Night" to R.raw.theme_tokyo_night,
-            "Tokyo Night Light" to R.raw.theme_tokyo_night_light,
-            "Solarized Dark" to R.raw.theme_solarized_dark,
-            "Solarized Light" to R.raw.theme_solarized_light,
             "Gruvbox Dark" to R.raw.theme_gruvbox_dark,
             "Gruvbox Light" to R.raw.theme_gruvbox_light,
             "Nord" to R.raw.theme_nord,
             "One Dark" to R.raw.theme_one_dark,
             "Rosé Pine" to R.raw.theme_rose_pine,
-            "Rosé Pine Dawn" to R.raw.theme_rose_pine_dawn,
             "Kanagawa" to R.raw.theme_kanagawa,
             "Monokai Pro" to R.raw.theme_monokai_pro,
-            "Everforest Dark" to R.raw.theme_everforest_dark,
-            "Everforest Light" to R.raw.theme_everforest_light,
         )
 
     private val cachedThemes: List<TerminalTheme> by lazy {

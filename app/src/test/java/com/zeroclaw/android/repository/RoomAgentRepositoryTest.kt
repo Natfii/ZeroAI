@@ -90,11 +90,11 @@ class RoomAgentRepositoryTest {
         }
 
     @Test
-    fun `toggleEnabled delegates to dao toggleEnabled`() =
+    fun `toggleEnabled delegates to dao toggleExclusive`() =
         runTest {
             repo.toggleEnabled("a1")
 
-            coVerify { dao.toggleEnabled("a1") }
+            coVerify { dao.toggleExclusive("a1") }
         }
 
     private fun makeEntity(
