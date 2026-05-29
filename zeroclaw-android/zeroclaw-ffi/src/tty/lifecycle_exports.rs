@@ -173,11 +173,7 @@ pub(crate) fn tty_destroy_inner() -> Result<(), FfiError> {
 }
 
 pub(crate) fn tty_write_inner(bytes: Vec<u8>) -> Result<(), FfiError> {
-    if tty::ssh::is_connected() {
-        tty::ssh::write_bytes(bytes)
-    } else {
-        tty::session::write_bytes(bytes)
-    }
+    tty::session::write_bytes(bytes)
 }
 
 pub(crate) fn tty_resize_inner(
@@ -186,21 +182,13 @@ pub(crate) fn tty_resize_inner(
     width_px: u32,
     height_px: u32,
 ) -> Result<(), FfiError> {
-    if tty::ssh::is_connected() {
-        tty::ssh::resize(cols as u16, rows as u16)
-    } else {
-        let result = tty::session::resize(cols as u16, rows as u16);
-        let _ = tty::session::set_mouse_geometry(cols as u16, rows as u16, width_px, height_px);
-        result
-    }
+    let result = tty::session::resize(cols as u16, rows as u16);
+    let _ = tty::session::set_mouse_geometry(cols as u16, rows as u16, width_px, height_px);
+    result
 }
 
 pub(crate) fn tty_get_output_snapshot_inner(max_lines: u32) -> Result<Vec<String>, FfiError> {
-    if tty::ssh::has_session() {
-        tty::ssh::get_output_lines(max_lines)
-    } else {
-        tty::session::get_output_lines(max_lines)
-    }
+    tty::session::get_output_lines(max_lines)
 }
 
 pub(crate) fn tty_get_context_inner(max_bytes: Option<u32>) -> Result<String, FfiError> {
@@ -209,11 +197,7 @@ pub(crate) fn tty_get_context_inner(max_bytes: Option<u32>) -> Result<String, Ff
 }
 
 pub(crate) fn tty_get_render_frame_inner() -> Result<types::TtyRenderFrame, FfiError> {
-    if tty::ssh::has_session() {
-        tty::ssh::get_render_frame()
-    } else {
-        tty::session::get_render_frame()
-    }
+    tty::session::get_render_frame()
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -232,9 +216,5 @@ pub(crate) fn tty_set_palette_inner(
             detail: format!("palette must have 16 entries, got {}", palette.len()),
         });
     }
-    if tty::ssh::has_session() {
-        tty::ssh::set_palette(bg, fg, cursor, &palette)
-    } else {
-        tty::session::set_palette(bg, fg, cursor, &palette)
-    }
+    tty::session::set_palette(bg, fg, cursor, &palette)
 }

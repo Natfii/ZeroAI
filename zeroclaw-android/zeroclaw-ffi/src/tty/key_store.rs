@@ -201,21 +201,6 @@ pub(crate) fn list_key_ids() -> Result<Vec<String>, FfiError> {
     Ok(ids)
 }
 
-/// Returns the filesystem path to a key file.
-///
-/// Used by the SSH module to load keys with `russh::keys` types
-/// (which differ from `russh_keys` types due to the internal fork).
-pub(crate) fn key_path(key_id: &str) -> Result<std::path::PathBuf, FfiError> {
-    let dir = keys_dir()?;
-    let path = dir.join(format!("{key_id}.pem"));
-    if !path.exists() {
-        return Err(FfiError::InvalidArgument {
-            detail: format!("key file not found: {key_id}"),
-        });
-    }
-    Ok(path)
-}
-
 // --- helpers ---
 
 fn keys_dir() -> Result<&'static PathBuf, FfiError> {
@@ -230,7 +215,8 @@ fn lock() -> Result<std::sync::MutexGuard<'static, ()>, FfiError> {
     })
 }
 
-pub(crate) fn load_key(key_id: &str) -> Result<PrivateKey, FfiError> {
+/// Loads a private key from the store by id (used by [`export_public`]).
+fn load_key(key_id: &str) -> Result<PrivateKey, FfiError> {
     let dir = keys_dir()?;
     let _guard = lock()?;
     let path = dir.join(format!("{key_id}.pem"));

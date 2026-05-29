@@ -62,13 +62,8 @@ private const val TOUCH_TARGET_SIZE_DP = 48
  * it is appended to the status label after an em-dash separator.
  *
  * Color mapping:
- * - [TtySessionUiState.LocalShell] and [TtySessionUiState.SshConnected]:
- *   [MaterialTheme.colorScheme.tertiary] (green-like).
- * - [TtySessionUiState.SshConnecting] and [TtySessionUiState.SshAuthRequired]:
- *   [MaterialTheme.colorScheme.secondary] (amber-like).
+ * - [TtySessionUiState.LocalShell]: [MaterialTheme.colorScheme.tertiary] (green-like).
  * - [TtySessionUiState.Error]: [MaterialTheme.colorScheme.error] (red).
- * - [TtySessionUiState.HostKeyVerification]:
- *   [MaterialTheme.colorScheme.secondary] (amber-like).
  *
  * @param session Current lifecycle state of the TTY session.
  * @param onClose Callback when the user taps the close button.
@@ -137,14 +132,6 @@ private fun resolveStatusDisplay(session: TtySessionUiState): Pair<Color, String
     when (session) {
         is TtySessionUiState.LocalShell ->
             MaterialTheme.colorScheme.tertiary to "Local"
-        is TtySessionUiState.SshConnecting ->
-            MaterialTheme.colorScheme.secondary to "Connecting\u2026"
-        is TtySessionUiState.HostKeyVerification ->
-            MaterialTheme.colorScheme.secondary to "Verify host key"
-        is TtySessionUiState.SshAuthRequired ->
-            MaterialTheme.colorScheme.secondary to "Authentication required"
-        is TtySessionUiState.SshConnected ->
-            MaterialTheme.colorScheme.tertiary to "SSH ${session.hostLabel}"
         is TtySessionUiState.Error ->
             MaterialTheme.colorScheme.error to "Disconnected"
     }

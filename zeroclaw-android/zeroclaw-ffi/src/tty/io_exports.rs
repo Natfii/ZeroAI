@@ -130,59 +130,30 @@ pub(crate) fn tty_is_paste_safe_inner(text: String) -> Result<bool, FfiError> {
 }
 
 pub(crate) fn tty_is_bracketed_paste_active_inner() -> Result<bool, FfiError> {
-    if tty::ssh::has_session() {
-        tty::ssh::is_bracketed_paste_active()
-    } else {
-        tty::session::is_bracketed_paste_active()
-    }
+    tty::session::is_bracketed_paste_active()
 }
 
 pub(crate) fn tty_take_bell_event_inner() -> Result<bool, FfiError> {
-    if tty::ssh::has_session() {
-        tty::ssh::take_bell_event()
-    } else {
-        tty::session::take_bell_event()
-    }
+    tty::session::take_bell_event()
 }
 
 pub(crate) fn tty_take_title_if_changed_inner() -> Result<Option<String>, FfiError> {
-    if tty::ssh::has_session() {
-        tty::ssh::take_title_if_changed()
-    } else {
-        tty::session::take_title_if_changed()
-    }
+    tty::session::take_title_if_changed()
 }
 
-#[allow(clippy::unnecessary_wraps)]
 pub(crate) fn tty_is_mouse_tracking_active_inner() -> Result<bool, FfiError> {
-    if tty::ssh::has_session() {
-        Ok(false)
-    } else {
-        tty::session::is_mouse_tracking_active()
-    }
+    tty::session::is_mouse_tracking_active()
 }
 
 pub(crate) fn tty_send_focus_event_inner(gained: bool) -> Result<(), FfiError> {
-    if tty::ssh::has_session() {
-        if !tty::ssh::is_focus_reporting_active().unwrap_or(false) {
-            return Ok(());
-        }
-        let encoded = tty::ghostty_bridge::encode_focus_event(gained);
-        if !encoded.is_empty() {
-            tty::ssh::write_bytes(encoded)
-        } else {
-            Ok(())
-        }
+    if !tty::session::is_focus_reporting_active().unwrap_or(false) {
+        return Ok(());
+    }
+    let encoded = tty::ghostty_bridge::encode_focus_event(gained);
+    if !encoded.is_empty() {
+        tty::session::write_bytes(encoded)
     } else {
-        if !tty::session::is_focus_reporting_active().unwrap_or(false) {
-            return Ok(());
-        }
-        let encoded = tty::ghostty_bridge::encode_focus_event(gained);
-        if !encoded.is_empty() {
-            tty::session::write_bytes(encoded)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 
@@ -193,11 +164,7 @@ pub(crate) fn tty_submit_mouse_event_inner(
     pixel_y: f32,
     mods: u32,
 ) -> Result<(), FfiError> {
-    let result = if tty::ssh::is_connected() {
-        Ok(())
-    } else {
-        tty::session::submit_mouse_event(action, button, pixel_x, pixel_y, mods)
-    };
+    let result = tty::session::submit_mouse_event(action, button, pixel_x, pixel_y, mods);
 
     match &result {
         Err(FfiError::StateError { .. }) => {

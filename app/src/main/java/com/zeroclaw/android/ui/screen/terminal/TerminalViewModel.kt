@@ -63,7 +63,6 @@ import com.zeroclaw.ffi.TailnetServiceKind
 import com.zeroclaw.ffi.TtyCursorState
 import com.zeroclaw.ffi.TtyCursorStyle
 import com.zeroclaw.ffi.TtyDirtyState
-import com.zeroclaw.ffi.TtyHostKeyDecision
 import com.zeroclaw.ffi.TtyRenderFrame
 import com.zeroclaw.ffi.TtyRenderRow
 import com.zeroclaw.ffi.evalScriptWithCapabilities
@@ -75,22 +74,16 @@ import com.zeroclaw.ffi.sessionCancel
 import com.zeroclaw.ffi.sessionDestroy
 import com.zeroclaw.ffi.sessionSend
 import com.zeroclaw.ffi.sessionStart
-import com.zeroclaw.ffi.ttyAnswerHostKey
 import com.zeroclaw.ffi.ttyCreate
 import com.zeroclaw.ffi.ttyDestroy
-import com.zeroclaw.ffi.ttyDisconnectSsh
 import com.zeroclaw.ffi.ttyGetOutputSnapshot
-import com.zeroclaw.ffi.ttyGetPendingHostKey
 import com.zeroclaw.ffi.ttyGetRenderFrame
 import com.zeroclaw.ffi.ttyIsBracketedPasteActive
 import com.zeroclaw.ffi.ttyIsMouseTrackingActive
 import com.zeroclaw.ffi.ttyIsPasteSafe
 import com.zeroclaw.ffi.ttyResize
 import com.zeroclaw.ffi.ttySetPalette
-import com.zeroclaw.ffi.ttyStartSsh
-import com.zeroclaw.ffi.ttySubmitKey
 import com.zeroclaw.ffi.ttySubmitMouseEvent
-import com.zeroclaw.ffi.ttySubmitPassword
 import com.zeroclaw.ffi.ttyTakeBellEvent
 import com.zeroclaw.ffi.ttyTakeTitleIfChanged
 import com.zeroclaw.ffi.ttyWaitForRenderSignal
@@ -418,9 +411,6 @@ class TerminalViewModel(
 
     /** Coroutine job for polling PTY output while TTY mode is active. */
     private var ttyPollJob: Job? = null
-
-    /** Coroutine job for polling SSH host key prompts during the handshake. */
-    private var sshPollJob: Job? = null
 
     /**
      * Signals the UI layer to launch the screen capture consent dialog.
@@ -790,12 +780,6 @@ class TerminalViewModel(
     override fun onCleared() {
         super.onCleared()
         ttyInputWrites.close()
-        sshPollJob?.cancel()
-        try {
-            ttyDisconnectSsh()
-        } catch (e: Exception) {
-            logRepository.append(LogSeverity.WARN, TAG, "SSH disconnect failed: ${e.message}")
-        }
         stopTtyPolling()
         try {
             ttyDestroy()
@@ -898,34 +882,6 @@ class TerminalViewModel(
      */
     fun ttyWriteBytes(bytes: ByteArray) {
         ttyInputWrites.trySend(bytes)
-    }
-
-    /**
-     * Sends a text string to the active PTY session as UTF-8 bytes.
-     *
-     * Intercepts `/ssh user@host [-p port]` before forwarding to the PTY,
-     * routing such input to [sshConnect] instead. All other input is forwarded
-     * as raw UTF-8 bytes via [ttyWriteBytes].
-     *
-     * @param text Text to write (typically a single character or line).
-     */
-    @Suppress("MagicNumber")
-    fun ttyWriteText(text: String) {
-        val match = SSH_COMMAND_PATTERN.matchEntire(text.trimEnd('\n'))
-        if (match != null) {
-            val user = match.groupValues[1]
-            val host = match.groupValues[2]
-            val port = match.groupValues[3].toIntOrNull() ?: SSH_DEFAULT_PORT
-            if (!SSH_USER_PATTERN.matches(user) || !SSH_HOST_PATTERN.matches(host) || port > SSH_MAX_PORT) {
-                viewModelScope.launch {
-                    repository.append(content = "Invalid SSH target.", entryType = ENTRY_TYPE_ERROR)
-                }
-                return
-            }
-            sshConnect(user, host, port)
-            return
-        }
-        ttyWriteBytes(text.toByteArray(Charsets.UTF_8))
     }
 
     /**
@@ -1432,277 +1388,6 @@ class TerminalViewModel(
             defaultFgArgb = 0xFF4AF626u,
             dirtyState = TtyDirtyState.FULL,
         )
-    }
-
-    /**
-     * Initiates an SSH connection to a remote host.
-     *
-     * Destroys any active local shell, transitions to connecting state,
-     * and begins polling for host key prompts.
-     *
-     * @param user SSH username.
-     * @param host Remote hostname or IP address.
-     * @param port Remote SSH port.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun sshConnect(
-        user: String,
-        host: String,
-        port: Int,
-    ) {
-        stopTtyPolling()
-        _terminalMode.value =
-            TerminalMode.Tty(
-                session = TtySessionUiState.SshConnecting(host, port, user),
-            )
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                ttyStartSsh(host, port.toUInt(), user)
-                startHostKeyPolling()
-            } catch (e: Exception) {
-                _terminalMode.value =
-                    TerminalMode.Tty(
-                        session =
-                            TtySessionUiState.Error(
-                                "SSH connection failed: ${e.message}",
-                            ),
-                    )
-            }
-        }
-    }
-
-    /**
-     * Polls for a pending host key prompt from the SSH handshake.
-     *
-     * Runs every [SSH_HOST_KEY_POLL_MS] until a prompt arrives or
-     * [SSH_HANDSHAKE_TIMEOUT_MS] elapses.
-     */
-    @Suppress("CognitiveComplexMethod", "LongMethod")
-    private fun startHostKeyPolling() {
-        sshPollJob?.cancel()
-        sshPollJob =
-            viewModelScope.launch(Dispatchers.IO) {
-                val deadline = System.currentTimeMillis() + SSH_HANDSHAKE_TIMEOUT_MS
-                while (System.currentTimeMillis() < deadline) {
-                    try {
-                        // Check SSH state machine transitions.
-                        val state = com.zeroclaw.ffi.ttyGetSshState()
-
-                        if (state == com.zeroclaw.ffi.SshState.DISCONNECTED) {
-                            val lines = ttyGetOutputSnapshot(TTY_SNAPSHOT_MAX_LINES.toUInt())
-                            val errorMsg =
-                                lines.lastOrNull { it.startsWith("SSH error:") }
-                                    ?: "SSH connection failed"
-                            _terminalMode.value =
-                                TerminalMode.Tty(
-                                    session = TtySessionUiState.Error(errorMsg),
-                                )
-                            return@launch
-                        }
-
-                        // SSH connected without user interaction (host
-                        // already trusted + key auth auto-succeeded).
-                        if (state == com.zeroclaw.ffi.SshState.CONNECTED) {
-                            _terminalMode.value =
-                                TerminalMode.Tty(
-                                    session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
-                                )
-                            startTtyPolling()
-                            return@launch
-                        }
-
-                        // Awaiting host key — show trust dialog.
-                        if (state == com.zeroclaw.ffi.SshState.AWAITING_HOST_KEY) {
-                            val prompt = ttyGetPendingHostKey()
-                            if (prompt != null) {
-                                _terminalMode.value =
-                                    TerminalMode.Tty(
-                                        session =
-                                            TtySessionUiState.HostKeyVerification(
-                                                host = prompt.host,
-                                                port = prompt.port.toInt(),
-                                                algorithm = prompt.algorithm,
-                                                fingerprintSha256 = prompt.fingerprintSha256,
-                                                isChanged = prompt.isChanged,
-                                            ),
-                                    )
-                                return@launch
-                            }
-                        }
-
-                        // Authenticating — show auth dialog.
-                        if (state == com.zeroclaw.ffi.SshState.AUTHENTICATING) {
-                            _terminalMode.value =
-                                TerminalMode.Tty(
-                                    session =
-                                        TtySessionUiState.SshAuthRequired(
-                                            methods = listOf("password", "publickey"),
-                                        ),
-                                )
-                            return@launch
-                        }
-                    } catch (_: Exception) {
-                        break
-                    }
-                    delay(SSH_HOST_KEY_POLL_MS)
-                }
-                // Timeout — show error
-                _terminalMode.value =
-                    TerminalMode.Tty(
-                        session = TtySessionUiState.Error("SSH connection timed out"),
-                    )
-            }
-    }
-
-    /**
-     * Responds to a host key verification prompt.
-     *
-     * @param accept Whether to trust the presented host key.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun sshAnswerHostKey(accept: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val decision =
-                    if (accept) {
-                        TtyHostKeyDecision.ACCEPT
-                    } else {
-                        TtyHostKeyDecision.REJECT
-                    }
-                ttyAnswerHostKey(decision)
-                if (accept) {
-                    _terminalMode.value =
-                        TerminalMode.Tty(
-                            session =
-                                TtySessionUiState.SshAuthRequired(
-                                    methods = listOf("password", "publickey"),
-                                ),
-                        )
-                } else {
-                    sshDisconnect()
-                }
-            } catch (e: Exception) {
-                _terminalMode.value =
-                    TerminalMode.Tty(
-                        session =
-                            TtySessionUiState.Error(
-                                "Host key error: ${e.message}",
-                            ),
-                    )
-            }
-        }
-    }
-
-    /**
-     * Submits a password for SSH authentication.
-     *
-     * Both the [CharArray] and intermediate [ByteArray] are zeroed
-     * on all exit paths.
-     *
-     * @param chars Password as a character array.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun sshSubmitPassword(chars: CharArray) {
-        viewModelScope.launch(Dispatchers.IO) {
-            var bytes: ByteArray? = null
-            try {
-                val encoder = Charsets.UTF_8.newEncoder()
-                val buf = encoder.encode(java.nio.CharBuffer.wrap(chars))
-                bytes = ByteArray(buf.remaining()).also { buf.get(it) }
-                val success = ttySubmitPassword(bytes)
-                if (success) {
-                    sshPollJob?.cancel()
-                    sshPollJob = null
-                    _terminalMode.value =
-                        TerminalMode.Tty(
-                            session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
-                        )
-                    startTtyPolling()
-                } else {
-                    _terminalMode.value =
-                        TerminalMode.Tty(
-                            session =
-                                TtySessionUiState.SshAuthRequired(
-                                    methods = listOf("password", "publickey"),
-                                ),
-                        )
-                }
-            } catch (e: Exception) {
-                _terminalMode.value =
-                    TerminalMode.Tty(
-                        session =
-                            TtySessionUiState.Error(
-                                "Auth failed: ${e.message}",
-                            ),
-                    )
-            } finally {
-                chars.fill('\u0000')
-                bytes?.fill(0)
-            }
-        }
-    }
-
-    /**
-     * Submits an SSH key for authentication.
-     *
-     * @param keyId UUID of the key in the Rust key store.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun sshSubmitKey(keyId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val success = ttySubmitKey(keyId)
-                if (success) {
-                    sshPollJob?.cancel()
-                    sshPollJob = null
-                    _terminalMode.value =
-                        TerminalMode.Tty(
-                            session = TtySessionUiState.SshConnected(hostLabel = "SSH"),
-                        )
-                    startTtyPolling()
-                } else {
-                    _terminalMode.value =
-                        TerminalMode.Tty(
-                            session =
-                                TtySessionUiState.SshAuthRequired(
-                                    methods = listOf("password", "publickey"),
-                                ),
-                        )
-                }
-            } catch (e: Exception) {
-                _terminalMode.value =
-                    TerminalMode.Tty(
-                        session =
-                            TtySessionUiState.Error(
-                                "Key auth failed: ${e.message}",
-                            ),
-                    )
-            }
-        }
-    }
-
-    /**
-     * Disconnects the active SSH session and returns to REPL mode.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun sshDisconnect() {
-        sshPollJob?.cancel()
-        sshPollJob = null
-        stopTtyPolling()
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                ttyDisconnectSsh()
-            } catch (_: Exception) {
-                // idempotent
-            }
-        }
-        _terminalMode.value = TerminalMode.Repl
-        viewModelScope.launch {
-            repository.append(
-                content = "SSH session ended.",
-                entryType = ENTRY_TYPE_SYSTEM,
-            )
-        }
     }
 
     /**
@@ -3999,27 +3684,6 @@ class TerminalViewModel(
 
         /** Subscription timeout for [peerAliases] flow collection. */
         private const val PEER_ALIAS_TIMEOUT = 5_000L
-
-        /** Pattern matching valid SSH usernames (RFC 952 / common practice). */
-        private val SSH_USER_PATTERN = Regex("""^[a-zA-Z0-9._-]{1,64}$""")
-
-        /** Pattern matching valid SSH hostnames or IP addresses. */
-        private val SSH_HOST_PATTERN = Regex("""^[a-zA-Z0-9._:-]{1,253}$""")
-
-        /** Pattern matching the `/ssh user@host [-p port]` terminal command. */
-        private val SSH_COMMAND_PATTERN = Regex("""^/ssh\s+(\S+)@(\S+)(?:\s+-p\s+(\d+))?\s*$""")
-
-        /** Default SSH port when `-p` is not specified. */
-        private const val SSH_DEFAULT_PORT = 22
-
-        /** Polling interval in milliseconds for host key prompts during handshake. */
-        private const val SSH_HOST_KEY_POLL_MS = 200L
-
-        /** Maximum time in milliseconds to wait for an SSH handshake host key prompt. */
-        private const val SSH_HANDSHAKE_TIMEOUT_MS = 30_000L
-
-        /** Maximum valid TCP port number. */
-        private const val SSH_MAX_PORT = 65535
 
         /** Runtime identifier for the currently executable embedded script engine. */
         private const val SCRIPT_RUNTIME_RHAI = "rhai"

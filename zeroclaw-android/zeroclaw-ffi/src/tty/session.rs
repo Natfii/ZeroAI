@@ -363,8 +363,7 @@ pub(crate) fn resize(cols: u16, rows: u16) -> Result<(), FfiError> {
     // terminal stays at its initial grid size while only the PTY winsize
     // tracks the canvas, so a shrunk canvas (e.g. the soft keyboard up)
     // renders blank rows: the render frame keeps reporting the original row
-    // count and the visible window slices off the top-anchored content. The
-    // SSH path already does this in `tty::ssh::resize`.
+    // count and the visible window slices off the top-anchored content.
     {
         let mut backend = session.backend.lock().unwrap_or_else(|e| {
             tracing::warn!(

@@ -330,10 +330,6 @@ fun TerminalScreen(
                             onKeyPress = terminalViewModel::ttyHandleSpecialKey,
                             onTextInput = terminalViewModel::ttyOnText,
                             onInputBytes = terminalViewModel::ttyWriteBytes,
-                            onAnswerHostKey = terminalViewModel::sshAnswerHostKey,
-                            onSubmitPassword = terminalViewModel::sshSubmitPassword,
-                            onSubmitKey = terminalViewModel::sshSubmitKey,
-                            onDisconnect = terminalViewModel::sshDisconnect,
                             cursorBlinking = ttyCursorBlinking,
                             cursorPosition = ttyCursorPosition,
                             gridCols = ttyGridCols,
@@ -1203,13 +1199,12 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * Full-screen TTY session composable with output display and input.
  *
  * Renders the PTY output via [TtyCanvasView] using the GPU-accelerated cell
- * grid renderer. A text input field handles keyboard entry and [TtyKeyRow]
- * exposes special keys. SSH auth dialogs ([TtyHostKeyDialog],
- * [TtyPasswordDialog]) are shown automatically based on the [session] state.
- * [outputLines] is retained for accessibility and fallback purposes even
- * though it is no longer the primary rendering path.
+ * grid renderer. Keyboard entry is fed to the PTY via [TtyKeyInputView] and
+ * [TtyKeyRow] exposes special keys. [outputLines] is retained for
+ * accessibility and fallback purposes even though it is no longer the
+ * primary rendering path.
  *
- * @param session Current TTY session UI state for the status bar and auth dialogs.
+ * @param session Current TTY session UI state for the status bar.
  * @param outputLines ANSI-stripped output lines retained for accessibility fallback.
  * @param frameProvider Lambda that returns the current [TtyRenderFrame], invoked
  *   inside the Canvas draw phase so that frame updates skip composition and layout.
@@ -1225,10 +1220,6 @@ private const val CURSOR_BLINK_INTERVAL_MS = 530L
  * @param onFontSizeChange Invoked with the new font size after a pinch-to-zoom gesture.
  * @param onSizeChanged Invoked with the new `(cols, rows, widthPx, heightPx)` grid dimensions
  *   and canvas pixel size when the canvas size or font metrics change.
- * @param onAnswerHostKey Callback invoked with `true` to accept or `false` to reject the host key.
- * @param onSubmitPassword Callback invoked with the password as a [CharArray] for SSH auth.
- * @param onSubmitKey Callback invoked with the private key path for SSH key auth.
- * @param onDisconnect Callback to disconnect and dismiss the current SSH auth prompt.
  * @param cursorBlinking Whether the cursor is in blinking mode; drives the blink [LaunchedEffect].
  * @param cursorPosition Stable `"col-row"` string key; resets the blink phase when the cursor moves.
  * @param gridCols Current grid column count from the latest render frame, or the default.
@@ -1266,10 +1257,6 @@ fun TtySessionContent(
     onInputBytes: (ByteArray) -> Unit = {},
     onFontSizeChange: (Float) -> Unit,
     onSizeChanged: (cols: Int, rows: Int, widthPx: Int, heightPx: Int) -> Unit,
-    onAnswerHostKey: (Boolean) -> Unit = {},
-    onSubmitPassword: (CharArray) -> Unit = {},
-    @Suppress("UnusedParameter") onSubmitKey: (String) -> Unit = {},
-    onDisconnect: () -> Unit = {},
     cursorBlinking: Boolean = false,
     cursorPosition: String = "",
     gridCols: Int = TTY_DEFAULT_GRID_COLS,
@@ -1320,13 +1307,10 @@ fun TtySessionContent(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Raise the soft keyboard when the surface appears (matching the prior
-    // text-field behaviour), but never while an SSH auth dialog owns the IME.
-    LaunchedEffect(inputView.value, session) {
-        val authActive =
-            session is TtySessionUiState.HostKeyVerification ||
-                session is TtySessionUiState.SshAuthRequired
-        if (!authActive) inputView.value?.showKeyboard()
+    // Raise the soft keyboard when the surface appears, matching the prior
+    // text-field behaviour.
+    LaunchedEffect(inputView.value) {
+        inputView.value?.showKeyboard()
     }
 
     Column(
@@ -1341,28 +1325,6 @@ fun TtySessionContent(
             terminalTitle = terminalTitle,
             modifier = Modifier.fillMaxWidth(),
         )
-
-        // Show auth dialogs based on SSH state
-        when (session) {
-            is TtySessionUiState.HostKeyVerification -> {
-                TtyHostKeyDialog(
-                    host = session.host,
-                    port = session.port,
-                    algorithm = session.algorithm,
-                    fingerprint = session.fingerprintSha256,
-                    isChanged = session.isChanged,
-                    onAccept = { onAnswerHostKey(true) },
-                    onReject = { onAnswerHostKey(false) },
-                )
-            }
-            is TtySessionUiState.SshAuthRequired -> {
-                TtyPasswordDialog(
-                    onSubmit = { chars -> onSubmitPassword(chars) },
-                    onDismiss = { onDisconnect() },
-                )
-            }
-            else -> Unit
-        }
 
         // Paste safety dialog
         if (pendingPaste != null) {

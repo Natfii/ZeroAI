@@ -38,11 +38,9 @@ sealed interface TerminalMode {
 /**
  * Observable UI state of a TTY session lifecycle.
  *
- * Each variant represents a discrete phase in the connection sequence
- * from initial shell launch or SSH handshake through to an established
- * session or terminal error. The [TerminalViewModel] emits these states
- * so that composables can render the appropriate status bar, auth
- * dialogs, and error banners.
+ * The local shell session is opened immediately; [Error] carries a
+ * terminal failure. The [TerminalViewModel] emits these states so that
+ * composables can render the status bar and error banners.
  */
 sealed interface TtySessionUiState {
     /**
@@ -52,68 +50,6 @@ sealed interface TtySessionUiState {
      * against the device shell (typically `/system/bin/sh`).
      */
     data object LocalShell : TtySessionUiState
-
-    /**
-     * An SSH connection attempt is in progress.
-     *
-     * The UI should display a connecting indicator with the target
-     * host details while the transport handshake completes.
-     *
-     * @property host Remote hostname or IP address.
-     * @property port Remote SSH port number.
-     * @property user Username for the SSH session.
-     */
-    data class SshConnecting(
-        val host: String,
-        val port: Int,
-        val user: String,
-    ) : TtySessionUiState
-
-    /**
-     * The server presented a host key that requires user verification.
-     *
-     * The UI should display the key fingerprint and algorithm in a
-     * confirmation dialog before the connection can proceed.
-     *
-     * @property host Remote hostname or IP address.
-     * @property port Remote SSH port number.
-     * @property algorithm Key algorithm name (e.g. "ssh-ed25519").
-     * @property fingerprintSha256 SHA-256 fingerprint of the host key.
-     * @property isChanged Whether the fingerprint differs from a previously trusted key.
-     */
-    data class HostKeyVerification(
-        val host: String,
-        val port: Int,
-        val algorithm: String,
-        val fingerprintSha256: String,
-        val isChanged: Boolean,
-    ) : TtySessionUiState
-
-    /**
-     * The server requires authentication and advertised the given methods.
-     *
-     * The UI should present an auth dialog appropriate to the available
-     * methods (e.g. password entry, key selection).
-     *
-     * @property methods List of SSH authentication method names
-     *   (e.g. "publickey", "password", "keyboard-interactive").
-     */
-    data class SshAuthRequired(
-        val methods: List<String>,
-    ) : TtySessionUiState
-
-    /**
-     * An SSH session is fully established and interactive.
-     *
-     * The status bar displays the connected host label and the TTY
-     * surface accepts user input.
-     *
-     * @property hostLabel Human-readable label for the connected host
-     *   (e.g. "user@example.com:22").
-     */
-    data class SshConnected(
-        val hostLabel: String,
-    ) : TtySessionUiState
 
     /**
      * The TTY session encountered a terminal error.
