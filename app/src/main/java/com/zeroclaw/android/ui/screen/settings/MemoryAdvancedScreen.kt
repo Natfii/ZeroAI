@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -25,12 +24,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.zeroclaw.android.ui.component.SecretTextField
+import com.zeroclaw.android.ui.component.NumberSettingField
 import com.zeroclaw.android.ui.component.SectionHeader
 import com.zeroclaw.android.ui.component.SettingsToggleRow
 
@@ -38,7 +36,7 @@ import com.zeroclaw.android.ui.component.SettingsToggleRow
 private const val WEIGHT_STEPS = 10
 
 /**
- * Advanced memory configuration screen for embedding, hygiene, recall tuning, and Qdrant vector store.
+ * Advanced memory configuration screen for hygiene, embedding, and recall tuning.
  *
  * Maps to upstream `[memory]` TOML section extended fields: hygiene
  * (archive/purge thresholds), embedding provider/model, and
@@ -76,7 +74,7 @@ fun MemoryAdvancedScreen(
             contentDescription = "Enable memory hygiene",
         )
 
-        OutlinedTextField(
+        NumberSettingField(
             value = settings.memoryArchiveAfterDays.toString(),
             onValueChange = { v ->
                 v
@@ -84,14 +82,11 @@ fun MemoryAdvancedScreen(
                     ?.coerceAtLeast(0)
                     ?.let { settingsViewModel.updateMemoryArchiveAfterDays(it) }
             },
-            label = { Text("Archive after (days)") },
-            singleLine = true,
+            label = "Archive after (days)",
             enabled = settings.memoryHygieneEnabled,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
         )
 
-        OutlinedTextField(
+        NumberSettingField(
             value = settings.memoryPurgeAfterDays.toString(),
             onValueChange = { v ->
                 v
@@ -99,11 +94,8 @@ fun MemoryAdvancedScreen(
                     ?.coerceAtLeast(0)
                     ?.let { settingsViewModel.updateMemoryPurgeAfterDays(it) }
             },
-            label = { Text("Purge after (days)") },
-            singleLine = true,
+            label = "Purge after (days)",
             enabled = settings.memoryHygieneEnabled,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
         )
 
         SectionHeader(title = "Embedding")
@@ -156,32 +148,6 @@ fun MemoryAdvancedScreen(
                 Modifier
                     .fillMaxWidth()
                     .semantics { contentDescription = "Keyword weight slider" },
-        )
-
-        SectionHeader(title = "Qdrant Vector Store")
-
-        OutlinedTextField(
-            value = settings.memoryQdrantUrl,
-            onValueChange = { settingsViewModel.updateMemoryQdrantUrl(it) },
-            label = { Text("Qdrant URL") },
-            supportingText = { Text("e.g. http://localhost:6334") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        OutlinedTextField(
-            value = settings.memoryQdrantCollection,
-            onValueChange = { settingsViewModel.updateMemoryQdrantCollection(it) },
-            label = { Text("Collection name") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        SecretTextField(
-            value = settings.memoryQdrantApiKey,
-            onValueChange = { settingsViewModel.updateMemoryQdrantApiKey(it) },
-            label = "API key",
-            modifier = Modifier.fillMaxWidth(),
         )
 
         Spacer(modifier = Modifier.height(16.dp))

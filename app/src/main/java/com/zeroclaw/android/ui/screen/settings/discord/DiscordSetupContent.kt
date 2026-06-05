@@ -81,7 +81,6 @@ fun DiscordSetupContent(
     var isEditing by remember { mutableStateOf(false) }
     var tokenInput by remember { mutableStateOf("") }
 
-    var showDmLinkDialog by remember { mutableStateOf(false) }
     var showChannelPicker by remember { mutableStateOf(false) }
     var showBackfillPicker by remember { mutableStateOf(false) }
     var channelToDelete by remember {
@@ -147,14 +146,6 @@ fun DiscordSetupContent(
 
             Spacer(modifier = Modifier.height(SECTION_SPACING_DP.dp))
 
-            DmLinkSection(
-                dmUser = uiState.dmUser,
-                onLinkClick = { showDmLinkDialog = true },
-                onUnlinkClick = { viewModel.unlinkDmUser() },
-            )
-
-            Spacer(modifier = Modifier.height(SECTION_SPACING_DP.dp))
-
             Button(
                 onClick = {
                     val token = botToken
@@ -184,17 +175,6 @@ fun DiscordSetupContent(
                 onDeleteRequest = { channelToDelete = it },
             )
         }
-    }
-
-    if (showDmLinkDialog) {
-        DmLinkDialog(
-            currentUser = uiState.dmUser,
-            onLink = { userId ->
-                botToken?.let { viewModel.linkDmUser(it, userId) }
-                showDmLinkDialog = false
-            },
-            onDismiss = { showDmLinkDialog = false },
-        )
     }
 
     if (showGuildPicker) {

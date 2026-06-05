@@ -123,10 +123,6 @@ data object AutonomyRoute
 @Serializable
 data object MemoryAdvancedRoute
 
-/** Scheduler and heartbeat configuration screen. */
-@Serializable
-data object SchedulerRoute
-
 /** QR code scanner screen for gateway pairing. */
 @Serializable
 data object QrScannerRoute
@@ -147,10 +143,6 @@ data object MemoryBrowserRoute
 @Serializable
 data object OnboardingRoute
 
-/** Auth profiles management sub-screen. */
-@Serializable
-data object AuthProfilesRoute
-
 /** Discord archive channels management sub-screen. */
 @Serializable
 data object DiscordChannelsRoute
@@ -168,10 +160,6 @@ data class DiscordChannelDetailRoute(
 /** Provider connections management sub-screen (OAuth and CLI-backed sessions). */
 @Serializable
 data object ProviderConnectionsRoute
-
-/** Web dashboard sub-screen (WebView pointing at the gateway SPA). */
-@Serializable
-data object WebDashboardRoute
 
 /** Configuration screen for the Twitter/X browse tool. */
 @Serializable
@@ -204,3 +192,7 @@ data object SkillPermissionsRoute
 /** SSH key management sub-screen. */
 @Serializable
 data object SshKeysRoute
+
+/** Unified appearance sub-screen (app theme plus terminal/shell palette). */
+@Serializable
+data object AppearanceRoute

@@ -3,6 +3,7 @@
 package com.zeroclaw.android.ui.screen.settings.cron
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,28 +50,34 @@ import com.zeroclaw.android.model.CronJob
 import com.zeroclaw.android.ui.component.EmptyState
 import com.zeroclaw.android.ui.component.ErrorCard
 import com.zeroclaw.android.ui.component.LoadingIndicator
+import com.zeroclaw.android.ui.screen.settings.SettingsViewModel
 
 /** Maximum characters to display for a truncated command string. */
 private const val COMMAND_MAX_LENGTH = 80
 
 /**
- * Screen for managing scheduled cron jobs.
+ * Screen for managing scheduling: the cron job list plus the scheduler-loop
+ * and heartbeat configuration that governs it.
  *
- * Displays a list of all cron jobs registered with the daemon, with
- * controls to pause, resume, and delete jobs. A floating action button
- * opens the [AddCronJobDialog] for creating new jobs.
+ * A collapsible [SchedulerHeartbeatCard] sits above the job list (the scheduler
+ * toggle is the master switch for every job below). Displays all cron jobs
+ * registered with the daemon, with controls to pause, resume, and delete jobs.
+ * A floating action button opens the [AddCronJobDialog] for creating new jobs.
  *
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param cronJobsViewModel ViewModel providing cron job state and actions.
+ * @param settingsViewModel ViewModel providing scheduler and heartbeat settings.
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
 fun CronJobsScreen(
     edgeMargin: Dp,
     cronJobsViewModel: CronJobsViewModel = viewModel(),
+    settingsViewModel: SettingsViewModel = viewModel(),
     modifier: Modifier = Modifier,
 ) {
     val uiState by cronJobsViewModel.uiState.collectAsStateWithLifecycle()
+    val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val snackbarMessage by cronJobsViewModel.snackbarMessage.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -100,43 +107,79 @@ fun CronJobsScreen(
             }
         },
     ) { innerPadding ->
-        Column(
+        LazyColumn(
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
                     .padding(horizontal = edgeMargin),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Spacer(modifier = Modifier.height(8.dp))
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
+                SchedulerHeartbeatCard(
+                    schedulerEnabled = settings.schedulerEnabled,
+                    maxTasks = settings.schedulerMaxTasks,
+                    maxConcurrent = settings.schedulerMaxConcurrent,
+                    heartbeatEnabled = settings.heartbeatEnabled,
+                    heartbeatIntervalMinutes = settings.heartbeatIntervalMinutes,
+                    onSchedulerEnabledChange = settingsViewModel::updateSchedulerEnabled,
+                    onMaxTasksChange = settingsViewModel::updateSchedulerMaxTasks,
+                    onMaxConcurrentChange = settingsViewModel::updateSchedulerMaxConcurrent,
+                    onHeartbeatEnabledChange = settingsViewModel::updateHeartbeatEnabled,
+                    onHeartbeatIntervalChange = settingsViewModel::updateHeartbeatIntervalMinutes,
+                )
+            }
 
             when (val state = uiState) {
                 is CronJobsUiState.Loading -> {
-                    LoadingIndicator(
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    )
+                    item {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            LoadingIndicator()
+                        }
+                    }
                 }
                 is CronJobsUiState.Error -> {
-                    ErrorCard(
-                        message = state.detail,
-                        onRetry = { cronJobsViewModel.loadJobs() },
-                    )
-                }
-                is CronJobsUiState.Content -> {
-                    if (state.data.isEmpty()) {
-                        EmptyState(
-                            icon = Icons.Outlined.Schedule,
-                            message = "No scheduled jobs. Tap + to add a cron job or one-shot task.",
-                        )
-                    } else {
-                        CronJobsList(
-                            jobs = state.data,
-                            onPause = { cronJobsViewModel.pauseJob(it) },
-                            onResume = { cronJobsViewModel.resumeJob(it) },
-                            onRemove = { cronJobsViewModel.removeJob(it) },
+                    item {
+                        ErrorCard(
+                            message = state.detail,
+                            onRetry = { cronJobsViewModel.loadJobs() },
                         )
                     }
                 }
+                is CronJobsUiState.Content -> {
+                    if (state.data.isEmpty()) {
+                        item {
+                            EmptyState(
+                                icon = Icons.Outlined.Schedule,
+                                message =
+                                    "No scheduled jobs. Tap + to add a cron job or one-shot task.",
+                            )
+                        }
+                    } else {
+                        items(
+                            items = state.data,
+                            key = { it.id },
+                            contentType = { "cron_job" },
+                        ) { job ->
+                            val onPauseJob = remember(job.id) { { cronJobsViewModel.pauseJob(job.id) } }
+                            val onResumeJob = remember(job.id) { { cronJobsViewModel.resumeJob(job.id) } }
+                            val onRemoveJob = remember(job.id) { { cronJobsViewModel.removeJob(job.id) } }
+                            CronJobCard(
+                                job = job,
+                                onPause = onPauseJob,
+                                onResume = onResumeJob,
+                                onRemove = onRemoveJob,
+                            )
+                        }
+                    }
+                }
             }
+
+            item { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 
@@ -156,52 +199,6 @@ fun CronJobsScreen(
             },
             onDismiss = { showAddDialog = false },
         )
-    }
-}
-
-/**
- * Lazy column of cron job cards.
- *
- * @param jobs List of cron jobs to display.
- * @param onPause Callback to pause a job by its ID.
- * @param onResume Callback to resume a job by its ID.
- * @param onRemove Callback to remove a job by its ID.
- */
-@Composable
-private fun CronJobsList(
-    jobs: List<CronJob>,
-    onPause: (String) -> Unit,
-    onResume: (String) -> Unit,
-    onRemove: (String) -> Unit,
-) {
-    LazyColumn(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        items(
-            items = jobs,
-            key = { it.id },
-            contentType = { "cron_job" },
-        ) { job ->
-            val onPauseJob =
-                remember(job.id) {
-                    { onPause(job.id) }
-                }
-            val onResumeJob =
-                remember(job.id) {
-                    { onResume(job.id) }
-                }
-            val onRemoveJob =
-                remember(job.id) {
-                    { onRemove(job.id) }
-                }
-            CronJobCard(
-                job = job,
-                onPause = onPauseJob,
-                onResume = onResumeJob,
-                onRemove = onRemoveJob,
-            )
-        }
-        item { Spacer(modifier = Modifier.height(80.dp)) }
     }
 }
 

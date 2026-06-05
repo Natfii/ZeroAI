@@ -108,10 +108,6 @@ package com.zeroclaw.android.model
  * @property securityOtpGatedDomainCategories Comma-separated domain categories requiring OTP.
  * @property securityEstopEnabled Whether the emergency stop feature is active.
  * @property securityEstopRequireOtpToResume Whether OTP is required to resume after e-stop.
- * @property memoryQdrantUrl Qdrant vector database URL.
- * @property memoryQdrantCollection Qdrant collection name.
- * @property memoryQdrantApiKey Qdrant API key.
- * @property embeddingRoutesJson JSON array of embedding route objects.
  * @property skillsOpenSkillsEnabled Whether the open-skills community repository is enabled.
  * @property skillsOpenSkillsDir Custom directory for open-skills repository. Empty uses default.
  * @property skillsPromptInjectionMode Skill prompt injection mode: "compact" (default,
@@ -246,10 +242,6 @@ data class AppSettings(
     val securityOtpGatedDomainCategories: String = "",
     val securityEstopEnabled: Boolean = false,
     val securityEstopRequireOtpToResume: Boolean = true,
-    val memoryQdrantUrl: String = "",
-    val memoryQdrantCollection: String = DEFAULT_QDRANT_COLLECTION,
-    val memoryQdrantApiKey: String = "",
-    val embeddingRoutesJson: String = "[]",
     val skillsOpenSkillsEnabled: Boolean = false,
     val skillsOpenSkillsDir: String = "",
     val skillsPromptInjectionMode: String = "compact",
@@ -441,9 +433,6 @@ data class AppSettings(
         /** Default OTP-gated actions (comma-separated). */
         const val DEFAULT_OTP_GATED_ACTIONS =
             "shell,file_write,browser_open,browser,memory_forget"
-
-        /** Default Qdrant collection name. */
-        const val DEFAULT_QDRANT_COLLECTION = "zeroclaw_memories"
 
         /** Default proxy scope. */
         const val DEFAULT_PROXY_SCOPE = "zeroclaw"

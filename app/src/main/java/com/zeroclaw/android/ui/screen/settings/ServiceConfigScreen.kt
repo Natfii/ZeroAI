@@ -14,8 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -40,8 +41,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zeroclaw.android.data.MemoryBackendCatalog
 import com.zeroclaw.android.model.AppSettings
+import com.zeroclaw.android.ui.component.NumberSettingField
 import com.zeroclaw.android.ui.component.ReasoningEffortDropdown
 import com.zeroclaw.android.ui.component.SectionHeader
+import com.zeroclaw.android.ui.component.SettingsListItem
 import com.zeroclaw.android.ui.component.SettingsToggleRow
 
 /** Maximum slider value for temperature. */
@@ -67,12 +70,14 @@ private const val WARN_PERCENT_MAX = 100
  * inference, memory, reliability, and cost settings.
  *
  * @param edgeMargin Horizontal padding based on window width size class.
+ * @param onOpenMemoryAdvanced Callback invoked to open the advanced memory settings screen.
  * @param settingsViewModel The shared [SettingsViewModel].
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
 fun ServiceConfigScreen(
     edgeMargin: Dp,
+    onOpenMemoryAdvanced: () -> Unit,
     settingsViewModel: SettingsViewModel = viewModel(),
     modifier: Modifier = Modifier,
 ) {
@@ -104,22 +109,19 @@ fun ServiceConfigScreen(
         val portText = settings.port.toString()
         val portError = settings.port !in PORT_MIN..PORT_MAX
 
-        OutlinedTextField(
+        NumberSettingField(
             value = portText,
             onValueChange = { value ->
                 value.toIntOrNull()?.let { settingsViewModel.updatePort(it) }
             },
-            label = { Text("Port") },
-            singleLine = true,
+            label = "Port",
             isError = portError,
             supportingText =
                 if (portError) {
-                    { Text("Port must be between $PORT_MIN and $PORT_MAX") }
+                    "Port must be between $PORT_MIN and $PORT_MAX"
                 } else {
                     null
                 },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
         )
 
         SectionHeader(title = "Startup")
@@ -139,7 +141,11 @@ fun ServiceConfigScreen(
             selectedFallbackRouteId = selectedFallbackRouteId,
         )
         InferenceSection(settings = settings, viewModel = settingsViewModel)
-        MemorySection(settings = settings, viewModel = settingsViewModel)
+        MemorySection(
+            settings = settings,
+            viewModel = settingsViewModel,
+            onOpenAdvanced = onOpenMemoryAdvanced,
+        )
         ReliabilitySection(settings = settings, viewModel = settingsViewModel)
         CostLimitsSection(settings = settings, viewModel = settingsViewModel)
         ProxySection(settings = settings, viewModel = settingsViewModel)
@@ -341,12 +347,14 @@ private fun InferenceSection(
  *
  * @param settings Current application settings.
  * @param viewModel The [SettingsViewModel] for persisting changes.
+ * @param onOpenAdvanced Callback invoked to open the advanced memory settings screen.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MemorySection(
     settings: AppSettings,
     viewModel: SettingsViewModel,
+    onOpenAdvanced: () -> Unit,
 ) {
     SectionHeader(title = "Memory")
 
@@ -390,6 +398,14 @@ private fun MemorySection(
         onCheckedChange = { viewModel.updateMemoryAutoSave(it) },
         contentDescription = "Memory auto-save",
     )
+
+    SettingsListItem(
+        icon = Icons.Outlined.Memory,
+        title = "Advanced memory settings",
+        subtitle = "Hygiene and recall weights",
+        onClick = onOpenAdvanced,
+        modifier = Modifier.semantics { contentDescription = "Open advanced memory settings" },
+    )
 }
 
 /**
@@ -407,22 +423,19 @@ private fun ReliabilitySection(
 
     val retriesError = settings.providerRetries !in 0..RETRIES_MAX
 
-    OutlinedTextField(
+    NumberSettingField(
         value = settings.providerRetries.toString(),
         onValueChange = { value ->
             value.toIntOrNull()?.let { viewModel.updateProviderRetries(it) }
         },
-        label = { Text("Provider retries") },
-        singleLine = true,
+        label = "Provider retries",
         isError = retriesError,
         supportingText =
             if (retriesError) {
-                { Text("Must be between 0 and $RETRIES_MAX") }
+                "Must be between 0 and $RETRIES_MAX"
             } else {
                 null
             },
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
     )
 
     OutlinedTextField(
@@ -434,16 +447,13 @@ private fun ReliabilitySection(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    OutlinedTextField(
+    NumberSettingField(
         value = settings.reliabilityBackoffMs.toString(),
         onValueChange = { value ->
             value.toLongOrNull()?.let { viewModel.updateReliabilityBackoffMs(it) }
         },
-        label = { Text("Provider backoff (ms)") },
-        supportingText = { Text("Wait time before retrying a failed provider") },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
+        label = "Provider backoff (ms)",
+        supportingText = "Wait time before retrying a failed provider",
     )
 
     OutlinedTextField(
@@ -486,65 +496,59 @@ private fun CostLimitsSection(
 
     val dailyError = settings.costEnabled && settings.dailyLimitUsd < 0f
 
-    OutlinedTextField(
+    NumberSettingField(
         value = settings.dailyLimitUsd.toString(),
         onValueChange = { value ->
             value.toFloatOrNull()?.let { viewModel.updateDailyLimitUsd(it) }
         },
-        label = { Text("Daily limit (USD)") },
-        singleLine = true,
+        label = "Daily limit (USD)",
+        enabled = settings.costEnabled,
         isError = dailyError,
         supportingText =
             if (dailyError) {
-                { Text("Must be a positive amount") }
+                "Must be a positive amount"
             } else {
                 null
             },
-        enabled = settings.costEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = Modifier.fillMaxWidth(),
+        keyboardType = KeyboardType.Decimal,
     )
 
     val monthlyError = settings.costEnabled && settings.monthlyLimitUsd < 0f
 
-    OutlinedTextField(
+    NumberSettingField(
         value = settings.monthlyLimitUsd.toString(),
         onValueChange = { value ->
             value.toFloatOrNull()?.let { viewModel.updateMonthlyLimitUsd(it) }
         },
-        label = { Text("Monthly limit (USD)") },
-        singleLine = true,
+        label = "Monthly limit (USD)",
+        enabled = settings.costEnabled,
         isError = monthlyError,
         supportingText =
             if (monthlyError) {
-                { Text("Must be a positive amount") }
+                "Must be a positive amount"
             } else {
                 null
             },
-        enabled = settings.costEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-        modifier = Modifier.fillMaxWidth(),
+        keyboardType = KeyboardType.Decimal,
     )
 
     val warnError = settings.costEnabled && settings.costWarnAtPercent !in 0..WARN_PERCENT_MAX
 
-    OutlinedTextField(
+    NumberSettingField(
         value = settings.costWarnAtPercent.toString(),
         onValueChange = { value ->
             value.toIntOrNull()?.let { viewModel.updateCostWarnAtPercent(it) }
         },
-        label = { Text("Warn at (%)") },
-        singleLine = true,
+        label = "Warn at (%)",
+        enabled = settings.costEnabled,
         isError = warnError,
         supportingText =
             if (warnError) {
-                { Text("Must be between 0 and $WARN_PERCENT_MAX") }
+                "Must be between 0 and $WARN_PERCENT_MAX"
             } else {
                 null
             },
-        enabled = settings.costEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
+        suffix = "%",
     )
 }
 

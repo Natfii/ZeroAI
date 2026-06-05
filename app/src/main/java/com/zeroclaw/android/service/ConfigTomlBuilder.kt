@@ -373,11 +373,13 @@ object ConfigTomlBuilder {
     }
 
     /**
-     * Appends the `[autonomy]` TOML section.
+     * Appends the `[risk_profiles.default]` and `[runtime_profiles.default]`
+     * sections that the runtime tool gate reads to authorize tool execution.
      *
-     * Upstream fields: level, workspace_only, allowed_commands, forbidden_paths,
-     * max_actions_per_hour, max_cost_per_day_cents, require_approval_for_medium_risk,
-     * block_high_risk_commands (see `.claude/submodule-api-map.md` lines 258-266).
+     * `SecurityPolicy::for_agent` resolves authorization through these default
+     * profiles, and every agent points at them via [buildAgentsToml], so the
+     * user's autonomy level plus the command allow-list and rate/cost limits
+     * mirrored here are what actually gate tool execution.
      *
      * @param config Configuration to read autonomy values from.
      */
@@ -386,28 +388,30 @@ object ConfigTomlBuilder {
         require(level in GlobalTomlConfig.VALID_AUTONOMY_LEVELS) {
             "Invalid autonomy level '$level': must be one of ${GlobalTomlConfig.VALID_AUTONOMY_LEVELS}"
         }
-        appendLine()
-        appendLine("[autonomy]")
-        appendLine("level = ${tomlString(level)}")
-        appendLine("workspace_only = ${config.workspaceOnly}")
         val cmdList =
             if (config.allowedCommands.isEmpty()) {
                 "[]"
             } else {
                 "[${config.allowedCommands.joinToString(", ") { tomlString(it) }}]"
             }
-        appendLine("allowed_commands = $cmdList")
         val pathList =
             if (config.forbiddenPaths.isEmpty()) {
                 "[]"
             } else {
                 "[${config.forbiddenPaths.joinToString(", ") { tomlString(it) }}]"
             }
+        appendLine()
+        appendLine("[risk_profiles.default]")
+        appendLine("level = ${tomlString(level)}")
+        appendLine("workspace_only = ${config.workspaceOnly}")
+        appendLine("allowed_commands = $cmdList")
         appendLine("forbidden_paths = $pathList")
-        appendLine("max_actions_per_hour = ${config.maxActionsPerHour.coerceAtLeast(0)}")
-        appendLine("max_cost_per_day_cents = ${config.maxCostPerDayCents.coerceAtLeast(0)}")
         appendLine("require_approval_for_medium_risk = ${config.requireApprovalMediumRisk}")
         appendLine("block_high_risk_commands = ${config.blockHighRiskCommands}")
+        appendLine()
+        appendLine("[runtime_profiles.default]")
+        appendLine("max_actions_per_hour = ${config.maxActionsPerHour.coerceAtLeast(0)}")
+        appendLine("max_cost_per_day_cents = ${config.maxCostPerDayCents.coerceAtLeast(0)}")
     }
 
     /**
@@ -950,6 +954,11 @@ object ConfigTomlBuilder {
             for (entry in agents) {
                 appendLine()
                 appendLine("[agents.${tomlKey(entry.name)}]")
+                // Point every agent at the shared default risk/runtime profiles
+                // so SecurityPolicy::for_agent resolves and the autonomy gate is
+                // actually enforced (an empty risk_profile silently disables it).
+                appendLine("risk_profile = ${tomlString("default")}")
+                appendLine("runtime_profile = ${tomlString("default")}")
                 if (entry.modelProviderRef.isNotBlank()) {
                     appendLine("model_provider = ${tomlString(entry.modelProviderRef)}")
                 }

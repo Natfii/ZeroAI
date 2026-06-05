@@ -70,13 +70,12 @@ class DataStoreSettingsRepository(
         val pinHash: String,
         val webSearchBraveApiKey: String,
         val webSearchGoogleApiKey: String,
-        val memoryQdrantApiKey: String,
         val reliabilityApiKeysJson: String,
     )
 
     /**
-     * Reads all 8 secure values in one go and returns a snapshot. Eight
-     * AES decrypts back-to-back rather than 10 interleaved across worker
+     * Reads all secure values in one go and returns a snapshot, doing the
+     * AES decrypts back-to-back rather than interleaved across worker
      * threads racing on the Tink mutex.
      */
     private fun readSecureSnapshot(): SecureSnapshot =
@@ -86,7 +85,6 @@ class DataStoreSettingsRepository(
             pinHash = securePrefs.getString(SEC_PIN_HASH, "") ?: "",
             webSearchBraveApiKey = securePrefs.getString(SEC_WEB_SEARCH_BRAVE_API_KEY, "") ?: "",
             webSearchGoogleApiKey = securePrefs.getString(SEC_WEB_SEARCH_GOOGLE_API_KEY, "") ?: "",
-            memoryQdrantApiKey = securePrefs.getString(SEC_MEMORY_QDRANT_API_KEY, "") ?: "",
             reliabilityApiKeysJson =
                 securePrefs.getString(SEC_RELIABILITY_API_KEYS_JSON, "{}") ?: "{}",
         )
@@ -356,12 +354,6 @@ class DataStoreSettingsRepository(
             securityOtpGatedDomainCategories = prefs[KEY_SECURITY_OTP_GATED_DOMAIN_CATS] ?: "",
             securityEstopEnabled = prefs[KEY_SECURITY_ESTOP_ENABLED] ?: false,
             securityEstopRequireOtpToResume = prefs[KEY_SECURITY_ESTOP_REQUIRE_OTP] ?: true,
-            memoryQdrantUrl = prefs[KEY_MEMORY_QDRANT_URL] ?: "",
-            memoryQdrantCollection =
-                prefs[KEY_MEMORY_QDRANT_COLLECTION]
-                    ?: AppSettings.DEFAULT_QDRANT_COLLECTION,
-            memoryQdrantApiKey = secrets.memoryQdrantApiKey,
-            embeddingRoutesJson = prefs[KEY_EMBEDDING_ROUTES_JSON] ?: "[]",
             skillsOpenSkillsEnabled = prefs[KEY_SKILLS_OPEN_SKILLS_ENABLED] ?: false,
             skillsOpenSkillsDir = prefs[KEY_SKILLS_OPEN_SKILLS_DIR] ?: "",
             skillsPromptInjectionMode = prefs[KEY_SKILLS_PROMPT_INJECTION_MODE] ?: "compact",
@@ -540,12 +532,6 @@ class DataStoreSettingsRepository(
 
     override suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean) = edit { it[KEY_MULTIMODAL_ALLOW_REMOTE_FETCH] = enabled }
 
-    override suspend fun setMemoryQdrantUrl(url: String) = edit { it[KEY_MEMORY_QDRANT_URL] = url }
-
-    override suspend fun setMemoryQdrantCollection(collection: String) = edit { it[KEY_MEMORY_QDRANT_COLLECTION] = collection }
-
-    override suspend fun setMemoryQdrantApiKey(key: String) = editSecure(SEC_MEMORY_QDRANT_API_KEY, key)
-
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) = edit { it[KEY_SKILLS_OPEN_SKILLS_ENABLED] = enabled }
 
     override suspend fun setSkillsOpenSkillsDir(dir: String) = edit { it[KEY_SKILLS_OPEN_SKILLS_DIR] = dir }
@@ -635,7 +621,6 @@ class DataStoreSettingsRepository(
         const val SEC_COMPOSIO_API_KEY = "sec_composio_api_key"
         const val SEC_WEB_SEARCH_BRAVE_API_KEY = "sec_web_search_brave_api_key"
         const val SEC_WEB_SEARCH_GOOGLE_API_KEY = "sec_web_search_google_api_key"
-        const val SEC_MEMORY_QDRANT_API_KEY = "sec_memory_qdrant_api_key"
         const val SEC_PIN_HASH = "sec_pin_hash"
         const val SEC_RELIABILITY_API_KEYS_JSON = "sec_reliability_api_keys_json"
 
@@ -741,9 +726,6 @@ class DataStoreSettingsRepository(
         val KEY_SECURITY_OTP_GATED_DOMAIN_CATS = stringPreferencesKey("security_otp_gated_domain_categories")
         val KEY_SECURITY_ESTOP_ENABLED = booleanPreferencesKey("security_estop_enabled")
         val KEY_SECURITY_ESTOP_REQUIRE_OTP = booleanPreferencesKey("security_estop_require_otp_to_resume")
-        val KEY_MEMORY_QDRANT_URL = stringPreferencesKey("memory_qdrant_url")
-        val KEY_MEMORY_QDRANT_COLLECTION = stringPreferencesKey("memory_qdrant_collection")
-        val KEY_EMBEDDING_ROUTES_JSON = stringPreferencesKey("embedding_routes_json")
         val KEY_HTTP_REQUEST_MAX_RESPONSE_SIZE = longPreferencesKey("http_request_max_response_size")
         val KEY_HTTP_REQUEST_TIMEOUT_SECS = longPreferencesKey("http_request_timeout_secs")
         val KEY_SKILLS_OPEN_SKILLS_ENABLED = booleanPreferencesKey("skills_open_skills_enabled")

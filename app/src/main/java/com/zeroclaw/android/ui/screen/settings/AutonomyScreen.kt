@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -30,11 +29,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.ui.component.NumberSettingField
 import com.zeroclaw.android.ui.component.SectionHeader
 import com.zeroclaw.android.ui.component.SettingsToggleRow
 
@@ -148,27 +147,19 @@ fun AutonomyScreen(
 
         SectionHeader(title = "Limits")
 
-        OutlinedTextField(
+        NumberSettingField(
             value = settings.maxActionsPerHour.toString(),
             onValueChange = { v -> v.toIntOrNull()?.let { settingsViewModel.updateMaxActionsPerHour(it) } },
-            label = { Text("Max actions per hour") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
+            label = "Max actions per hour",
         )
 
-        OutlinedTextField(
+        NumberSettingField(
             value = settings.maxCostPerDayCents.toString(),
             onValueChange = { v ->
                 v.toIntOrNull()?.let { settingsViewModel.updateMaxCostPerDayCents(it) }
             },
-            label = { Text("Max cost per day (cents)") },
-            supportingText = {
-                Text("Hard limit \u2014 blocks actions when exceeded")
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
+            label = "Max cost per day (cents)",
+            supportingText = "Hard limit \u2014 blocks actions when exceeded",
         )
 
         SectionHeader(title = "Risk Management")

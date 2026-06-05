@@ -21,8 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.LinkOff
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Tag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -33,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -68,9 +65,6 @@ private const val ITEM_SPACING_DP = 8
 
 /** Section heading spacing in dp. */
 private const val SECTION_SPACING_DP = 24
-
-/** Inner card padding in dp. */
-private const val CARD_PADDING_DP = 16
 
 /** Maximum number of guild archive channels allowed. */
 private const val MAX_GUILD_CHANNELS = 3
@@ -123,111 +117,6 @@ fun DiscordChannelsScreen(
             flagRestartRequired = true,
             modifier = Modifier.padding(innerPadding),
         )
-    }
-}
-
-/**
- * DM user link section showing the linked user or a link button.
- *
- * @param dmUser Currently linked DM username, or null if not linked.
- * @param onLinkClick Callback when the link/change button is tapped.
- * @param onUnlinkClick Callback when the linked user is removed.
- */
-@Composable
-internal fun DmLinkSection(
-    dmUser: String?,
-    onLinkClick: () -> Unit,
-    onUnlinkClick: () -> Unit,
-) {
-    Text(
-        text = "DM User",
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-    )
-
-    Spacer(modifier = Modifier.height(ITEM_SPACING_DP.dp))
-
-    Card(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-    ) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(CARD_PADDING_DP.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                imageVector = if (dmUser != null) Icons.Filled.Person else Icons.Filled.PersonAdd,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(modifier = Modifier.width(ICON_TEXT_SPACING_DP.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                if (dmUser != null) {
-                    Text(
-                        text = dmUser,
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = "DM messages sync to private memory",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Text(
-                        text = "No DM user linked",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = "Link a user to archive DM conversations",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (dmUser != null) {
-                    TextButton(
-                        onClick = onUnlinkClick,
-                        modifier =
-                            Modifier
-                                .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
-                                .semantics {
-                                    contentDescription = "Unlink DM user"
-                                },
-                    ) {
-                        Text("Unlink")
-                    }
-                    Spacer(modifier = Modifier.width(ITEM_SPACING_DP.dp))
-                }
-                OutlinedButton(
-                    onClick = onLinkClick,
-                    modifier =
-                        Modifier
-                            .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
-                            .semantics {
-                                contentDescription =
-                                    if (dmUser != null) {
-                                        "Change linked DM user"
-                                    } else {
-                                        "Link DM user"
-                                    }
-                            },
-                ) {
-                    Text(if (dmUser != null) "Change" else "Link")
-                }
-            }
-        }
     }
 }
 
@@ -377,66 +266,6 @@ internal fun ChannelListItem(
             }
         }
     }
-}
-
-/**
- * Dialog for linking a DM user by entering their Discord user ID.
- *
- * @param currentUser Currently linked username, or null.
- * @param onLink Callback with the entered user ID when submitted.
- * @param onDismiss Callback when the dialog is dismissed.
- */
-@Composable
-internal fun DmLinkDialog(
-    currentUser: String?,
-    onLink: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var userId by remember { mutableStateOf("") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                if (currentUser != null) "Change DM User" else "Link DM User",
-            )
-        },
-        text = {
-            Column {
-                if (currentUser != null) {
-                    Text(
-                        text = "Currently linked: $currentUser",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(modifier = Modifier.height(ITEM_SPACING_DP.dp))
-                }
-                OutlinedTextField(
-                    value = userId,
-                    onValueChange = { userId = it.filter { ch -> ch.isDigit() } },
-                    label = { Text("Discord User ID") },
-                    supportingText = {
-                        Text("Right-click your profile in Discord and copy your user ID")
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onLink(userId) },
-                enabled = userId.isNotBlank(),
-            ) {
-                Text("Link")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
-        },
-    )
 }
 
 /**

@@ -9,7 +9,6 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
-import com.zeroclaw.android.data.DiscordDmLinkStore
 import com.zeroclaw.android.data.discord.PendingDiscordOpsStore
 import com.zeroclaw.android.data.local.discord.DiscordChannelConfigEntity
 import com.zeroclaw.android.data.validation.ChannelValidator
@@ -20,7 +19,6 @@ import com.zeroclaw.ffi.discordConfigureChannel
 import com.zeroclaw.ffi.discordFetchBotGuilds
 import com.zeroclaw.ffi.discordFetchGuildChannels
 import com.zeroclaw.ffi.discordRemoveChannel
-import com.zeroclaw.ffi.discordValidateUser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,13 +28,11 @@ import kotlinx.coroutines.launch
 /**
  * UI state for the Discord channels management screen.
  *
- * @property dmUser Linked DM user info (username displayed).
  * @property channels Currently configured archive channels.
  * @property isLoading Whether a background operation is in progress.
  * @property error Error message to display, or null.
  */
 data class DiscordChannelsUiState(
-    val dmUser: String? = null,
     val channels: List<DiscordChannelConfigEntity> = emptyList(),
     val isLoading: Boolean = false,
     val error: String? = null,
@@ -181,19 +177,11 @@ class DiscordChannelsViewModel(
     @Suppress("TooGenericExceptionCaught")
     private suspend fun loadChannelsInternal() {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-        val linkedDmUser =
-            try {
-                DiscordDmLinkStore.read(app)
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to read DM link", e)
-                null
-            }
         try {
             val db = app.openDiscordArchive()
             if (db == null) {
                 _uiState.value =
                     _uiState.value.copy(
-                        dmUser = linkedDmUser?.username,
                         channels = emptyList(),
                         isLoading = false,
                     )
@@ -202,7 +190,6 @@ class DiscordChannelsViewModel(
             val configs = db.messageDao().getAllChannelConfigs()
             _uiState.value =
                 _uiState.value.copy(
-                    dmUser = linkedDmUser?.username,
                     channels = configs,
                     isLoading = false,
                 )
@@ -210,7 +197,6 @@ class DiscordChannelsViewModel(
             Log.e(TAG, "Failed to load channel configs", e)
             _uiState.value =
                 _uiState.value.copy(
-                    dmUser = linkedDmUser?.username,
                     channels = emptyList(),
                     isLoading = false,
                     error = "Failed to load channels",
@@ -319,78 +305,6 @@ class DiscordChannelsViewModel(
                 )
             if (flagRestart) {
                 (app as? ZeroAIApplication)?.daemonBridge?.markRestartRequired()
-            }
-        }
-    }
-
-    /**
-     * Links a DM user by validating via FFI, then persisting the link.
-     *
-     * @param botToken Discord bot token for API calls.
-     * @param userId Discord user snowflake ID to link.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun linkDmUser(
-        botToken: String,
-        userId: String,
-    ) {
-        viewModelScope.launch(Dispatchers.IO) {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            try {
-                val validatedUser = discordValidateUser(botToken, userId.trim())
-                DiscordDmLinkStore.save(
-                    app = app,
-                    userId = validatedUser.id,
-                    username = validatedUser.username,
-                    avatarUrl = validatedUser.avatarUrl,
-                )
-                try {
-                    DiscordDmLinkStore.syncRuntime(app)
-                } catch (e: com.zeroclaw.ffi.FfiException.StateException) {
-                    Log.w(TAG, "Daemon not running, DM link will sync on next start")
-                }
-                _uiState.value =
-                    _uiState.value.copy(
-                        dmUser = validatedUser.username,
-                        isLoading = false,
-                    )
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to link DM user", e)
-                _uiState.value =
-                    _uiState.value.copy(
-                        isLoading = false,
-                        error = uiError("Unable to link DM user", e, "add a Discord bot first"),
-                    )
-            }
-        }
-    }
-
-    /**
-     * Removes the persisted Discord DM link and clears the native runtime state.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun unlinkDmUser() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-            try {
-                DiscordDmLinkStore.clear(app)
-                try {
-                    DiscordDmLinkStore.syncRuntime(app)
-                } catch (e: com.zeroclaw.ffi.FfiException.StateException) {
-                    Log.w(TAG, "Daemon not running, DM link will sync on next start")
-                }
-                _uiState.value =
-                    _uiState.value.copy(
-                        dmUser = null,
-                        isLoading = false,
-                    )
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to unlink DM user", e)
-                _uiState.value =
-                    _uiState.value.copy(
-                        isLoading = false,
-                        error = uiError("Unable to unlink DM user", e, "add a Discord bot first"),
-                    )
             }
         }
     }

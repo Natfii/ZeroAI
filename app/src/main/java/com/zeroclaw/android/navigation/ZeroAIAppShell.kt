@@ -255,6 +255,7 @@ private fun screenTitleFor(destination: NavDestination?): String? {
     if (destination == null) return null
     return when {
         destination.hasRoute(AboutRoute::class) -> "About"
+        destination.hasRoute(AppearanceRoute::class) -> "Appearance"
         destination.hasRoute(ProviderSlotDetailRoute::class) -> "Connection"
         destination.hasRoute(ApiKeyDetailRoute::class) -> "API Key"
         destination.hasRoute(ApiKeysRoute::class) -> "API Keys"
@@ -263,16 +264,17 @@ private fun screenTitleFor(destination: NavDestination?): String? {
         destination.hasRoute(ChannelDetailRoute::class) -> "Channel"
         destination.hasRoute(ConnectedChannelsRoute::class) -> "Channels"
         destination.hasRoute(CostDetailRoute::class) -> "Cost Tracking"
-        destination.hasRoute(CronJobsRoute::class) -> "Cron Jobs"
+        destination.hasRoute(CronJobsRoute::class) -> "Scheduled Tasks"
         destination.hasRoute(DoctorRoute::class) -> "Doctor"
         destination.hasRoute(LogViewerRoute::class) -> "Logs"
-        destination.hasRoute(MemoryAdvancedRoute::class) -> "Memory"
+        destination.hasRoute(MemoryAdvancedRoute::class) -> "Memory Advanced"
         destination.hasRoute(MemoryBrowserRoute::class) -> "Memory Browser"
         destination.hasRoute(PluginDetailRoute::class) -> "Plugin"
+        destination.hasRoute(ProviderConnectionsRoute::class) -> "Provider Logins"
         destination.hasRoute(QrScannerRoute::class) -> "QR Scanner"
-        destination.hasRoute(SchedulerRoute::class) -> "Scheduler"
         destination.hasRoute(ServiceConfigRoute::class) -> "Service Config"
-        destination.hasRoute(WebDashboardRoute::class) -> "Web Dashboard"
+        destination.hasRoute(SkillPermissionsRoute::class) -> "Skill Permissions"
+        destination.hasRoute(SshKeysRoute::class) -> "SSH Keys"
         else -> null
     }
 }

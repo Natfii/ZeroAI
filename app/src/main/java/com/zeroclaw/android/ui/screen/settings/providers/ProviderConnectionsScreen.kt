@@ -43,7 +43,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.zeroclaw.android.ui.component.AnthropicCodeSheet
 import com.zeroclaw.android.ui.component.ContentPane
 import com.zeroclaw.android.ui.component.ErrorCard
 import com.zeroclaw.android.ui.component.LoadingIndicator
@@ -60,9 +59,10 @@ private val HeaderBottomSpacing = 16.dp
 /**
  * Screen for managing OAuth and CLI-backed provider login sessions.
  *
- * Displays connection status for each OAuth-capable provider (Anthropic, OpenAI,
- * Google Account) with actions to sign in or disconnect. This surface is distinct
- * from the API Keys screen, which handles only manually entered provider API keys.
+ * Displays connection status for each OAuth-capable provider surfaced here
+ * (currently OpenAI/ChatGPT) with actions to sign in or disconnect. This surface
+ * is distinct from the API Keys screen, which handles only manually entered
+ * provider API keys.
  *
  * @param edgeMargin Horizontal padding based on window width size class.
  * @param providerConnectionsViewModel ViewModel providing connection state and actions.
@@ -80,21 +80,6 @@ fun ProviderConnectionsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var disconnectTarget by remember { mutableStateOf<ProviderConnectionItem?>(null) }
-
-    val anthropicSheetVisible by
-        providerConnectionsViewModel.anthropicSheetVisible.collectAsStateWithLifecycle()
-    val anthropicSheetLoading by
-        providerConnectionsViewModel.anthropicSheetLoading.collectAsStateWithLifecycle()
-    val anthropicSheetError by
-        providerConnectionsViewModel.anthropicSheetError.collectAsStateWithLifecycle()
-
-    AnthropicCodeSheet(
-        visible = anthropicSheetVisible,
-        onSubmit = providerConnectionsViewModel::submitAnthropicCode,
-        onDismiss = providerConnectionsViewModel::dismissAnthropicSheet,
-        isLoading = anthropicSheetLoading,
-        errorMessage = anthropicSheetError,
-    )
 
     LaunchedEffect(snackbarMessage) {
         snackbarMessage?.let { message ->

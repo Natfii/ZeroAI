@@ -154,12 +154,6 @@ internal class TestSettingsRepository : SettingsRepository {
 
     override suspend fun setTwitterBrowseTimeoutSecs(secs: Long) = _settings.update { it.copy(twitterBrowseTimeoutSecs = secs) }
 
-    override suspend fun setMemoryQdrantUrl(url: String) = _settings.update { it.copy(memoryQdrantUrl = url) }
-
-    override suspend fun setMemoryQdrantCollection(collection: String) = _settings.update { it.copy(memoryQdrantCollection = collection) }
-
-    override suspend fun setMemoryQdrantApiKey(key: String) = _settings.update { it.copy(memoryQdrantApiKey = key) }
-
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) = _settings.update { it.copy(skillsOpenSkillsEnabled = enabled) }
 
     override suspend fun setSkillsOpenSkillsDir(dir: String) = _settings.update { it.copy(skillsOpenSkillsDir = dir) }

@@ -546,27 +546,6 @@ interface SettingsRepository {
     suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean)
 
     /**
-     * Updates the Qdrant vector database URL.
-     *
-     * @param url Qdrant endpoint URL.
-     */
-    suspend fun setMemoryQdrantUrl(url: String)
-
-    /**
-     * Updates the Qdrant collection name.
-     *
-     * @param collection Collection identifier.
-     */
-    suspend fun setMemoryQdrantCollection(collection: String)
-
-    /**
-     * Updates the Qdrant API key.
-     *
-     * @param key API key string.
-     */
-    suspend fun setMemoryQdrantApiKey(key: String)
-
-    /**
      * Toggles the open-skills community repository.
      *
      * @param enabled Whether open-skills is enabled.

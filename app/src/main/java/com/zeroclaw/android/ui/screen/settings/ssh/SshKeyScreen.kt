@@ -30,7 +30,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -43,7 +42,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -54,7 +52,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -118,14 +115,17 @@ private const val FAB_SPACING_DP = 12
  * sheet, and delete keys. Includes empty state with guided actions
  * and accessibility support for all interactive elements.
  *
- * @param onBack Callback invoked when the back navigation button is pressed.
+ * The back button and title are supplied by the app shell's top bar, so
+ * this screen does not host its own top app bar.
+ *
  * @param viewModel ViewModel providing SSH key state and actions.
+ * @param modifier Modifier applied to the screen scaffold.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SshKeyScreen(
-    onBack: () -> Unit,
     viewModel: SshKeyViewModel = viewModel(),
+    modifier: Modifier = Modifier,
 ) {
     val keys by viewModel.keys.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
@@ -159,25 +159,7 @@ fun SshKeyScreen(
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("SSH Keys") },
-                navigationIcon = {
-                    IconButton(
-                        onClick = onBack,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription = "Navigate back"
-                            },
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = null,
-                        )
-                    }
-                },
-            )
-        },
+        modifier = modifier,
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         floatingActionButton = {
             if (keys.isNotEmpty()) {

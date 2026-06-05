@@ -393,12 +393,6 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setMultimodalAllowRemoteFetch(enabled: Boolean) { /* no-op */ }
 
-    override suspend fun setMemoryQdrantUrl(url: String) { /* no-op */ }
-
-    override suspend fun setMemoryQdrantCollection(collection: String) { /* no-op */ }
-
-    override suspend fun setMemoryQdrantApiKey(key: String) { /* no-op */ }
-
     override suspend fun setSkillsOpenSkillsEnabled(enabled: Boolean) { /* no-op */ }
 
     override suspend fun setSkillsOpenSkillsDir(dir: String) { /* no-op */ }

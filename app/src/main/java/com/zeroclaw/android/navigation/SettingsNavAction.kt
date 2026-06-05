@@ -9,9 +9,9 @@ package com.zeroclaw.android.navigation
 /**
  * Sealed interface representing navigation actions from the settings root screen.
  *
- * Consolidates individual navigation callbacks into a single typed action,
- * reducing the [SettingsScreen][com.zeroclaw.android.ui.screen.settings.SettingsScreen]
- * parameter count from 22 lambdas to one.
+ * Consolidates the per-setting navigation callbacks into a single typed
+ * [SettingsScreen][com.zeroclaw.android.ui.screen.settings.SettingsScreen]
+ * `onNavigate` action.
  */
 sealed interface SettingsNavAction {
     /** Navigate to the service configuration screen. */
@@ -41,35 +41,27 @@ sealed interface SettingsNavAction {
     /** Navigate to the memory advanced settings screen. */
     data object MemoryAdvanced : SettingsNavAction
 
-    /** Navigate to the scheduler and heartbeat screen. */
-    data object Scheduler : SettingsNavAction
-
-    /** Navigate to the scheduled tasks (cron jobs) screen. */
+    /** Navigate to the scheduled tasks (cron jobs) screen, including scheduler and heartbeat config. */
     data object CronJobs : SettingsNavAction
 
     /** Navigate to the memory browser screen. */
     data object MemoryBrowser : SettingsNavAction
 
-    /** Navigate to the auth profiles management screen. */
-    data object AuthProfiles : SettingsNavAction
-
-    /** Navigate to the Discord archive channels management screen. */
-    data object DiscordChannels : SettingsNavAction
-
     /**
      * Navigate to the provider login screen.
      *
      * Displays OAuth-backed provider sessions (Claude Code, ChatGPT)
-     * separately from manual API keys and chat apps.
+     * separately from manual API keys and chat apps. Also surfaces the raw
+     * stored auth profiles, so the standalone advanced view is no longer needed.
      */
     data object ProviderConnections : SettingsNavAction
-
-    /** Opens the web dashboard (full engine config in a WebView). */
-    data object WebDashboard : SettingsNavAction
 
     /** Navigate to the skill permissions (capability grants) screen. */
     data object SkillPermissions : SettingsNavAction
 
     /** Navigate to the SSH key management screen. */
     data object SshKeys : SettingsNavAction
+
+    /** Navigate to the unified appearance screen (app theme + terminal/shell palette). */
+    data object Appearance : SettingsNavAction
 }

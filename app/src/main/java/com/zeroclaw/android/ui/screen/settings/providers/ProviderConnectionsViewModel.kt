@@ -80,8 +80,10 @@ sealed interface ProviderConnectionsUiState {
 /**
  * ViewModel for the provider logins screen.
  *
- * Manages the list of OAuth-capable provider sessions (Anthropic, OpenAI, and
- * the shared Google account connection). Reads existing profiles from the
+ * Manages the list of OAuth-capable provider sessions surfaced here, which is
+ * currently OpenAI/ChatGPT only (the provider list is driven by the
+ * coordinator's allow-list). Anthropic OAuth is offered from the per-agent
+ * provider-slot surface, not this screen. Reads existing profiles from the
  * Rust-owned encrypted store without requiring the daemon to be running.
  *
  * @param application Application context used by [AndroidViewModel].
@@ -109,24 +111,6 @@ class ProviderConnectionsViewModel(
     @Volatile
     private var cachedSnapshots: List<ProviderConnectionSnapshot> = emptyList()
     private val oauthInProgressIds = MutableStateFlow<Set<String>>(emptySet())
-
-    private val _anthropicSheetVisible = MutableStateFlow(false)
-
-    /** Whether the Anthropic code paste-back sheet is visible. */
-    val anthropicSheetVisible: StateFlow<Boolean> = _anthropicSheetVisible.asStateFlow()
-
-    private val _anthropicSheetLoading = MutableStateFlow(false)
-
-    /** Whether the Anthropic code exchange is in progress. */
-    val anthropicSheetLoading: StateFlow<Boolean> = _anthropicSheetLoading.asStateFlow()
-
-    private val _anthropicSheetError = MutableStateFlow<String?>(null)
-
-    /** Error message to display in the Anthropic paste-back sheet. */
-    val anthropicSheetError: StateFlow<String?> = _anthropicSheetError.asStateFlow()
-
-    /** Stored PKCE state for the in-flight Anthropic OAuth flow. */
-    private var anthropicPkce: com.zeroclaw.android.data.oauth.PkceState? = null
 
     init {
         loadConnections()
@@ -194,12 +178,6 @@ class ProviderConnectionsViewModel(
         context: Context,
         providerId: String,
     ) {
-        if (providerId == ANTHROPIC_ID) {
-            setOAuthInProgress(providerId, true)
-            anthropicPkce = coordinator.startAnthropicFlow(context)
-            _anthropicSheetVisible.value = true
-            return
-        }
         setOAuthInProgress(providerId, true)
         try {
             coordinator.connectProvider(context, providerId)
@@ -210,45 +188,6 @@ class ProviderConnectionsViewModel(
         } finally {
             setOAuthInProgress(providerId, false)
         }
-    }
-
-    /**
-     * Submits a pasted Anthropic authorization code for token exchange.
-     *
-     * @param code Cleaned authorization code from the paste-back sheet.
-     */
-    @Suppress("TooGenericExceptionCaught")
-    fun submitAnthropicCode(code: String) {
-        val pkce = anthropicPkce ?: return
-        _anthropicSheetLoading.value = true
-        _anthropicSheetError.value = null
-        viewModelScope.launch {
-            try {
-                coordinator.completeAnthropicFlow(code, pkce)
-                _snackbarMessage.value = "Claude Code connected"
-                dismissAnthropicSheet()
-                loadConnectionsInternal()
-            } catch (e: com.zeroclaw.android.data.oauth.OAuthExchangeException) {
-                _anthropicSheetError.value =
-                    "Invalid or expired code \u2014 please try again (HTTP ${e.httpStatusCode})"
-            } catch (e: Exception) {
-                _anthropicSheetError.value =
-                    "Connection failed \u2014 ${e.message ?: "unknown error"}"
-            } finally {
-                _anthropicSheetLoading.value = false
-            }
-        }
-    }
-
-    /**
-     * Dismisses the Anthropic paste-back sheet and clears related state.
-     */
-    fun dismissAnthropicSheet() {
-        _anthropicSheetVisible.value = false
-        _anthropicSheetLoading.value = false
-        _anthropicSheetError.value = null
-        anthropicPkce = null
-        setOAuthInProgress(ANTHROPIC_ID, false)
     }
 
     private fun setOAuthInProgress(
@@ -290,8 +229,6 @@ class ProviderConnectionsViewModel(
 
     /** Shared utilities for mapping FFI types to presentation models. */
     companion object {
-        private const val ANTHROPIC_ID = "anthropic"
-
         private fun FfiAuthProfile.toConnectedInfo(): ConnectedProfileInfo =
             ConnectedProfileInfo(
                 kind =

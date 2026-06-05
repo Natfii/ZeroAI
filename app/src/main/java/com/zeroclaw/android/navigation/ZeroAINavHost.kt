@@ -45,19 +45,17 @@ import com.zeroclaw.android.ui.screen.plugins.PluginsScreen
 import com.zeroclaw.android.ui.screen.plugins.PluginsViewModel
 import com.zeroclaw.android.ui.screen.plugins.SkillBuilderScreen
 import com.zeroclaw.android.ui.screen.settings.AboutScreen
+import com.zeroclaw.android.ui.screen.settings.AppearanceScreen
 import com.zeroclaw.android.ui.screen.settings.AutonomyScreen
 import com.zeroclaw.android.ui.screen.settings.BatterySettingsScreen
 import com.zeroclaw.android.ui.screen.settings.CostDetailScreen
 import com.zeroclaw.android.ui.screen.settings.MemoryAdvancedScreen
-import com.zeroclaw.android.ui.screen.settings.SchedulerScreen
 import com.zeroclaw.android.ui.screen.settings.ServiceConfigScreen
 import com.zeroclaw.android.ui.screen.settings.SettingsScreen
 import com.zeroclaw.android.ui.screen.settings.SettingsViewModel
-import com.zeroclaw.android.ui.screen.settings.WebDashboardScreen
 import com.zeroclaw.android.ui.screen.settings.apikeys.ApiKeyDetailScreen
 import com.zeroclaw.android.ui.screen.settings.apikeys.ApiKeysScreen
 import com.zeroclaw.android.ui.screen.settings.apikeys.ApiKeysViewModel
-import com.zeroclaw.android.ui.screen.settings.apikeys.AuthProfilesScreen
 import com.zeroclaw.android.ui.screen.settings.channels.ChannelDetailScreen
 import com.zeroclaw.android.ui.screen.settings.channels.ConnectedChannelsScreen
 import com.zeroclaw.android.ui.screen.settings.cron.CronJobsScreen
@@ -269,24 +267,18 @@ fun ZeroAINavHost(
                             navController.navigate(AutonomyRoute)
                         SettingsNavAction.MemoryAdvanced ->
                             navController.navigate(MemoryAdvancedRoute)
-                        SettingsNavAction.Scheduler ->
-                            navController.navigate(SchedulerRoute)
                         SettingsNavAction.CronJobs ->
                             navController.navigate(CronJobsRoute)
                         SettingsNavAction.MemoryBrowser ->
                             navController.navigate(MemoryBrowserRoute)
-                        SettingsNavAction.AuthProfiles ->
-                            navController.navigate(AuthProfilesRoute)
-                        SettingsNavAction.DiscordChannels ->
-                            navController.navigate(DiscordChannelsRoute)
                         SettingsNavAction.ProviderConnections ->
                             navController.navigate(ProviderConnectionsRoute)
-                        SettingsNavAction.WebDashboard ->
-                            navController.navigate(WebDashboardRoute)
                         SettingsNavAction.SkillPermissions ->
                             navController.navigate(SkillPermissionsRoute)
                         SettingsNavAction.SshKeys ->
                             navController.navigate(SshKeysRoute)
+                        SettingsNavAction.Appearance ->
+                            navController.navigate(AppearanceRoute)
                     }
                 },
                 onRerunWizard = {
@@ -301,7 +293,10 @@ fun ZeroAINavHost(
         }
 
         composable<ServiceConfigRoute> {
-            ServiceConfigScreen(edgeMargin = edgeMargin)
+            ServiceConfigScreen(
+                edgeMargin = edgeMargin,
+                onOpenMemoryAdvanced = { navController.navigate(MemoryAdvancedRoute) },
+            )
         }
 
         composable<BatterySettingsRoute> {
@@ -503,10 +498,6 @@ fun ZeroAINavHost(
             MemoryAdvancedScreen(edgeMargin = edgeMargin)
         }
 
-        composable<SchedulerRoute> {
-            SchedulerScreen(edgeMargin = edgeMargin)
-        }
-
         composable<QrScannerRoute> {
             QrScannerScreen(
                 onTokenScanned = { token ->
@@ -549,16 +540,12 @@ fun ZeroAINavHost(
             CronJobsScreen(edgeMargin = edgeMargin)
         }
 
-        composable<AuthProfilesRoute> {
-            AuthProfilesScreen(edgeMargin = edgeMargin)
-        }
-
         composable<ProviderConnectionsRoute> {
             ProviderConnectionsScreen(edgeMargin = edgeMargin)
         }
 
-        composable<WebDashboardRoute> {
-            WebDashboardScreen()
+        composable<AppearanceRoute> {
+            AppearanceScreen(edgeMargin = edgeMargin)
         }
 
         composable<DiscordChannelsRoute> {
@@ -596,9 +583,7 @@ fun ZeroAINavHost(
         }
 
         composable<SshKeysRoute> {
-            SshKeyScreen(
-                onBack = { navController.popBackStack() },
-            )
+            SshKeyScreen()
         }
     }
 }
