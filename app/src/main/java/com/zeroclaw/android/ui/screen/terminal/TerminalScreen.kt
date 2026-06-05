@@ -283,7 +283,6 @@ fun TerminalScreen(
                 isShellMode = terminalMode is TerminalMode.Tty,
                 onSelectRepl = terminalViewModel::switchToRepl,
                 onSelectShell = terminalViewModel::switchToTty,
-                onOpenTheme = terminalViewModel::openThemePicker,
                 edgeMargin = edgeMargin,
                 modifier = Modifier.zIndex(1f),
             )
