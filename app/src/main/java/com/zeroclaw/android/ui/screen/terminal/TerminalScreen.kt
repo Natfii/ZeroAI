@@ -104,6 +104,7 @@ import com.zeroclaw.android.ui.component.MiniZeroMascotState
 import com.zeroclaw.android.ui.component.VoiceFab
 import com.zeroclaw.android.ui.screen.terminal.theme.LocalTerminalTheme
 import com.zeroclaw.android.ui.screen.terminal.theme.TerminalThemePicker
+import com.zeroclaw.android.ui.screen.terminal.theme.TerminalThemeRepository
 import com.zeroclaw.android.ui.theme.TerminalTypography
 import com.zeroclaw.android.util.LocalPowerSaveMode
 import com.zeroclaw.ffi.TtyRenderFrame
@@ -267,6 +268,28 @@ fun TerminalScreen(
     val ttyCtrlActive by terminalViewModel.ttyCtrlActive.collectAsStateWithLifecycle()
     val ttyAltActive by terminalViewModel.ttyAltActive.collectAsStateWithLifecycle()
     val currentTheme by terminalViewModel.currentTheme.collectAsStateWithLifecycle()
+    // Repaint the active REPL when the terminal palette changes in
+    // Settings > Appearance. The ViewModel's currentTheme only refreshes on
+    // one-shot reads (init / TTY start), so a live Settings change leaves it
+    // stale (the Shell already updates via ttySetPalette). Observe the
+    // settings DataStore directly here — it's a process singleton, so the
+    // AppearanceViewModel's write is seen despite a separate repository
+    // instance. (The tidier fix belongs in TerminalViewModel; deferred while
+    // that file is mid-edit.)
+    val terminalThemeRepository = remember(context) { TerminalThemeRepository(context) }
+    val liveThemeName by terminalThemeRepository.selectedThemeName
+        .collectAsStateWithLifecycle(
+            initialValue = currentTheme?.name ?: TerminalThemeRepository.DEFAULT_THEME_NAME,
+        )
+    val resolvedTheme = currentTheme
+    val liveTerminalTheme =
+        remember(liveThemeName, resolvedTheme) {
+            when {
+                resolvedTheme == null -> null
+                resolvedTheme.name == liveThemeName -> resolvedTheme
+                else -> terminalThemeRepository.themeByName(liveThemeName)
+            }
+        }
     val showThemePicker by terminalViewModel.showThemePicker.collectAsStateWithLifecycle()
     val ttyCursorBlinking by terminalViewModel.ttyCursorBlinking.collectAsStateWithLifecycle()
     val ttyCursorPosition by terminalViewModel.ttyCursorPosition.collectAsStateWithLifecycle()
@@ -277,7 +300,7 @@ fun TerminalScreen(
     val ttyTitle by terminalViewModel.terminalTitle.collectAsStateWithLifecycle()
     val isPowerSave = LocalPowerSaveMode.current
 
-    CompositionLocalProvider(LocalTerminalTheme provides currentTheme) {
+    CompositionLocalProvider(LocalTerminalTheme provides liveTerminalTheme) {
         Column(modifier = modifier.fillMaxSize()) {
             TerminalModeToggleBar(
                 isShellMode = terminalMode is TerminalMode.Tty,
