@@ -420,6 +420,46 @@ pub(crate) fn effective_model_provider_type(config: &Config) -> Result<String, F
         })
 }
 
+/// Builds the active chat model provider for `provider_name`'s default
+/// alias from `config`, threading the alias entry's `api_key` plus the
+/// runtime options (URI, `zeroclaw_dir`, `secrets_encrypt`, reasoning) so
+/// auth'd / self-hosted endpoints — notably the on-device LiteRT loopback —
+/// receive their `Authorization: Bearer`.
+///
+/// Single source of truth for FFI provider construction. Passing `None`
+/// for the key (the old per-call-site pattern) silently dropped the
+/// credential and 401'd auth'd endpoints; routing the agent loop,
+/// compaction, and streaming paths through this one function makes that
+/// class of bug structurally impossible to reintroduce per call site.
+pub(crate) fn build_active_provider(
+    config: &Config,
+    provider_name: &str,
+) -> anyhow::Result<Box<dyn zeroclaw::providers::ModelProvider>> {
+    let chat_alias = config
+        .first_model_provider_alias()
+        .and_then(|s| s.as_str().split_once('.').map(|(_, a)| a.to_string()))
+        .unwrap_or_else(|| "default".to_string());
+    let mut options =
+        zeroclaw::providers::provider_runtime_options_for_alias(config, provider_name, &chat_alias);
+    options.zeroclaw_dir = config.config_path.parent().map(PathBuf::from);
+    options.secrets_encrypt = config.secrets.encrypt;
+    options.reasoning_enabled = config.runtime.reasoning_enabled;
+    options.reasoning_effort = config.runtime.reasoning_effort.clone();
+    let api_key = config
+        .providers
+        .models
+        .find(provider_name, &chat_alias)
+        .and_then(|entry| entry.api_key.as_deref());
+    zeroclaw::providers::create_resilient_model_provider_for_alias(
+        config,
+        provider_name,
+        &chat_alias,
+        api_key,
+        None,
+        &config.reliability,
+        &options,
+    )
+}
 
 /// Returns an owned clone of the running daemon's [`Config`].
 ///

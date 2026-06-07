@@ -137,14 +137,11 @@ pub(crate) fn send_message_streaming_inner(
 
         let _ = &message; // router classification dropped during port
 
-        let prov: anyhow::Result<Box<dyn zeroclaw::providers::ModelProvider>> =
-            zeroclaw::providers::create_resilient_model_provider_with_options(
-                &provider_name,
-                None,
-                None,
-                &config.reliability,
-                &zeroclaw::providers::ModelProviderRuntimeOptions::default(),
-            );
+        // Build via the shared helper so the streaming path threads the
+        // alias's api_key + URI like the agent loop. Without it, on-device /
+        // auth'd endpoints 401 (the streaming straggler of the same
+        // None-credential bug fixed on the session path).
+        let prov = crate::runtime::build_active_provider(config, &provider_name);
 
         Ok((model, temperature, prov))
     })?;

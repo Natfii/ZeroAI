@@ -826,39 +826,16 @@ pub(crate) fn session_send_inner(
         // routing classifier is bypassed (no fallback chain) until
         // upstream restores a router config.
         //
-        // Resolve the alias's runtime options from the active config so
-        // self-hosted families (custom/lmstudio/llamacpp) get the URI
-        // override stamped onto `provider_api_url`. Without this the
-        // factory falls back to family defaults (e.g. localhost) or
-        // bails out with "Custom model_provider requires `uri`".
-        let chat_alias = config
-            .first_model_provider_alias()
-            .and_then(|s| s.as_str().split_once('.').map(|(_, a)| a.to_string()))
-            .unwrap_or_else(|| "default".to_string());
-        let mut provider_runtime_options =
-            zeroclaw::providers::provider_runtime_options_for_alias(
-                &config,
-                &provider_name,
-                &chat_alias,
-            );
-        provider_runtime_options.zeroclaw_dir =
-            config.config_path.parent().map(std::path::PathBuf::from);
-        provider_runtime_options.secrets_encrypt = config.secrets.encrypt;
-        provider_runtime_options.reasoning_enabled = config.runtime.reasoning_enabled;
-        provider_runtime_options.reasoning_effort = config.runtime.reasoning_effort.clone();
-
         let _ = &raw_message_text; // router classification dropped during port
 
-        let provider = zeroclaw::providers::create_resilient_model_provider_for_alias(
-            &config,
-            &provider_name,
-            &chat_alias,
-            None,
-            None,
-            &config.reliability,
-            &provider_runtime_options,
-        )
-        .map_err(|e| AgentLoopOutcome::Error(format!("failed to create provider: {e}")))?;
+        // Build the chat provider via the shared helper, which threads the
+        // alias's api_key + runtime options (URI, reasoning, secrets) so
+        // auth'd self-hosted endpoints get their `Authorization: Bearer`.
+        // See crate::runtime::build_active_provider — one path shared by the
+        // agent loop, compaction, and streaming so the None-credential 401
+        // class can't recur per call site.
+        let provider = crate::runtime::build_active_provider(&config, &provider_name)
+            .map_err(|e| AgentLoopOutcome::Error(format!("failed to create provider: {e}")))?;
 
         // Build tool specs from the real tools registry plus static
         // descriptions for tools the LLM should know about.
@@ -893,9 +870,10 @@ pub(crate) fn session_send_inner(
             tracing::info!(len = full_response.len(), "session_send: success");
             // Run compaction on the history (best-effort).
             if let Ok(true) = handle.block_on(async {
-                let provider =
-                    zeroclaw::providers::create_model_provider(&provider_name, None)
-                        .ok();
+                // Compaction reuses the same shared provider builder so it
+                // reaches the configured endpoint WITH its api_key. Best-
+                // effort: .ok() skips compaction if the build fails.
+                let provider = crate::runtime::build_active_provider(&config, &provider_name).ok();
                 if let Some(provider) = provider {
                     auto_compact_history(
                         &mut history,
