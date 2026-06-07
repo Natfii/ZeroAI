@@ -74,13 +74,21 @@ class LiteRtGemmaInference {
      * engine first, so callers can switch variants in place.
      *
      * @param modelPath Absolute path to the downloaded `.litertlm` file.
-     * @param backend Backend to attempt. Defaults to GPU.
+     * @param backend Backend to attempt. Defaults to and, in
+     *   production, is only ever GPU. CPU inference is too slow for
+     *   interactive agent use on the flagship phones we target, so
+     *   there is deliberately no GPU-to-CPU fallback: a GPU init
+     *   failure surfaces as a load failure rather than silently
+     *   degrading to an unusably-slow CPU path. The parameter stays
+     *   configurable purely so tests can exercise alternatives.
      * @param cacheDir Optional writable directory for GPU shader /
      *   kernel cache. Strongly recommended for the GPU backend: the
      *   native code uses this to persist OpenCL kernel binaries and
      *   without it the cold-compile path can fail on some devices.
-     * @param maxNumTokens Maximum token budget for a single inference
-     *   pass. Bounds engine working memory and per-request runtime.
+     * @param maxNumTokens Token budget for a single inference pass;
+     *   bounds engine working memory and per-request runtime. Required —
+     *   callers pass the per-variant `contextTokens` (the single source of
+     *   truth for the context cap), so there is no misleading default.
      * @return [Result.success] when the engine is initialised, or
      *   [Result.failure] carrying the underlying exception.
      */
@@ -89,7 +97,7 @@ class LiteRtGemmaInference {
         modelPath: String,
         backend: Backend = Backend.GPU(),
         cacheDir: String? = null,
-        maxNumTokens: Int = DEFAULT_MAX_TOKENS,
+        maxNumTokens: Int,
     ): Result<Unit> {
         unload()
         loadCancelled = false
@@ -299,21 +307,5 @@ class LiteRtGemmaInference {
             if (part is Content.Text) builder.append(part.text)
         }
         return builder.toString()
-    }
-
-    /** Constants for [LiteRtGemmaInference]. */
-    companion object {
-        /**
-         * Default max input/output token cap passed to LiteRT-LM's
-         * `EngineConfig.maxNumTokens`. The SDK falls back to 4096
-         * when `null` is supplied — too small for any modern agent
-         * loop that includes memory + system prompts + tool defs.
-         *
-         * 32K matches the Gemma 4 E2B / E4B family's native context
-         * window per the `litert-community` model cards. Larger
-         * variants (e.g. Phi-4-mini at 128K) should pass an explicit
-         * `maxNumTokens` override.
-         */
-        const val DEFAULT_MAX_TOKENS: Int = 32_000
     }
 }

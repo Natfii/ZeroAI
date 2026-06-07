@@ -66,7 +66,7 @@ private val CardPadding = 16.dp
 /** Corner radius for picker cards. */
 private val CardCorner = 12.dp
 
-/** Token-per-thousand divisor used for the "32K" / "128K" labels. */
+/** Token-per-thousand divisor used for the "32K" / "24K" context labels. */
 private const val TOKENS_PER_K = 1000
 
 /** Bytes per gigabyte (decimal — matches what users see in storage UIs). */
@@ -78,10 +78,10 @@ private const val BYTES_PER_MB = 1_000_000L
 /**
  * On-device large model setup screen.
  *
- * Surfaces the single shipped LiteRT-LM variant (Gemma 4 E2B-it),
- * its per-device RAM/storage gating, and the on-device agent enable
- * toggle. Catalog deliberately scoped to one entry until additional
- * variants can be validated on hardware — see [LiteRtModelCatalog].
+ * Surfaces every LiteRT-LM variant in [LiteRtModelCatalog] (currently
+ * Gemma 4 E2B-it and the heavier E4B-it), each with its per-device
+ * RAM/storage gating and download controls, plus the on-device agent
+ * enable toggle.
  *
  * Enable toggle is mutually exclusive with the cloud slot toggles via
  * `AgentDao.toggleExclusive`: enabling here disables every other
@@ -175,11 +175,11 @@ private fun ResourceWarningCard() {
                 )
                 Text(
                     text =
-                        "Running a local LLM downloads ~2.6 GB of weights and " +
-                            "uses ~700 MB of GPU memory during inference. " +
-                            "Requires a Mali or Adreno GPU; Tensor G5 (Pixel 10) " +
-                            "is not yet supported. Expect noticeable battery " +
-                            "drain when chatting locally.",
+                        "Running a local LLM downloads 2.6-3.7 GB of weights " +
+                            "(depending on variant) and uses roughly 1.2-1.8 GB " +
+                            "of GPU memory during inference. Runs on the GPU " +
+                            "(OpenCL). Expect noticeable battery drain when " +
+                            "chatting locally.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

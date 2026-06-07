@@ -55,7 +55,7 @@ data class OnDeviceLargeUiState(
  * ViewModel for the on-device large model setup screen.
  *
  * Composes:
- *  - a static catalog ([LiteRtModelCatalog]) of E2B / E4B / Phi-4-mini
+ *  - a static catalog ([LiteRtModelCatalog]) of the E2B / E4B variants
  *  - per-variant download state from [LiteRtModelDownloader] (WorkManager)
  *  - per-variant on-disk readiness via [LiteRtModelStore]
  *  - device RAM/storage gating via [OnDeviceRamGate]

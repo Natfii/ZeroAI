@@ -21,8 +21,11 @@ package com.zeroclaw.android.model
  * @property displayName Human-readable name shown in the picker.
  * @property variantNote Short tagline describing the trade-off
  *   ("speed" / "quality" / "long context").
- * @property contextTokens Maximum input context the model architecture
- *   supports. Distinct from any library-side cap (LiteRT-LM imposes none).
+ * @property contextTokens Token budget handed to the engine as
+ *   `maxNumTokens`; it bounds the KV-cache allocation and therefore
+ *   the GPU working-memory peak. Usually the model's native context
+ *   window, but may be capped below it to keep a heavier variant
+ *   within the device's memory budget.
  * @property fileBytes Size of the `.litertlm` file the downloader fetches.
  * @property workingMemoryBytes Steady-state GPU working memory required
  *   during inference, per the Hugging Face model card.
@@ -68,33 +71,65 @@ enum class LiteRtRisk {
  */
 object LiteRtModelCatalog {
     /**
-     * Gemma 4 E2B-it (LiteRT-LM). The only variant we currently ship.
+     * Gemma 4 E2B-it (LiteRT-LM), the lightweight default variant.
      *
-     * Other variants in the family (E4B) and the Phi-4 catalog entry
-     * were trimmed because they could not be validated on hardware
-     * before release: E4B's working-memory footprint exceeds what
-     * Tensor G5's CPU backend handles cleanly at 32K context (the
-     * GPU backend isn't viable on PowerVR until LiteRT-LM ships
-     * support), and Phi-4-mini was never tested end-to-end on
-     * device. They can be re-introduced here once we have a phone
-     * to validate them on.
+     * The shipped `.litertlm` is already the mobile QAT build (mixed
+     * 2/4/8-bit weights baked in), so it runs comfortably on the GPU
+     * (OpenCL) backend. On Tensor G5 LiteRT-LM currently mis-detects
+     * the GPU as PowerVR and logs that GPU weight-prep is disabled,
+     * but it still falls through to the OpenCL path and runs
+     * (google-ai-edge/LiteRT-LM#1681).
+     *
+     * The per-SoC NPU build in the same Hugging Face repo
+     * (`..._Google_Tensor_G5.litertlm`) is deliberately NOT used: its
+     * dispatch shim needs the `Darwinn` TPU symbols, which exist only
+     * in the gated, non-redistributable Tensor ML SDK build of
+     * `libLiteRt.so` — verified absent from the public
+     * `litertlm-android` AAR in 0.11, 0.12 and 0.13.1.
      */
     val Gemma4E2B: LiteRtModel =
         LiteRtModel(
             id = "gemma-4-e2b-it",
-            displayName = "Gemma 4 E2B-it",
-            variantNote = "2B params · 32K context · GPU only",
+            displayName = "Gemma 4 E2B-it (QAT)",
+            variantNote = "2B params · 32K context · mixed 2/4/8-bit QAT",
             contextTokens = 32_000,
-            fileBytes = 2_590_000_000L,
-            workingMemoryBytes = 700_000_000L,
+            fileBytes = 2_588_147_712L,
+            workingMemoryBytes = 1_200_000_000L,
             downloadUrl =
                 "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/" +
                     "resolve/main/gemma-4-E2B-it.litertlm",
             risk = LiteRtRisk.Comfortable,
         )
 
-    /** Every variant in display order. */
-    val all: List<LiteRtModel> = listOf(Gemma4E2B)
+    /**
+     * Gemma 4 E4B-it (LiteRT-LM), the higher-quality heavyweight
+     * variant. Same mobile QAT packaging as [Gemma4E2B] but ~4B
+     * effective params, so it carries a larger weight + KV-cache
+     * footprint and is gated harder by [OnDeviceRamGate].
+     *
+     * Runs on the GPU backend like E2B. The [contextTokens] budget is
+     * capped below the architecture's native 32K on purpose: the KV
+     * cache scales with the token budget, and trimming it keeps the
+     * GPU working-memory peak comfortable on Tensor G5. 24K is the
+     * starting point now that the agent's baseline context overhead
+     * has been reduced — raise or lower it from real device traces.
+     */
+    val Gemma4E4B: LiteRtModel =
+        LiteRtModel(
+            id = "gemma-4-e4b-it",
+            displayName = "Gemma 4 E4B-it",
+            variantNote = "4B params · 24K context · higher quality",
+            contextTokens = 24_000,
+            fileBytes = 3_659_530_240L,
+            workingMemoryBytes = 1_800_000_000L,
+            downloadUrl =
+                "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/" +
+                    "resolve/main/gemma-4-E4B-it.litertlm",
+            risk = LiteRtRisk.Heavy,
+        )
+
+    /** Every variant in display order (lightest first). */
+    val all: List<LiteRtModel> = listOf(Gemma4E2B, Gemma4E4B)
 
     /**
      * Looks up a variant by its [LiteRtModel.id].
