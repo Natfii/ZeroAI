@@ -3,7 +3,7 @@
 ![banner](https://github.com/user-attachments/assets/eca832d2-c90b-4aed-867b-06d69cc19a7f)
 
 <p align="center">                                                                                                                                                                                                            <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white"/>
-    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                           
+    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                         
     <img alt="Target SDK" src="https://img.shields.io/badge/target%20SDK-35-brightgreen"/>
     <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.0-7F52FF?logo=kotlin&logoColor=white"/>
     <img alt="Rust" src="https://img.shields.io/badge/Rust-FFI-DEA584?logo=rust&logoColor=black"/>
@@ -66,11 +66,11 @@ Zero is designed to be private by default, configurable, and capable of running 
 
 ### Providers
 
-- **On-device** — Gemma 4 E2B-it via LiteRT-LM (CPU on Tensor G5, GPU on Mali/Adreno)
+- **On-device** — Gemma 4 E2B-it / E4B-it via LiteRT-LM (Beta)
 - OpenAI
-- Anthropic
-- Google Gemini
-- Ollama
+- Anthropic API
+- Google Gemini API
+- Local - Ollama, llama.cpp, LM Studio, etc.
 - OpenRouter
 
 ### Channels
