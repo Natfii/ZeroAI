@@ -19,11 +19,13 @@ package com.zeroclaw.android.service.ondevice
  */
 sealed interface OpenAiResponseEvent {
     /**
-     * Incremental text chunk produced by the model. Multiple of
-     * these are emitted during a streaming generation; the
-     * non-streaming path accumulates them into one assistant message.
+     * A text chunk produced by the model. Streaming paths emit several
+     * as the model generates; the on-device [OnDeviceInferenceManager.serveCompletion]
+     * path instead buffers the full reply and emits a single cleaned chunk
+     * (so the Gemma reply scrub can operate on the whole text). Either way
+     * the daemon concatenates chunks into one assistant message.
      *
-     * @property text Delta text since the previous emission.
+     * @property text The text chunk.
      */
     data class TextDelta(
         val text: String,

@@ -368,7 +368,8 @@ class OnDeviceInferenceManager(
                         }
                 conversation.use { conv ->
                     var toolCallSeen = false
-                    var totalTextChars = 0
+                    var replyTextEmitted = false
+                    val replyTextBuffer = StringBuilder()
                     val loadedModelId =
                         (_state.value as? OnDeviceInferenceState.Loaded)?.model?.id.orEmpty()
                     try {
@@ -407,11 +408,30 @@ class OnDeviceInferenceManager(
                                                     text.take(LOG_PREVIEW_CHARS),
                                             )
                                         }
-                                        totalTextChars += text.length
-                                        emit(OpenAiResponseEvent.TextDelta(text))
+                                        replyTextBuffer.append(text)
                                     }
                                 }
                             }
+                        // On-device Gemma models echo the channel prompt's
+                        // bracket scaffolding ([Memory context], [No reply
+                        // sent: …], gate verdicts) and can degenerate into
+                        // short-token repetition. Scrub the fully-assembled
+                        // reply at the harness level before it leaves the
+                        // engine. Buffered rather than streamed per-delta
+                        // because the strip needs the whole text; on-device
+                        // generation is slow enough that clean output beats
+                        // live token streaming.
+                        if (!toolCallSeen) {
+                            val cleaned =
+                                ReplyScrubber.scrubReplyText(
+                                    loadedModelId,
+                                    replyTextBuffer.toString(),
+                                )
+                            if (cleaned.isNotEmpty()) {
+                                replyTextEmitted = true
+                                emit(OpenAiResponseEvent.TextDelta(cleaned))
+                            }
+                        }
                     } catch (cancellation: kotlinx.coroutines.CancellationException) {
                         // Propagate cancellation cleanly so the HTTP
                         // collector tears down the connection without
@@ -498,7 +518,7 @@ class OnDeviceInferenceManager(
                     @Suppress("ComplexCondition")
                     val shouldEmitMidChainFallback =
                         !toolCallSeen &&
-                            totalTextChars == 0 &&
+                            !replyTextEmitted &&
                             GemmaResponseHarness.appliesTo(loadedModelId) &&
                             GemmaResponseHarness.isMidToolChain(request.messages)
                     if (shouldEmitMidChainFallback) {
@@ -663,6 +683,12 @@ class OnDeviceInferenceManager(
             withContext(engineDispatcher) {
                 inference.load(
                     modelPath = path,
+                    // GPU only, by design: CPU inference is too slow
+                    // for interactive use on the flagship devices we
+                    // target, so we never fall back to it. A GPU init
+                    // failure becomes a visible Failed state (see
+                    // EngineReadiness.Failed) instead of a silent,
+                    // unusably-slow CPU degrade.
                     backend = Backend.GPU(),
                     maxNumTokens = model.contextTokens,
                 )
