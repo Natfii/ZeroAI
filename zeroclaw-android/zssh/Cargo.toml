@@ -14,7 +14,7 @@ workspace = true
 
 [dependencies]
 # Reuse only deps already pinned in the workspace Cargo.lock — no new crates.
-russh = { version = "0.56", default-features = false, features = ["ring"] }
+russh = { version = "0.61", default-features = false, features = ["ring"] }
 tokio = { version = "1.50", features = [
     "rt",
     "macros",

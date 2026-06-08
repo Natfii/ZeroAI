@@ -99,6 +99,7 @@ object SecurePrefsProvider {
             "zeroclaw_channel_secrets" -> "channel."
             "zeroclaw_email_secrets" -> "email."
             "zeroclaw_db_passphrase" -> "db."
+            "zeroclaw_ssh_keys" -> "ssh."
             else -> "$legacyName."
         }
 

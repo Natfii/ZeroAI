@@ -21,10 +21,10 @@ pub(crate) mod io_exports;
 pub(crate) mod key_store;
 pub(crate) mod key_store_exports;
 pub(crate) mod lifecycle_exports;
-pub(crate) mod known_hosts;
 pub(crate) mod native_window;
 pub(crate) mod render;
 pub(crate) mod session;
+pub(crate) mod ssh_agent;
 pub mod types;
 
 /// Shared tokio runtime for the TTY subsystem (local shell + SSH).

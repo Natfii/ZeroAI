@@ -9,10 +9,11 @@ import kotlinx.serialization.Serializable
 /**
  * Metadata for a stored SSH key.
  *
- * Contains only public information — private key material is stored
- * exclusively in Rust under `filesDir/ssh/keys/`.
+ * Contains only public information — private key material is encrypted at
+ * rest in [EncryptedSshKeyStore] and held in the in-app ssh-agent for the
+ * session.
  *
- * @property keyId Unique identifier (UUID v4) matching the Rust-side filename.
+ * @property keyId Unique identifier (UUID v4) shared with [EncryptedSshKeyStore].
  * @property algorithm Key algorithm ("ed25519" or "rsa4096").
  * @property label User-assigned label for display.
  * @property fingerprintSha256 SHA-256 fingerprint in `SHA256:<base64>` format.

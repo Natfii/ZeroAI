@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use russh::client::{self, KeyboardInteractiveAuthResponse};
+use russh::keys::agent::client::AgentClient;
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg};
 use russh::{ChannelMsg, ChannelReadHalf, ChannelWriteHalf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -101,12 +102,11 @@ pub(crate) async fn run(args: Args) -> Result<u8, BoxError> {
     };
 
     let connect = client::connect(config, (args.host.as_str(), args.port), handler);
-    let mut handle = match tokio::time::timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS), connect)
-        .await
-    {
-        Ok(result) => result?,
-        Err(_) => return Err("connection timed out".into()),
-    };
+    let mut handle =
+        match tokio::time::timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS), connect).await {
+            Ok(result) => result?,
+            Err(_) => return Err("connection timed out".into()),
+        };
 
     if !authenticate(&mut handle, &args).await? {
         return Err("Permission denied.".into());
@@ -116,7 +116,15 @@ pub(crate) async fn run(args: Args) -> Result<u8, BoxError> {
     let (cols, rows) = term::terminal_size();
     let term_env = std::env::var("TERM").unwrap_or_else(|_| "xterm-256color".to_owned());
     channel
-        .request_pty(false, &term_env, u32::from(cols), u32::from(rows), 0, 0, &[])
+        .request_pty(
+            false,
+            &term_env,
+            u32::from(cols),
+            u32::from(rows),
+            0,
+            0,
+            &[],
+        )
         .await?;
     channel.request_shell(true).await?;
 
@@ -136,8 +144,17 @@ pub(crate) async fn run(args: Args) -> Result<u8, BoxError> {
     Ok(code)
 }
 
-/// Authenticates the handle, trying the identity file (if any) then
-/// interactive password / keyboard-interactive auth.
+/// Hash algorithm for an RSA key (SHA-256), or `None` for non-RSA keys.
+///
+/// RSA public-key auth must request the modern `rsa-sha2-256` signature
+/// algorithm; every other key type signs with its native algorithm.
+fn rsa_hash_alg(is_rsa: bool) -> Option<HashAlg> {
+    if is_rsa { Some(HashAlg::Sha256) } else { None }
+}
+
+/// Authenticates the handle: an explicit `-i` key file, otherwise every
+/// identity held by the in-process ssh-agent (`SSH_AUTH_SOCK`), then falling
+/// back to interactive password / keyboard-interactive auth.
 ///
 /// @return `true` if authentication succeeded.
 async fn authenticate(
@@ -145,27 +162,17 @@ async fn authenticate(
     args: &Args,
 ) -> Result<bool, BoxError> {
     if let Some(path) = &args.identity {
-        let key = russh::keys::load_secret_key(path, None)?;
-        let hash_alg = if key.algorithm().is_rsa() {
-            Some(HashAlg::Sha256)
-        } else {
-            None
-        };
-        let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg);
-        if handle
-            .authenticate_publickey(&args.user, key_with_alg)
-            .await?
-            .success()
-        {
+        if authenticate_identity_file(handle, args, path).await? {
             return Ok(true);
         }
         eprintln!("zssh: public key rejected; falling back to password.");
+    } else if authenticate_agent(handle, args).await? {
+        return Ok(true);
     }
 
     for attempt in 1..=AUTH_ATTEMPTS {
         // `Zeroizing<String>` scrubs the secret when it drops each iteration.
-        let password =
-            term::read_password(&format!("{}@{}'s password: ", args.user, args.host))?;
+        let password = term::read_password(&format!("{}@{}'s password: ", args.user, args.host))?;
         let ok = handle
             .authenticate_password(&args.user, password.as_str())
             .await?
@@ -180,6 +187,58 @@ async fn authenticate(
         }
         if attempt < AUTH_ATTEMPTS {
             eprintln!("Permission denied, please try again.");
+        }
+    }
+    Ok(false)
+}
+
+/// Attempts public-key auth with the explicit `-i` identity file.
+///
+/// Loads the (possibly passphrase-less) secret key from disk and offers it to
+/// the server. A load failure is surfaced to the caller as an error rather
+/// than silently skipped, since the user named this file explicitly.
+///
+/// @return `true` if the key was accepted.
+async fn authenticate_identity_file(
+    handle: &mut client::Handle<CliHandler>,
+    args: &Args,
+    path: &str,
+) -> Result<bool, BoxError> {
+    let key = russh::keys::load_secret_key(path, None)?;
+    let hash_alg = rsa_hash_alg(key.algorithm().is_rsa());
+    let key_with_alg = PrivateKeyWithHashAlg::new(Arc::new(key), hash_alg);
+    Ok(handle
+        .authenticate_publickey(&args.user, key_with_alg)
+        .await?
+        .success())
+}
+
+/// Attempts public-key auth against every identity held by the ssh-agent.
+///
+/// Connects to the agent named by `SSH_AUTH_SOCK`, lists its identities, and
+/// offers each one in turn, letting the agent produce the signatures. A
+/// missing or unreachable agent (no `SSH_AUTH_SOCK`) is treated as "no keys"
+/// so the caller falls back to password auth.
+///
+/// @return `true` if any agent identity was accepted.
+async fn authenticate_agent(
+    handle: &mut client::Handle<CliHandler>,
+    args: &Args,
+) -> Result<bool, BoxError> {
+    let mut agent = match AgentClient::connect_env().await {
+        Ok(agent) => agent,
+        Err(_) => return Ok(false),
+    };
+    let identities = agent.request_identities().await?;
+    for identity in identities {
+        let public_key = identity.public_key().into_owned();
+        let hash_alg = rsa_hash_alg(public_key.algorithm().is_rsa());
+        if handle
+            .authenticate_publickey_with(&args.user, public_key, hash_alg, &mut agent)
+            .await?
+            .success()
+        {
+            return Ok(true);
         }
     }
     Ok(false)
@@ -249,7 +308,8 @@ async fn read_loop(mut read_half: ChannelReadHalf) -> u8 {
     let mut exit_code: u8 = 0;
     loop {
         match read_half.wait().await {
-            Some(ChannelMsg::Data { ref data }) | Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+            Some(ChannelMsg::Data { ref data })
+            | Some(ChannelMsg::ExtendedData { ref data, .. }) => {
                 if stdout.write_all(data).await.is_err() {
                     break;
                 }

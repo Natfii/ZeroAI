@@ -53,9 +53,10 @@ import com.zeroclaw.android.data.repository.RoomPluginRepository
 import com.zeroclaw.android.data.repository.RoomTerminalEntryRepository
 import com.zeroclaw.android.data.repository.SettingsRepository
 import com.zeroclaw.android.data.repository.TerminalEntryRepository
+import com.zeroclaw.android.data.ssh.EncryptedSshKeyStore
+import com.zeroclaw.android.data.ssh.SshAgentInitializer
 import com.zeroclaw.android.data.ssh.SshDataStore
 import com.zeroclaw.android.model.CachedTailscalePeer
-import com.zeroclaw.android.model.LogSeverity
 import com.zeroclaw.android.model.RefreshCommand
 import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.service.CapabilityApprovalNotifier
@@ -249,6 +250,16 @@ class ZeroAIApplication :
      */
     val sshDataStore: SshDataStore by lazy { SshDataStore(this) }
 
+    /**
+     * Encrypted-at-rest store for SSH private keys.
+     *
+     * Holds each key's OpenSSH private PEM as an AES-256-GCM blob in the
+     * consolidated secure prefs file. Lazy so the keystore open is deferred
+     * off [onCreate]'s critical path. Private bytes are decrypted only when
+     * handed to the in-app ssh-agent over the FFI.
+     */
+    val sshKeyStore: EncryptedSshKeyStore by lazy { EncryptedSshKeyStore(context = this) }
+
     /** Emergency stop state repository. */
     lateinit var estopRepository: EstopRepository
         private set
@@ -427,29 +438,6 @@ class ZeroAIApplication :
                 activityRepository
             }
 
-        ioScope.launch {
-            warmupJob.join()
-            try {
-                com.zeroclaw.ffi.sshKeyStoreInit(
-                    filesDir.resolve("ssh/keys").absolutePath,
-                )
-            } catch (e: Exception) {
-                logRepository.append(
-                    LogSeverity.ERROR,
-                    TAG,
-                    "SSH key store init failed: ${e.message}",
-                )
-            }
-            try {
-                sshDataStore.pruneStaleKeys()
-            } catch (e: Exception) {
-                logRepository.append(
-                    LogSeverity.WARN,
-                    TAG,
-                    "SSH key prune failed: ${e.message}",
-                )
-            }
-        }
         estopRepository = EstopRepository(scope = ioScope)
         healthBridge = HealthBridge()
         costBridge = CostBridge()
@@ -473,6 +461,7 @@ class ZeroAIApplication :
         }
 
         seedProviderSlots(ioScope)
+        startSshAgent(ioScope)
         onDeviceInferenceManager.attach()
 
         sessionLockManager = SessionLockManager(settingsRepository.settings, ioScope)
@@ -562,6 +551,28 @@ class ZeroAIApplication :
                 .onFailure { error ->
                     Log.e(TAG, "Provider slot seeding failed: ${error.message}")
                 }
+        }
+    }
+
+    /**
+     * Brings the in-process ssh-agent up for the session.
+     *
+     * Migrates any legacy plaintext keys into the encrypted store, starts the
+     * agent on `filesDir/ssh/agent.sock`, and loads every encrypted key into
+     * it so terminal shells and the bundled `ssh` client can authenticate via
+     * `SSH_AUTH_SOCK`. Runs off the main thread; the agent-start in Rust is
+     * idempotent so a transient failure simply leaves keys unloaded until the
+     * next launch rather than crashing.
+     *
+     * @param scope Background scope for the agent bring-up coroutine.
+     */
+    private fun startSshAgent(scope: CoroutineScope) {
+        scope.launch {
+            SshAgentInitializer(
+                sshDir = File(filesDir, "ssh"),
+                keyStore = sshKeyStore,
+                dataStore = sshDataStore,
+            ).initialize()
         }
     }
 

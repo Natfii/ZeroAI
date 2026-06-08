@@ -7,7 +7,6 @@ package com.zeroclaw.android.data.ssh
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import com.zeroclaw.ffi.sshKeyExists
 import io.github.osipxd.security.crypto.encryptedPreferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -76,26 +75,20 @@ class SshDataStore(
     }
 
     /**
-     * Removes entries whose Rust-side key file no longer exists.
+     * Removes entries whose [keyId] is absent from [validKeyIds].
      *
-     * Called at startup to recover from external file deletion
-     * or app data corruption.
+     * Called at startup to reconcile metadata against the encrypted private
+     * key store, recovering from partial writes or app data corruption.
+     *
+     * @param validKeyIds Ids that currently hold encrypted private bytes.
      */
-    @Suppress("TooGenericExceptionCaught")
-    suspend fun pruneStaleKeys() {
+    suspend fun pruneStaleKeys(validKeyIds: Set<String>) {
         context.sshStore.edit { prefs ->
             val current =
                 prefs[KEY_SSH_KEYS]
                     ?.let { json.decodeFromString<List<SshKeyEntry>>(it) }
                     ?: return@edit
-            val valid =
-                current.filter { entry ->
-                    try {
-                        sshKeyExists(entry.keyId)
-                    } catch (_: Exception) {
-                        false
-                    }
-                }
+            val valid = current.filter { it.keyId in validKeyIds }
             if (valid.size != current.size) {
                 prefs[KEY_SSH_KEYS] = json.encodeToString(valid)
             }

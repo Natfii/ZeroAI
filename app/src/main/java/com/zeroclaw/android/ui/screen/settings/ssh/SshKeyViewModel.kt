@@ -10,17 +10,20 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.ssh.SshKeyEntry
+import com.zeroclaw.ffi.SshGeneratedKey
 import com.zeroclaw.ffi.SshKeyAlgorithm
-import com.zeroclaw.ffi.sshDeleteKey
-import com.zeroclaw.ffi.sshExportPublicKey
+import com.zeroclaw.ffi.sshAgentAddIdentity
+import com.zeroclaw.ffi.sshAgentReset
 import com.zeroclaw.ffi.sshGenerateKey
 import com.zeroclaw.ffi.sshImportKey
 import java.io.File
+import java.nio.CharBuffer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -42,6 +45,7 @@ class SshKeyViewModel(
 ) : AndroidViewModel(application) {
     private val app = application as ZeroAIApplication
     private val dataStore = app.sshDataStore
+    private val keyStore = app.sshKeyStore
 
     /** Observable list of SSH key entries. */
     val keys: StateFlow<List<SshKeyEntry>> =
@@ -64,7 +68,8 @@ class SshKeyViewModel(
     }
 
     /**
-     * Generates a new SSH key and persists its metadata.
+     * Generates a new SSH key, encrypts the private bytes at rest, and
+     * persists its metadata.
      *
      * @param algorithm Key algorithm to use.
      * @param label User-assigned label.
@@ -77,11 +82,11 @@ class SshKeyViewModel(
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                val meta =
+                val generated =
                     withContext(Dispatchers.IO) {
                         sshGenerateKey(algorithm, label)
                     }
-                dataStore.addKey(meta.toEntry())
+                storeGeneratedKey(generated)
             } catch (e: Exception) {
                 _error.value = "Key generation failed: ${e.message}"
             } finally {
@@ -110,44 +115,71 @@ class SshKeyViewModel(
         viewModelScope.launch {
             _isLoading.value = true
             var passphraseBytes: ByteArray? = null
+            var tempFile: File? = null
             try {
-                val tempFile =
+                val dest =
                     withContext(Dispatchers.IO) {
-                        val dest = File(app.cacheDir, "ssh_import_temp")
-                        app.contentResolver.openInputStream(uri)?.use { input ->
-                            dest.outputStream().use { output ->
-                                input.copyTo(output)
-                            }
-                        } ?: error("Cannot read selected file")
-                        dest
+                        File.createTempFile("ssh_import_", ".tmp", app.cacheDir)
                     }
+                tempFile = dest
+                withContext(Dispatchers.IO) {
+                    app.contentResolver.openInputStream(uri)?.use { input ->
+                        dest.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: error("Cannot read selected file")
+                }
                 passphraseBytes =
                     passphrase?.let { chars ->
                         val encoder = Charsets.UTF_8.newEncoder()
-                        val buf = encoder.encode(java.nio.CharBuffer.wrap(chars))
+                        val buf = encoder.encode(CharBuffer.wrap(chars))
                         ByteArray(buf.remaining()).also { buf.get(it) }
                     }
-                val meta =
+                val generated =
                     withContext(Dispatchers.IO) {
                         sshImportKey(
-                            tempFile.absolutePath,
+                            dest.absolutePath,
                             passphraseBytes,
                             label,
                         )
                     }
-                dataStore.addKey(meta.toEntry())
+                storeGeneratedKey(generated)
             } catch (e: Exception) {
                 _error.value = "Import failed: ${e.message}"
             } finally {
                 passphrase?.fill('\u0000')
                 passphraseBytes?.fill(0)
+                tempFile?.delete()
                 _isLoading.value = false
             }
         }
     }
 
     /**
-     * Deletes a key from both Rust storage and the DataStore.
+     * Encrypts the private bytes at rest, persists metadata, and adds the
+     * key to the running ssh-agent for the current session.
+     *
+     * The plaintext private buffer is zeroed before returning.
+     *
+     * @param generated Freshly generated or imported key with private bytes.
+     */
+    private suspend fun storeGeneratedKey(generated: SshGeneratedKey) {
+        val keyId = generated.metadata.keyId
+        val privatePem = generated.privatePem
+        try {
+            withContext(Dispatchers.IO) { keyStore.put(keyId, privatePem) }
+            dataStore.addKey(generated.metadata.toEntry())
+            // Best-effort: the key is already persisted encrypted, so failing to
+            // load it into the live agent self-heals at the next launch (via
+            // SshAgentInitializer) instead of losing the key or its metadata.
+            runCatching { withContext(Dispatchers.IO) { sshAgentAddIdentity(privatePem) } }
+        } finally {
+            privatePem.fill(0)
+        }
+    }
+
+    /**
+     * Deletes a key from encrypted storage, metadata, and the running agent.
      *
      * @param keyId UUID of the key to delete.
      */
@@ -155,7 +187,10 @@ class SshKeyViewModel(
     fun deleteKey(keyId: String) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { sshDeleteKey(keyId) }
+                withContext(Dispatchers.IO) {
+                    keyStore.delete(keyId)
+                    sshAgentReset()
+                }
                 dataStore.removeKey(keyId)
             } catch (e: Exception) {
                 _error.value = "Delete failed: ${e.message}"
@@ -166,17 +201,16 @@ class SshKeyViewModel(
     /**
      * Returns the public key in OpenSSH format for clipboard copy.
      *
+     * Reads from the metadata store; no FFI call is required.
+     *
      * @param keyId UUID of the key.
-     * @return OpenSSH public key string.
+     * @return OpenSSH public key string, or null if the key is unknown.
      */
-    @Suppress("TooGenericExceptionCaught")
     suspend fun getPublicKey(keyId: String): String? =
-        try {
-            withContext(Dispatchers.IO) { sshExportPublicKey(keyId) }
-        } catch (e: Exception) {
-            _error.value = "Export failed: ${e.message}"
-            null
-        }
+        dataStore.keys
+            .first()
+            .firstOrNull { it.keyId == keyId }
+            ?.publicKeyOpenssh
 }
 
 /**
@@ -188,6 +222,7 @@ private fun com.zeroclaw.ffi.SshKeyMetadata.toEntry() =
         keyId = keyId,
         algorithm =
             when (algorithm) {
+                SshKeyAlgorithm.ECDSA_P256 -> "ecdsap256"
                 SshKeyAlgorithm.ED25519 -> "ed25519"
                 SshKeyAlgorithm.RSA4096 -> "rsa4096"
             },

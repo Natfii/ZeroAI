@@ -10,7 +10,12 @@
 /// Supported SSH key algorithms for generation.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum SshKeyAlgorithm {
-    /// Ed25519 (recommended, fast, small keys).
+    /// ECDSA on NIST P-256 (recommended; the only curve a non-exportable
+    /// Android Keystore signer can hold, so new keys default here for
+    /// forward-compatibility with a future hardware-backed tier).
+    EcdsaP256,
+    /// Ed25519 (fast, small keys; software/import tier only — Keystore
+    /// cannot hold Curve25519 as a non-exportable key at minSdk 28).
     Ed25519,
     /// RSA with 4096-bit key size.
     Rsa4096,
@@ -34,6 +39,20 @@ pub struct SshKeyMetadata {
     pub public_key_openssh: String,
     /// Creation timestamp as milliseconds since Unix epoch.
     pub created_at_epoch_ms: i64,
+}
+
+/// A freshly generated or imported SSH key, returned across the FFI so
+/// Kotlin can encrypt the private bytes at rest itself.
+///
+/// The private key never touches the Rust filesystem in plaintext. Kotlin
+/// stores `private_pem` in the encrypted SSH key store and discards the
+/// buffer immediately after.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SshGeneratedKey {
+    /// Public metadata for persistence and display.
+    pub metadata: SshKeyMetadata,
+    /// Unencrypted OpenSSH-format private key PEM bytes.
+    pub private_pem: Vec<u8>,
 }
 
 // ── Render frame (Kotlin-facing) ────────────────────────────────────────

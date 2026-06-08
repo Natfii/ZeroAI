@@ -659,6 +659,13 @@ fn run_child(slave_fd: OwnedFd) -> ! {
         } else if std::env::var("HOME").is_err() {
             std::env::set_var("HOME", "/data/local/tmp");
         }
+
+        // Point the bundled `ssh` (zssh) at the in-process ssh-agent so it
+        // authenticates with the session's decrypted keys via the agent
+        // protocol. Private keys are never written to disk for zssh to read.
+        if let Some(sock) = crate::tty::ssh_agent::agent_sock_path() {
+            std::env::set_var("SSH_AUTH_SOCK", sock);
+        }
     }
 
     // Execute the shell. argv[0] is the program name shown in `ps`.

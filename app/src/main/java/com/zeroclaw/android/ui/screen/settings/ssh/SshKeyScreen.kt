@@ -17,6 +17,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -445,19 +447,20 @@ private fun SshKeyCard(
 /**
  * Dialog for generating a new SSH key.
  *
- * Presents algorithm selection via [FilterChip]s (Ed25519 default,
- * RSA-4096) and a required label field. The Generate button is
+ * Presents algorithm selection via [FilterChip]s (ECDSA P-256 default,
+ * Ed25519, RSA-4096) and a required label field. The Generate button is
  * disabled until a non-empty label is entered.
  *
  * @param onDismiss Callback invoked when the dialog is dismissed.
  * @param onConfirm Callback invoked with the selected algorithm and label.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GenerateKeyDialog(
     onDismiss: () -> Unit,
     onConfirm: (SshKeyAlgorithm, String) -> Unit,
 ) {
-    var algorithm by remember { mutableStateOf(SshKeyAlgorithm.ED25519) }
+    var algorithm by remember { mutableStateOf(SshKeyAlgorithm.ECDSA_P256) }
     var label by remember { mutableStateOf("") }
 
     AlertDialog(
@@ -471,9 +474,20 @@ private fun GenerateKeyDialog(
                     text = "Algorithm",
                     style = MaterialTheme.typography.labelLarge,
                 )
-                Row(
+                FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(INLINE_SPACING_DP.dp),
                 ) {
+                    FilterChip(
+                        selected = algorithm == SshKeyAlgorithm.ECDSA_P256,
+                        onClick = { algorithm = SshKeyAlgorithm.ECDSA_P256 },
+                        label = { Text("ECDSA P-256") },
+                        modifier =
+                            Modifier
+                                .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
+                                .semantics {
+                                    contentDescription = "Select ECDSA P-256 algorithm"
+                                },
+                    )
                     FilterChip(
                         selected = algorithm == SshKeyAlgorithm.ED25519,
                         onClick = { algorithm = SshKeyAlgorithm.ED25519 },
@@ -680,6 +694,7 @@ private fun KeyDetailBottomSheet(
 
     val algorithmLabel =
         when (entry.algorithm) {
+            "ecdsap256" -> "ECDSA P-256"
             "ed25519" -> "Ed25519"
             "rsa4096" -> "RSA-4096"
             else -> entry.algorithm

@@ -78,6 +78,9 @@ codex-x86_64-pc-windows-msvc.exe
 # Git worktrees
 .worktrees/
 .tmp/
+# Local debug/scratch screenshots & scratch artifacts (never commit)
+.tmp_*
+*.scratch.png
 .kotlin/
 .superpowers/
 .worktrees/
