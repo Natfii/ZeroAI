@@ -4,13 +4,8 @@
 
 package com.zeroclaw.android.ui.screen.dashboard
 
-import android.app.Activity
-import android.app.KeyguardManager
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -84,6 +79,7 @@ import com.zeroclaw.android.ui.component.MiniZeroMascot
 import com.zeroclaw.android.ui.component.MiniZeroMascotState
 import com.zeroclaw.android.ui.component.RestartRequiredBanner
 import com.zeroclaw.android.ui.component.SectionHeader
+import com.zeroclaw.android.ui.lock.rememberDeviceCredentialAuthenticator
 import com.zeroclaw.android.util.BatteryOptimization
 import com.zeroclaw.android.util.LocalPowerSaveMode
 import com.zeroclaw.android.viewmodel.DaemonUiState
@@ -1046,27 +1042,15 @@ private fun EstopButton(onEngage: () -> Unit) {
  *
  * Displays a warning message and a resume button. If the device has
  * a lock screen configured, tapping resume launches the device credential
- * confirmation screen (PIN, pattern, or fingerprint). If no lock screen
+ * confirmation screen (PIN, pattern, or password). If no lock screen
  * is set, a simple confirmation dialog is shown instead.
  *
  * @param onResume Callback invoked after the user successfully confirms resume.
  */
 @Composable
 private fun EstopActiveBanner(onResume: () -> Unit) {
-    val context = LocalContext.current
-    val keyguardManager =
-        remember { context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager }
-    val isDeviceSecure = remember { keyguardManager.isDeviceSecure }
+    val authenticator = rememberDeviceCredentialAuthenticator()
     var showResumeDialog by remember { mutableStateOf(false) }
-
-    val credentialLauncher =
-        rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.StartActivityForResult(),
-        ) { result ->
-            if (result.resultCode == Activity.RESULT_OK) {
-                onResume()
-            }
-        }
 
     Card(
         modifier =
@@ -1095,18 +1079,12 @@ private fun EstopActiveBanner(onResume: () -> Unit) {
             Spacer(modifier = Modifier.height(8.dp))
             FilledTonalButton(
                 onClick = {
-                    if (isDeviceSecure) {
-                        @Suppress("DEPRECATION")
-                        val intent =
-                            keyguardManager.createConfirmDeviceCredentialIntent(
-                                "Resume Emergency Stop",
-                                "Confirm your identity to resume agent execution",
-                            )
-                        if (intent != null) {
-                            credentialLauncher.launch(intent)
-                        } else {
-                            onResume()
-                        }
+                    if (authenticator.isDeviceSecure()) {
+                        authenticator.authenticate(
+                            title = "Resume Emergency Stop",
+                            subtitle = "Confirm your identity to resume agent execution",
+                            onSuccess = onResume,
+                        )
                     } else {
                         showResumeDialog = true
                     }
