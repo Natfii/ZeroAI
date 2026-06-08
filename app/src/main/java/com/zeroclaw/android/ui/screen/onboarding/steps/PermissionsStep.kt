@@ -27,7 +27,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,25 +35,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import com.zeroclaw.android.ui.component.PinEntryMode
-import com.zeroclaw.android.ui.component.PinEntrySheet
 import com.zeroclaw.android.util.BatteryOptimization
 
 /**
  * Onboarding step for requesting necessary permissions.
  *
- * Guides the user through notification permission (Android 13+),
- * battery optimization exemption, and optional PIN-based app lock.
- *
- * @param pinHash The current PIN hash (empty if no PIN is set).
- * @param onPinSet Callback with the new PIN hash after setup.
+ * Guides the user through notification permission (Android 13+) and the
+ * battery optimization exemption. The device-credential app lock has its
+ * own dedicated step
+ * ([DeviceLockStep][com.zeroclaw.android.ui.screen.onboarding.steps.DeviceLockStep]).
  */
 @Suppress("MagicNumber")
 @Composable
-fun PermissionsStep(
-    pinHash: String,
-    onPinSet: (String) -> Unit,
-) {
+fun PermissionsStep() {
     val context = LocalContext.current
     var isExempt by rememberSaveable {
         mutableStateOf(BatteryOptimization.isExempt(context))
@@ -179,75 +172,6 @@ fun PermissionsStep(
             ) {
                 Text("Request Exemption")
             }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        var showPinSheet by remember { mutableStateOf(false) }
-
-        Text(
-            text = "App Lock",
-            style = MaterialTheme.typography.titleSmall,
-        )
-        Text(
-            text =
-                "Set up a PIN to lock the app on launch and " +
-                    "after a period of inactivity.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (pinHash.isNotEmpty()) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.CheckCircle,
-                    contentDescription = "PIN set",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Text(
-                    text = "PIN is set",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(modifier = Modifier.height(4.dp))
-            FilledTonalButton(
-                onClick = { showPinSheet = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Change PIN")
-            }
-        } else {
-            FilledTonalButton(
-                onClick = { showPinSheet = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text("Set up a PIN")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = "You can set up app lock later in Settings",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        if (showPinSheet) {
-            PinEntrySheet(
-                mode = if (pinHash.isNotEmpty()) PinEntryMode.CHANGE else PinEntryMode.SETUP,
-                currentPinHash = pinHash,
-                onPinSet = { hash ->
-                    onPinSet(hash)
-                    showPinSheet = false
-                },
-                onDismiss = { showPinSheet = false },
-            )
         }
     }
 }

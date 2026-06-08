@@ -630,13 +630,6 @@ interface SettingsRepository {
     suspend fun setReliabilityApiKeysJson(json: String)
 
     /**
-     * Toggles the session lock gate.
-     *
-     * @param enabled Whether the app-wide lock is active.
-     */
-    suspend fun setLockEnabled(enabled: Boolean)
-
-    /**
      * Updates the lock timeout duration.
      *
      * @param minutes Minutes of background time before re-locking.
@@ -644,11 +637,11 @@ interface SettingsRepository {
     suspend fun setLockTimeoutMinutes(minutes: Int)
 
     /**
-     * Stores the PBKDF2 hash of the user's PIN.
+     * Toggles whether the lock is enforced via the device screen-lock credential.
      *
-     * @param hash Base64-encoded salt+hash string from [PinHasher][com.zeroclaw.android.util.PinHasher].
+     * @param enabled `true` to require the device credential (PIN/pattern/password) to unlock.
      */
-    suspend fun setPinHash(hash: String)
+    suspend fun setUseDeviceCredential(enabled: Boolean)
 
     /**
      * Updates the remote plugin registry URL.

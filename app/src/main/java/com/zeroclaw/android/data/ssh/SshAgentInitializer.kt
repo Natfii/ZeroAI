@@ -14,20 +14,23 @@ import java.security.SecureRandom
  * Brings the in-process ssh-agent up for the session and reconciles
  * on-disk key state with the encrypted-at-rest store.
  *
- * Owns three startup responsibilities that must run before any terminal
- * shell forks (so the bundled `ssh` can authenticate via `SSH_AUTH_SOCK`):
+ * Startup splits into two phases so the decrypt step can be gated behind the
+ * device-credential app lock (the agent-holds-keys ⟺ app-unlocked invariant):
  *
- *  1. A one-time migration of any legacy plaintext `<keyId>.pem` files left
- *     under [keysDir] by older builds into [keyStore], with a strict
- *     verify-before-delete so a plaintext key is never destroyed unless its
- *     encrypted copy reads back byte-for-byte.
- *  2. Starting the agent on `<sshDir>/agent.sock`.
- *  3. Decrypting every stored key and loading it into the running agent so
- *     it is held for the session.
+ *  - [prepareAgent] runs the lock-independent work that may always run: a
+ *    one-time migration of legacy plaintext `<keyId>.pem` files into
+ *    [keyStore] (with strict verify-before-delete so a plaintext key is never
+ *    destroyed unless its encrypted copy reads back byte-for-byte), starting
+ *    the agent on `<sshDir>/agent.sock`, and pruning orphaned metadata. No
+ *    private key is decrypted here, so it is safe to call while the app is
+ *    locked — the agent simply holds no identities yet.
+ *  - [loadKeysIntoAgent] is the decrypt step: it reads every stored private
+ *    key and adds it to the running agent. It must only be invoked once the
+ *    app is unlocked, since it materialises plaintext key bytes in the agent.
  *
- * [initialize] is idempotent and crash-safe: the agent start is idempotent
- * in Rust, the migration is gated by a marker file, and a failure to load
- * any single key is logged and skipped rather than aborting startup.
+ * Both phases are idempotent and crash-safe: the agent start is idempotent in
+ * Rust, the migration is gated by a marker file, and a failure to load any
+ * single key is logged and skipped rather than aborting.
  *
  * @param sshDir Base SSH directory (`filesDir/ssh`) that hosts the agent
  *   socket and the migration marker.
@@ -40,16 +43,19 @@ class SshAgentInitializer(
     private val dataStore: SshDataStore,
 ) {
     /**
-     * Runs the migration, starts the agent, loads all keys, and prunes
-     * orphaned metadata.
+     * Runs the lock-independent agent bring-up: migration, agent start, and
+     * metadata prune. Does NOT decrypt or load any keys.
      *
-     * Safe to call from a background dispatcher. Each phase is independently
-     * guarded so a single failure cannot leave the agent unstarted: a
-     * migration error is logged and the agent still starts; a per-key load
-     * error is logged and remaining keys still load.
+     * Safe to call from a background dispatcher while the app is still locked.
+     * Each phase is independently guarded so a single failure cannot leave the
+     * agent unstarted: a migration error is logged and the agent still starts;
+     * a prune error is logged and ignored.
+     *
+     * @return `true` if the agent socket is up so [loadKeysIntoAgent] can run,
+     *   `false` if the agent failed to start.
      */
     @Suppress("TooGenericExceptionCaught")
-    suspend fun initialize() {
+    suspend fun prepareAgent(): Boolean {
         runCatching { migratePlaintextKeys() }
             .onFailure { error ->
                 Log.e(TAG, "SSH key migration failed: ${error.message}")
@@ -60,24 +66,28 @@ class SshAgentInitializer(
                 .onFailure { error ->
                     Log.e(TAG, "SSH agent start failed: ${error.message}")
                 }.isSuccess
-        if (!started) return
+        if (!started) return false
 
-        loadStoredKeysIntoAgent()
         runCatching { dataStore.pruneStaleKeys(keyStore.keyIds()) }
             .onFailure { error ->
                 Log.w(TAG, "SSH metadata prune failed: ${error.message}")
             }
+        return true
     }
 
     /**
      * Decrypts every stored key and adds it to the running agent.
      *
-     * A per-key failure (corrupt blob, parse error) is logged and skipped so
-     * one bad key cannot block the rest of the session's keys from loading.
-     * The decrypted buffer is zeroed after each add.
+     * Must only run once the app is unlocked — this is the step that
+     * materialises plaintext private bytes in the live agent. A per-key
+     * failure (corrupt blob, parse error) is logged and skipped so one bad
+     * key cannot block the rest of the session's keys; the decrypted buffer is
+     * zeroed after each add.
+     *
+     * Safe to call from a background dispatcher.
      */
     @Suppress("TooGenericExceptionCaught")
-    private fun loadStoredKeysIntoAgent() {
+    fun loadKeysIntoAgent() {
         var loaded = 0
         for (keyId in keyStore.keyIds()) {
             val pem = keyStore.get(keyId) ?: continue

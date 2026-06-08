@@ -41,9 +41,8 @@ class SessionLockManagerTest {
     private fun createManager(
         settings: AppSettings =
             AppSettings(
-                lockEnabled = true,
                 lockTimeoutMinutes = 1,
-                pinHash = "fakehash",
+                useDeviceCredential = true,
             ),
     ): Pair<SessionLockManager, MutableStateFlow<AppSettings>> {
         val flow = MutableStateFlow(settings)
@@ -93,26 +92,12 @@ class SessionLockManagerTest {
         }
 
     @Test
-    @DisplayName("onStart does not lock when lock is disabled")
-    fun `onStart does not lock when lock is disabled`() =
+    @DisplayName("onStart does not lock when device credential is not enabled")
+    fun `onStart does not lock when device credential is not enabled`() =
         runTest {
             val (manager, _) =
                 createManager(
-                    AppSettings(lockEnabled = false, lockTimeoutMinutes = 0, pinHash = "hash"),
-                )
-            manager.unlock()
-            manager.onStop(owner)
-            manager.onStart(owner)
-            assertFalse(manager.isLocked.value)
-        }
-
-    @Test
-    @DisplayName("onStart does not lock when no PIN is set")
-    fun `onStart does not lock when no PIN is set`() =
-        runTest {
-            val (manager, _) =
-                createManager(
-                    AppSettings(lockEnabled = true, lockTimeoutMinutes = 0, pinHash = ""),
+                    AppSettings(lockTimeoutMinutes = 0, useDeviceCredential = false),
                 )
             manager.unlock()
             manager.onStop(owner)
@@ -136,10 +121,10 @@ class SessionLockManagerTest {
         runTest {
             val (manager, flow) =
                 createManager(
-                    AppSettings(lockEnabled = false, pinHash = ""),
+                    AppSettings(useDeviceCredential = false),
                 )
             manager.unlock()
-            flow.value = AppSettings(lockEnabled = true, lockTimeoutMinutes = 0, pinHash = "hash")
+            flow.value = AppSettings(lockTimeoutMinutes = 0, useDeviceCredential = true)
             manager.onStop(owner)
             Thread.sleep(1)
             manager.onStart(owner)

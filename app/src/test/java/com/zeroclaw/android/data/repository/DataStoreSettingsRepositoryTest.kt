@@ -421,11 +421,9 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setReliabilityApiKeysJson(json: String) { /* no-op */ }
 
-    override suspend fun setLockEnabled(enabled: Boolean) { /* no-op */ }
-
     override suspend fun setLockTimeoutMinutes(minutes: Int) { /* no-op */ }
 
-    override suspend fun setPinHash(hash: String) { /* no-op */ }
+    override suspend fun setUseDeviceCredential(enabled: Boolean) { /* no-op */ }
 
     override suspend fun setPluginRegistryUrl(url: String) { /* no-op */ }
 

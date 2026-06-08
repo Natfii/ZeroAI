@@ -6,7 +6,10 @@
 
 package com.zeroclaw.android.navigation
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -15,12 +18,16 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -28,10 +35,14 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -43,8 +54,8 @@ import androidx.navigation.compose.rememberNavController
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.ui.component.LoadingIndicator
-import com.zeroclaw.android.ui.component.LockGateScreen
 import com.zeroclaw.android.ui.component.StatusDot
+import com.zeroclaw.android.ui.lock.rememberDeviceCredentialAuthenticator
 import com.zeroclaw.android.viewmodel.DaemonViewModel
 import kotlinx.coroutines.flow.map
 
@@ -113,11 +124,14 @@ fun ZeroAIAppShell(
                 .AppSettings(),
     )
     val isOnboarding = currentDestination?.hasRoute(OnboardingRoute::class) == true
+    // Exempt onboarding from the lock ONLY on first run (no lock configured
+    // yet). On a re-run of a completed setup the lock must still fire, or a
+    // background-timeout mid-wizard would expose the steps without the
+    // credential challenge.
     val shouldShowLock =
         isLocked &&
-            settings.lockEnabled &&
-            settings.pinHash.isNotEmpty() &&
-            !isOnboarding
+            settings.useDeviceCredential &&
+            (!isOnboarding || onboardingCompleted == true)
 
     val isTopLevel =
         !isOnboarding &&
@@ -236,10 +250,65 @@ fun ZeroAIAppShell(
         }
 
         if (shouldShowLock) {
-            LockGateScreen(
-                pinHash = settings.pinHash,
-                onUnlock = { app.sessionLockManager.unlock() },
+            DeviceCredentialLockShell(
+                onUnlocked = { app.sessionLockManager.unlock() },
             )
+        }
+    }
+}
+
+/**
+ * Full-screen locked overlay whose only action unlocks via the device credential.
+ *
+ * Renders an opaque surface over the app and prompts for the screen-lock
+ * credential through [rememberDeviceCredentialAuthenticator]. The prompt is
+ * launched automatically on first display and re-launchable from the unlock
+ * button, calling [onUnlocked] only after a confirmed match. This replaces the
+ * retired app-invented PIN gate; there is one device-credential path.
+ *
+ * @param onUnlocked Invoked after a successful device-credential confirmation.
+ */
+@Composable
+private fun DeviceCredentialLockShell(onUnlocked: () -> Unit) {
+    val authenticator = rememberDeviceCredentialAuthenticator()
+    val prompt: () -> Unit = {
+        authenticator.authenticate(
+            title = "ZeroAI is locked",
+            subtitle = "Confirm your device PIN, pattern, or password to continue",
+            onSuccess = onUnlocked,
+        )
+    }
+
+    LaunchedEffect(Unit) { prompt() }
+
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.surface),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(LOCK_SHELL_SPACING),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Lock,
+                contentDescription = null,
+                modifier = Modifier.size(LOCK_SHELL_ICON_SIZE),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Text(
+                text = "ZeroAI is locked",
+                style = MaterialTheme.typography.headlineSmall,
+                modifier =
+                    Modifier.semantics {
+                        liveRegion = LiveRegionMode.Polite
+                    },
+            )
+            FilledTonalButton(onClick = prompt) {
+                Text("Unlock")
+            }
         }
     }
 }
@@ -296,3 +365,6 @@ private fun TopBarTitle(
         StatusDot(state = serviceState)
     }
 }
+
+private val LOCK_SHELL_SPACING = 16.dp
+private val LOCK_SHELL_ICON_SIZE = 48.dp

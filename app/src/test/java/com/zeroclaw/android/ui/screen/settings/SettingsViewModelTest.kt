@@ -47,25 +47,6 @@ class SettingsViewModelTest {
         }
 
     @Test
-    @DisplayName("lock enabled defaults to false")
-    fun `lock enabled defaults to false`() =
-        runTest {
-            val repo = TestSettingsRepository()
-            assertEquals(false, repo.settings.first().lockEnabled)
-        }
-
-    @Test
-    @DisplayName("setLockEnabled updates repository")
-    fun `setLockEnabled updates repository`() =
-        runTest {
-            val repo = TestSettingsRepository()
-            repo.setLockEnabled(true)
-            assertEquals(true, repo.settings.first().lockEnabled)
-            repo.setLockEnabled(false)
-            assertEquals(false, repo.settings.first().lockEnabled)
-        }
-
-    @Test
     @DisplayName("setLockTimeoutMinutes updates repository")
     fun `setLockTimeoutMinutes updates repository`() =
         runTest {
@@ -76,21 +57,22 @@ class SettingsViewModelTest {
         }
 
     @Test
-    @DisplayName("setPinHash updates repository")
-    fun `setPinHash updates repository`() =
+    @DisplayName("setUseDeviceCredential updates repository")
+    fun `setUseDeviceCredential updates repository`() =
         runTest {
             val repo = TestSettingsRepository()
-            val hash = "test-pin-hash-value"
-            repo.setPinHash(hash)
-            assertEquals(hash, repo.settings.first().pinHash)
+            repo.setUseDeviceCredential(true)
+            assertEquals(true, repo.settings.first().useDeviceCredential)
+            repo.setUseDeviceCredential(false)
+            assertEquals(false, repo.settings.first().useDeviceCredential)
         }
 
     @Test
-    @DisplayName("pinHash defaults to empty string")
-    fun `pinHash defaults to empty string`() =
+    @DisplayName("useDeviceCredential defaults to false")
+    fun `useDeviceCredential defaults to false`() =
         runTest {
             val repo = TestSettingsRepository()
-            assertEquals("", repo.settings.first().pinHash)
+            assertEquals(false, repo.settings.first().useDeviceCredential)
         }
 
     @Test

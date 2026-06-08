@@ -32,11 +32,8 @@ internal class OnboardingMutableStates {
     /** Current wizard step index (zero-based). */
     val currentStep: MutableStateFlow<Int> = MutableStateFlow(OnboardingCoordinator.STEP_PERMISSIONS)
 
-    /** PIN hash from the security step, empty when no PIN is set. */
-    val pinHash: MutableStateFlow<String> = MutableStateFlow("")
-
-    /** Whether the session lock is enabled. */
-    val lockEnabled: MutableStateFlow<Boolean> = MutableStateFlow(false)
+    /** Whether the app lock is enforced via the device screen-lock credential. */
+    val useDeviceCredential: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
     /** Provider step state. */
     val provider: MutableStateFlow<ProviderStepState> = MutableStateFlow(ProviderStepState())

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -51,6 +52,18 @@ class SshKeyViewModel(
     val keys: StateFlow<List<SshKeyEntry>> =
         dataStore.keys
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), emptyList())
+
+    /**
+     * Whether the device-credential app lock is enabled.
+     *
+     * SSH is gated on this lock: when it is `false` the agent does not load
+     * stored keys, so the screen surfaces a banner steering the user to the
+     * setup wizard to enable it.
+     */
+    val appLockEnabled: StateFlow<Boolean> =
+        app.settingsRepository.settings
+            .map { it.useDeviceCredential }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), true)
 
     private val _isLoading = MutableStateFlow(false)
 

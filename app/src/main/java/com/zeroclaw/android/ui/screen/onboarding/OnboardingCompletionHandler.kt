@@ -53,8 +53,7 @@ internal class OnboardingCompletionHandler(
     private val memoryState: StateFlow<MemoryStepState>,
     private val identityState: StateFlow<IdentityStepState>,
     private val personalityState: StateFlow<PersonalityStepState>,
-    private val pinHash: StateFlow<String>,
-    private val lockEnabled: StateFlow<Boolean>,
+    private val useDeviceCredential: StateFlow<Boolean>,
     private val activationState: MutableStateFlow<ActivationStepState>,
     private val apiKeyRepository: ApiKeyRepository,
     private val agentRepository: AgentRepository,
@@ -75,7 +74,7 @@ internal class OnboardingCompletionHandler(
      * 7. Default provider/model persistence
      * 8. Autonomy level persistence
      * 9. Memory configuration persistence
-     * 10. PIN hash/lock persistence
+     * 10. Device-credential lock persistence
      * 11. [onDone] callback (caller marks onboarding complete + navigates)
      */
     @Suppress("CognitiveComplexMethod", "CyclomaticComplexMethod", "LongMethod")
@@ -117,11 +116,7 @@ internal class OnboardingCompletionHandler(
         saveAutonomyLevel()
         saveMemoryConfig()
 
-        val hash = pinHash.value
-        if (hash.isNotEmpty()) {
-            settingsRepository.setPinHash(hash)
-            settingsRepository.setLockEnabled(lockEnabled.value)
-        }
+        settingsRepository.setUseDeviceCredential(useDeviceCredential.value)
 
         onDone()
     }

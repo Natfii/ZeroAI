@@ -28,30 +28,30 @@ import org.junit.jupiter.api.Test
 /**
  * Unit tests for the onboarding coordinator step states and navigation logic.
  *
- * Tests the 9-step navigation bounds, data class defaults and copy semantics,
+ * Tests the 10-step navigation bounds, data class defaults and copy semantics,
  * and channel sub-flow state management. The coordinator ViewModel itself
  * requires an Android context and will be integration-tested when wired to the UI.
  */
 @DisplayName("OnboardingCoordinator")
 class OnboardingCoordinatorTest {
-    /** Total steps in the 9-step wizard. */
-    private val totalSteps = 9
+    /** Total steps in the 10-step wizard. */
+    private val totalSteps = 10
 
     @Nested
     @DisplayName("Step navigation")
     inner class StepNavigation {
         @Test
-        @DisplayName("initial step is 0 and total is 9")
-        fun `initial step is 0 and total is 9`() {
-            val tracker = NineStepTracker()
+        @DisplayName("initial step is 0 and total is 10")
+        fun `initial step is 0 and total is 10`() {
+            val tracker = StepTracker()
             assertEquals(0, tracker.current)
             assertEquals(totalSteps, tracker.totalSteps)
         }
 
         @Test
-        @DisplayName("nextStep advances through all 9 steps")
-        fun `nextStep advances through all 9 steps`() {
-            val tracker = NineStepTracker()
+        @DisplayName("nextStep advances through all 10 steps")
+        fun `nextStep advances through all 10 steps`() {
+            val tracker = StepTracker()
             repeat(totalSteps - 1) { tracker.next() }
             assertEquals(totalSteps - 1, tracker.current)
         }
@@ -59,7 +59,7 @@ class OnboardingCoordinatorTest {
         @Test
         @DisplayName("nextStep does not exceed max step")
         fun `nextStep does not exceed max step`() {
-            val tracker = NineStepTracker()
+            val tracker = StepTracker()
             repeat(totalSteps + 5) { tracker.next() }
             assertEquals(totalSteps - 1, tracker.current)
         }
@@ -67,7 +67,7 @@ class OnboardingCoordinatorTest {
         @Test
         @DisplayName("previousStep goes back within bounds")
         fun `previousStep goes back within bounds`() {
-            val tracker = NineStepTracker()
+            val tracker = StepTracker()
             repeat(5) { tracker.next() }
             assertEquals(5, tracker.current)
             repeat(3) { tracker.previous() }
@@ -77,7 +77,7 @@ class OnboardingCoordinatorTest {
         @Test
         @DisplayName("previousStep does not go below 0")
         fun `previousStep does not go below 0`() {
-            val tracker = NineStepTracker()
+            val tracker = StepTracker()
             tracker.previous()
             assertEquals(0, tracker.current)
             tracker.next()
@@ -296,9 +296,9 @@ class OnboardingCoordinatorTest {
  * Mirrors the step-tracking logic from [OnboardingCoordinator]
  * without requiring [android.app.Application].
  */
-private class NineStepTracker {
+private class StepTracker {
     /** Total steps in the wizard. */
-    val totalSteps: Int = 9
+    val totalSteps: Int = 10
     var current: Int = 0
         private set
 

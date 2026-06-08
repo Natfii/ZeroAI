@@ -38,15 +38,13 @@ class SessionLockManager(
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
     private var backgroundTimestamp: Long = 0L
-    private var lockEnabled: Boolean = false
-    private var pinHashSet: Boolean = false
+    private var useDeviceCredential: Boolean = false
     private var timeoutMillis: Long = AppSettings.DEFAULT_LOCK_TIMEOUT * MILLIS_PER_MINUTE
 
     init {
         scope.launch {
             settingsFlow.collect { settings ->
-                lockEnabled = settings.lockEnabled
-                pinHashSet = settings.pinHash.isNotEmpty()
+                useDeviceCredential = settings.useDeviceCredential
                 timeoutMillis = settings.lockTimeoutMinutes.toLong() * MILLIS_PER_MINUTE
             }
         }
@@ -59,7 +57,7 @@ class SessionLockManager(
     override fun onStart(owner: LifecycleOwner) {
         if (backgroundTimestamp == 0L) return
         val elapsed = System.currentTimeMillis() - backgroundTimestamp
-        if (elapsed >= timeoutMillis && lockEnabled && pinHashSet) {
+        if (elapsed >= timeoutMillis && useDeviceCredential) {
             _isLocked.value = true
         }
     }

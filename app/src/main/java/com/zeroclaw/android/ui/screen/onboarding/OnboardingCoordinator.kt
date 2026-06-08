@@ -43,7 +43,7 @@ import kotlinx.coroutines.launch
 private const val SHARING_TIMEOUT_MS = 5000L
 
 /**
- * Coordinator ViewModel for the 8-step onboarding wizard.
+ * Coordinator ViewModel for the 10-step onboarding wizard.
  *
  * Each step has its own typed state class exposed as a [StateFlow]. The
  * coordinator manages step navigation, validation, model fetching, and
@@ -81,32 +81,35 @@ class OnboardingCoordinator(
         /** Step index: runtime permissions. */
         const val STEP_PERMISSIONS = 0
 
+        /** Step index: device-credential app lock setup. */
+        const val STEP_DEVICE_LOCK = 1
+
         /** Step index: welcome screen. */
-        const val STEP_WELCOME = 1
+        const val STEP_WELCOME = 2
 
         /** Step index: provider and API key configuration. */
-        const val STEP_PROVIDER = 2
+        const val STEP_PROVIDER = 3
 
         /** Step index: on-device AI (AICore / Gemini Nano) setup. */
-        const val STEP_ON_DEVICE_AI = 3
+        const val STEP_ON_DEVICE_AI = 4
 
         /** Step index: channel selection and sub-flow configuration. */
-        const val STEP_CHANNELS = 4
+        const val STEP_CHANNELS = 5
 
         /** Step index: security/autonomy level. */
-        const val STEP_SECURITY = 5
+        const val STEP_SECURITY = 6
 
         /** Step index: memory backend configuration. */
-        const val STEP_MEMORY = 6
+        const val STEP_MEMORY = 7
 
         /** Step index: agent identity configuration. */
-        const val STEP_IDENTITY = 7
+        const val STEP_IDENTITY = 8
 
         /** Step index: activation and completion. */
-        const val STEP_ACTIVATION = 8
+        const val STEP_ACTIVATION = 9
 
         /** Total number of onboarding steps. */
-        const val TOTAL_STEPS = 9
+        const val TOTAL_STEPS = 10
 
         /** Total number of personality sub-screens. */
         const val PERSONALITY_SUB_STEPS = 5
@@ -127,11 +130,8 @@ class OnboardingCoordinator(
         const val PERSONALITY_INTERESTS = 4
     }
 
-    /** PBKDF2 hash of the PIN set during onboarding. */
-    val pinHash: StateFlow<String> = states.pinHash.asStateFlow()
-
-    /** Whether the session lock is enabled. */
-    val lockEnabled: StateFlow<Boolean> = states.lockEnabled.asStateFlow()
+    /** Whether the app lock uses the device screen-lock credential. */
+    val useDeviceCredential: StateFlow<Boolean> = states.useDeviceCredential.asStateFlow()
 
     /** Observable state for the provider configuration step. */
     val providerState: StateFlow<ProviderStepState> = states.provider.asStateFlow()
@@ -235,8 +235,7 @@ class OnboardingCoordinator(
             memoryState = states.memory,
             identityState = states.identity,
             personalityState = states.personality,
-            pinHash = states.pinHash,
-            lockEnabled = states.lockEnabled,
+            useDeviceCredential = states.useDeviceCredential,
             activationState = states.activation,
             apiKeyRepository = apiKeyRepository,
             agentRepository = agentRepository,
@@ -323,24 +322,15 @@ class OnboardingCoordinator(
     }
 
     /**
-     * Stores the PBKDF2 hash of the PIN configured during onboarding.
+     * Toggles whether the app lock uses the device screen-lock credential.
      *
-     * Also enables the session lock when a non-empty hash is provided.
+     * The device credential is the single lock mode, so enabling it also
+     * enables the session lock; disabling it turns the lock off.
      *
-     * @param hash Base64-encoded salt+hash string.
+     * @param enabled Whether to require the device credential to unlock.
      */
-    fun setPinHash(hash: String) {
-        states.pinHash.value = hash
-        states.lockEnabled.value = hash.isNotEmpty()
-    }
-
-    /**
-     * Toggles the session lock enabled state.
-     *
-     * @param enabled Whether the lock is active.
-     */
-    fun setLockEnabled(enabled: Boolean) {
-        states.lockEnabled.value = enabled
+    fun setUseDeviceCredential(enabled: Boolean) {
+        states.useDeviceCredential.value = enabled
     }
 
     /** @see OnboardingProviderHandler.setProvider */

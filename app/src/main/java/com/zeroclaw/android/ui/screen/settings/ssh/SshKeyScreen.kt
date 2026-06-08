@@ -132,6 +132,7 @@ fun SshKeyScreen(
     val keys by viewModel.keys.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val appLockEnabled by viewModel.appLockEnabled.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -191,40 +192,45 @@ fun SshKeyScreen(
             }
         },
     ) { innerPadding ->
-        Box(
+        Column(
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
         ) {
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center),
-                )
-            } else if (keys.isEmpty()) {
-                SshEmptyState(
-                    onGenerate = { showGenerateDialog = true },
-                    onImport = { filePicker.launch(arrayOf("*/*")) },
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP.dp),
-                    contentPadding =
-                        androidx.compose.foundation.layout.PaddingValues(
-                            horizontal = EDGE_PADDING_DP.dp,
-                            vertical = ITEM_SPACING_DP.dp,
-                        ),
-                ) {
-                    items(
-                        items = keys,
-                        key = { it.keyId },
-                        contentType = { "ssh_key" },
-                    ) { entry ->
-                        SshKeyCard(
-                            entry = entry,
-                            onClick = { detailKey = entry },
-                        )
+            if (!appLockEnabled) {
+                SshDisabledBanner()
+            }
+            Box(modifier = Modifier.fillMaxSize()) {
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                } else if (keys.isEmpty()) {
+                    SshEmptyState(
+                        onGenerate = { showGenerateDialog = true },
+                        onImport = { filePicker.launch(arrayOf("*/*")) },
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP.dp),
+                        contentPadding =
+                            androidx.compose.foundation.layout.PaddingValues(
+                                horizontal = EDGE_PADDING_DP.dp,
+                                vertical = ITEM_SPACING_DP.dp,
+                            ),
+                    ) {
+                        items(
+                            items = keys,
+                            key = { it.keyId },
+                            contentType = { "ssh_key" },
+                        ) { entry ->
+                            SshKeyCard(
+                                entry = entry,
+                                onClick = { detailKey = entry },
+                            )
+                        }
                     }
                 }
             }
@@ -353,6 +359,44 @@ private fun SshEmptyState(
                 Text("Import")
             }
         }
+    }
+}
+
+/**
+ * Banner shown when the device-credential app lock is disabled.
+ *
+ * SSH is gated on the app lock, so when it is off the running agent holds
+ * no keys. The banner explains the state and points the user at the existing
+ * "Re-run Setup Wizard" recovery flow in Settings rather than offering a new
+ * enable path here.
+ */
+@Composable
+private fun SshDisabledBanner() {
+    Card(
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+            ),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    horizontal = EDGE_PADDING_DP.dp,
+                    vertical = ITEM_SPACING_DP.dp,
+                ).semantics {
+                    contentDescription =
+                        "App lock is off. SSH is disabled. " +
+                        "Re-run setup from Settings to enable it."
+                },
+    ) {
+        Text(
+            text =
+                "App lock is off — SSH is disabled. Re-run setup from " +
+                    "Settings to enable it.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.padding(CARD_PADDING_DP.dp),
+        )
     }
 }
 

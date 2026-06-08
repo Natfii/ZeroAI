@@ -6,18 +6,13 @@
 
 package com.zeroclaw.android.navigation
 
-import android.app.Activity
-import android.app.KeyguardManager
-import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -30,8 +25,7 @@ import androidx.navigation.toRoute
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.model.ServiceState
 import com.zeroclaw.android.service.ZeroAIDaemonService
-import com.zeroclaw.android.ui.component.PinEntryMode
-import com.zeroclaw.android.ui.component.PinEntrySheet
+import com.zeroclaw.android.ui.lock.rememberDeviceCredentialAuthenticator
 import com.zeroclaw.android.ui.screen.agents.AgentsScreen
 import com.zeroclaw.android.ui.screen.agents.OnDeviceLargeModelScreen
 import com.zeroclaw.android.ui.screen.agents.ProviderSlotDetailScreen
@@ -305,30 +299,8 @@ fun ZeroAINavHost(
 
         composable<ApiKeysRoute> {
             val context = LocalContext.current
-            val app = context.applicationContext as ZeroAIApplication
             val apiKeysViewModel: ApiKeysViewModel = viewModel()
-            val settings by app.settingsRepository.settings.collectAsStateWithLifecycle(
-                initialValue =
-                    com.zeroclaw.android.model
-                        .AppSettings(),
-            )
-            var pendingRevealKeyId by remember { mutableStateOf<String?>(null) }
-            var showPinSetupForReveal by remember { mutableStateOf(false) }
-            var awaitingDeviceCredential by remember { mutableStateOf(false) }
-            val keyguardManager =
-                remember(context) {
-                    context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-                }
-            val deviceCredentialLauncher =
-                rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult(),
-                ) { result ->
-                    if (result.resultCode == Activity.RESULT_OK) {
-                        pendingRevealKeyId?.let { apiKeysViewModel.revealKey(it) }
-                    }
-                    pendingRevealKeyId = null
-                    awaitingDeviceCredential = false
-                }
+            val authenticator = rememberDeviceCredentialAuthenticator()
             val credentialsLauncher =
                 rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument(),
@@ -340,27 +312,14 @@ fun ZeroAINavHost(
                     navController.navigate(ApiKeyDetailRoute(keyId = keyId))
                 },
                 onRequestSecureReveal = { keyId ->
-                    pendingRevealKeyId = keyId
-                    val launchedDeviceCredential =
-                        if (keyguardManager.isDeviceSecure) {
-                            @Suppress("DEPRECATION")
-                            val intent =
-                                keyguardManager.createConfirmDeviceCredentialIntent(
-                                    "Reveal API Key",
-                                    "Confirm your identity to reveal the stored key",
-                                )
-                            if (intent != null) {
-                                awaitingDeviceCredential = true
-                                deviceCredentialLauncher.launch(intent)
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    if (!launchedDeviceCredential && settings.pinHash.isEmpty()) {
-                        showPinSetupForReveal = true
+                    if (authenticator.isDeviceSecure()) {
+                        authenticator.authenticate(
+                            title = "Reveal API Key",
+                            subtitle = "Confirm your device credential to reveal the stored key",
+                            onSuccess = { apiKeysViewModel.revealKey(keyId) },
+                        )
+                    } else {
+                        apiKeysViewModel.revealKey(keyId)
                     }
                 },
                 onExportResult = { payload ->
@@ -386,35 +345,6 @@ fun ZeroAINavHost(
                 edgeMargin = edgeMargin,
                 apiKeysViewModel = apiKeysViewModel,
             )
-
-            if (showPinSetupForReveal && pendingRevealKeyId != null) {
-                PinEntrySheet(
-                    mode = PinEntryMode.SETUP,
-                    currentPinHash = "",
-                    onPinSet = { newHash ->
-                        restartScope.launch {
-                            app.settingsRepository.setPinHash(newHash)
-                        }
-                        pendingRevealKeyId?.let { apiKeysViewModel.revealKey(it) }
-                        pendingRevealKeyId = null
-                        showPinSetupForReveal = false
-                    },
-                    onDismiss = {
-                        pendingRevealKeyId = null
-                        showPinSetupForReveal = false
-                    },
-                )
-            } else if (!awaitingDeviceCredential && pendingRevealKeyId != null && settings.pinHash.isNotEmpty()) {
-                PinEntrySheet(
-                    mode = PinEntryMode.VERIFY,
-                    currentPinHash = settings.pinHash,
-                    onPinSet = {
-                        pendingRevealKeyId?.let { apiKeysViewModel.revealKey(it) }
-                        pendingRevealKeyId = null
-                    },
-                    onDismiss = { pendingRevealKeyId = null },
-                )
-            }
         }
 
         composable<ApiKeyDetailRoute> { backStackEntry ->

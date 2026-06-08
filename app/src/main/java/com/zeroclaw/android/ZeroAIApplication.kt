@@ -461,11 +461,11 @@ class ZeroAIApplication :
         }
 
         seedProviderSlots(ioScope)
-        startSshAgent(ioScope)
         onDeviceInferenceManager.attach()
 
         sessionLockManager = SessionLockManager(settingsRepository.settings, ioScope)
         ProcessLifecycleOwner.get().lifecycle.addObserver(sessionLockManager)
+        startSshAgent(ioScope)
 
         syncDaemonState(ioScope)
         observeForegroundSync(ioScope)
@@ -555,24 +555,70 @@ class ZeroAIApplication :
     }
 
     /**
-     * Brings the in-process ssh-agent up for the session.
+     * Brings the in-process ssh-agent up and gates key loading behind the
+     * device-credential app lock.
      *
-     * Migrates any legacy plaintext keys into the encrypted store, starts the
-     * agent on `filesDir/ssh/agent.sock`, and loads every encrypted key into
-     * it so terminal shells and the bundled `ssh` client can authenticate via
-     * `SSH_AUTH_SOCK`. Runs off the main thread; the agent-start in Rust is
-     * idempotent so a transient failure simply leaves keys unloaded until the
-     * next launch rather than crashing.
+     * Enforces the SSH security invariant **agent-holds-keys ⟺ app-unlocked**:
      *
-     * @param scope Background scope for the agent bring-up coroutine.
+     *  1. [SshAgentInitializer.prepareAgent] always runs — it migrates legacy
+     *     plaintext keys and starts the agent socket without decrypting any
+     *     private bytes, so the agent comes up empty.
+     *  2. The decrypt-and-load step is deferred until [SessionLockManager]
+     *     reports the first unlock (`isLocked` transitioning to `false`), and
+     *     only when [AppSettings.useDeviceCredential] is on. When the lock is
+     *     off (SSH disabled, or a fresh pre-onboarding install) `isLocked`
+     *     never flips, so no key is ever decrypted into the agent.
+     *  3. Every re-lock (`isLocked` transitioning back to `true`, e.g. the
+     *     background-timeout path) flushes all identities via the existing
+     *     `ssh_agent_reset` FFI, genuinely re-protecting the keys.
+     *
+     * Runs off the main thread; the agent start in Rust is idempotent so a
+     * transient failure simply leaves keys unloaded until the next unlock
+     * rather than crashing.
+     *
+     * @param scope Background scope for the agent bring-up and lock observer.
      */
     private fun startSshAgent(scope: CoroutineScope) {
-        scope.launch {
+        val initializer =
             SshAgentInitializer(
                 sshDir = File(filesDir, "ssh"),
                 keyStore = sshKeyStore,
                 dataStore = sshDataStore,
-            ).initialize()
+            )
+        scope.launch {
+            val ready = initializer.prepareAgent()
+            if (ready) observeLockForSshKeys(initializer)
+        }
+    }
+
+    /**
+     * Loads keys into the agent on the first unlock and flushes them on every
+     * re-lock, keeping the agent's identity set in lockstep with the app lock.
+     *
+     * Collects [SessionLockManager.isLocked]. On a `true → false` transition,
+     * if [AppSettings.useDeviceCredential] is enabled the stored keys are
+     * decrypted into the agent (once per unlock). On a `false → true`
+     * transition the agent is flushed via `ssh_agent_reset`. The initial
+     * locked state emits nothing, so a launch that never unlocks loads no key.
+     *
+     * @param initializer Prepared agent initializer used to load keys.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun observeLockForSshKeys(initializer: SshAgentInitializer) {
+        var wasLocked = true
+        sessionLockManager.isLocked.collect { locked ->
+            if (wasLocked == locked) return@collect
+            if (!locked) {
+                if (settingsRepository.settings.first().useDeviceCredential) {
+                    initializer.loadKeysIntoAgent()
+                }
+            } else {
+                runCatching { com.zeroclaw.ffi.sshAgentReset() }
+                    .onFailure { error ->
+                        Log.w(TAG, "SSH agent flush on re-lock failed: ${error.message}")
+                    }
+            }
+            wasLocked = locked
         }
     }
 

@@ -128,9 +128,9 @@ package com.zeroclaw.android.model
  * @property proxyServiceSelectors Comma-separated service selectors for proxy routing.
  * @property reliabilityBackoffMs Provider retry backoff duration in milliseconds.
  * @property reliabilityApiKeysJson JSON object mapping provider names to API keys.
- * @property lockEnabled Android-only. Whether the session lock gate is active.
  * @property lockTimeoutMinutes Android-only. Minutes of background time before re-locking.
- * @property pinHash Android-only. PBKDF2 hash of the user's PIN (Base64-encoded salt+hash).
+ * @property useDeviceCredential Android-only. Whether the lock is enforced via the device
+ *   screen-lock credential (PIN/pattern/password). The single lock mode; required once SSH is used.
  * @property pluginRegistryUrl Android-only. Plugin registry preference, not passed to daemon TOML.
  * @property pluginSyncEnabled Android-only. Plugin registry preference, not passed to daemon TOML.
  * @property pluginSyncIntervalHours Android-only. Plugin registry preference, not passed to daemon TOML.
@@ -254,9 +254,8 @@ data class AppSettings(
     val proxyServiceSelectors: String = "",
     val reliabilityBackoffMs: Long = DEFAULT_RELIABILITY_BACKOFF_MS,
     val reliabilityApiKeysJson: String = "{}",
-    val lockEnabled: Boolean = false,
     val lockTimeoutMinutes: Int = DEFAULT_LOCK_TIMEOUT,
-    val pinHash: String = "",
+    val useDeviceCredential: Boolean = false,
     val pluginRegistryUrl: String = DEFAULT_PLUGIN_REGISTRY_URL,
     val pluginSyncEnabled: Boolean = false,
     val pluginSyncIntervalHours: Int = DEFAULT_PLUGIN_SYNC_INTERVAL,
@@ -275,8 +274,8 @@ data class AppSettings(
     /**
      * Returns a string representation with secret fields redacted.
      *
-     * Prevents accidental leakage of API keys, tokens, and PIN hashes
-     * in log output or crash reports.
+     * Prevents accidental leakage of API keys and tokens in log output
+     * or crash reports.
      */
     override fun toString(): String =
         "AppSettings(provider=$defaultProvider, model=$defaultModel, host=$host, port=$port, " +

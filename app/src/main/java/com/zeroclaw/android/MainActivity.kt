@@ -7,13 +7,13 @@
 package com.zeroclaw.android
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.getValue
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.zeroclaw.android.BuildConfig
 import com.zeroclaw.android.model.AppSettings
@@ -33,7 +33,7 @@ import com.zeroclaw.android.ui.theme.ZeroAITheme
  * [ZeroAIAppShell] which manages navigation, the adaptive
  * navigation bar, and all screens.
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

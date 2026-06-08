@@ -43,8 +43,8 @@ private const val SECURE_SETTINGS_PREFS = "secure_settings"
  * [SettingsRepository] implementation backed by Jetpack DataStore Preferences.
  *
  * Non-secret settings are stored in plaintext DataStore. Secret values
- * (tunnel tokens, third-party API keys, paired gateway tokens, the PIN
- * hash, and reliability API keys) are stored in [EncryptedSharedPreferences]
+ * (tunnel tokens, third-party API keys, paired gateway tokens, and
+ * reliability API keys) are stored in [EncryptedSharedPreferences]
  * via [SecurePrefsProvider].
  *
  * @param context Application context for DataStore initialization.
@@ -67,7 +67,6 @@ class DataStoreSettingsRepository(
     private data class SecureSnapshot(
         val gwPairedTokens: String,
         val composioApiKey: String,
-        val pinHash: String,
         val webSearchBraveApiKey: String,
         val webSearchGoogleApiKey: String,
         val reliabilityApiKeysJson: String,
@@ -82,7 +81,6 @@ class DataStoreSettingsRepository(
         SecureSnapshot(
             gwPairedTokens = securePrefs.getString(SEC_GW_PAIRED_TOKENS, "") ?: "",
             composioApiKey = securePrefs.getString(SEC_COMPOSIO_API_KEY, "") ?: "",
-            pinHash = securePrefs.getString(SEC_PIN_HASH, "") ?: "",
             webSearchBraveApiKey = securePrefs.getString(SEC_WEB_SEARCH_BRAVE_API_KEY, "") ?: "",
             webSearchGoogleApiKey = securePrefs.getString(SEC_WEB_SEARCH_GOOGLE_API_KEY, "") ?: "",
             reliabilityApiKeysJson =
@@ -267,11 +265,10 @@ class DataStoreSettingsRepository(
             httpRequestTimeoutSecs =
                 prefs[KEY_HTTP_REQUEST_TIMEOUT_SECS]
                     ?: AppSettings.DEFAULT_HTTP_REQUEST_TIMEOUT_SECS,
-            lockEnabled = prefs[KEY_LOCK_ENABLED] ?: false,
             lockTimeoutMinutes =
                 prefs[KEY_LOCK_TIMEOUT]
                     ?: AppSettings.DEFAULT_LOCK_TIMEOUT,
-            pinHash = secrets.pinHash,
+            useDeviceCredential = prefs[KEY_USE_DEVICE_CREDENTIAL] ?: false,
             pluginRegistryUrl =
                 prefs[KEY_PLUGIN_REGISTRY_URL]
                     ?: AppSettings.DEFAULT_PLUGIN_REGISTRY_URL,
@@ -556,11 +553,9 @@ class DataStoreSettingsRepository(
 
     override suspend fun setReliabilityApiKeysJson(json: String) = editSecure(SEC_RELIABILITY_API_KEYS_JSON, json)
 
-    override suspend fun setLockEnabled(enabled: Boolean) = edit { it[KEY_LOCK_ENABLED] = enabled }
-
     override suspend fun setLockTimeoutMinutes(minutes: Int) = edit { it[KEY_LOCK_TIMEOUT] = minutes }
 
-    override suspend fun setPinHash(hash: String) = editSecure(SEC_PIN_HASH, hash)
+    override suspend fun setUseDeviceCredential(enabled: Boolean) = edit { it[KEY_USE_DEVICE_CREDENTIAL] = enabled }
 
     override suspend fun setPluginRegistryUrl(url: String) = edit { it[KEY_PLUGIN_REGISTRY_URL] = url }
 
@@ -621,7 +616,6 @@ class DataStoreSettingsRepository(
         const val SEC_COMPOSIO_API_KEY = "sec_composio_api_key"
         const val SEC_WEB_SEARCH_BRAVE_API_KEY = "sec_web_search_brave_api_key"
         const val SEC_WEB_SEARCH_GOOGLE_API_KEY = "sec_web_search_google_api_key"
-        const val SEC_PIN_HASH = "sec_pin_hash"
         const val SEC_RELIABILITY_API_KEYS_JSON = "sec_reliability_api_keys_json"
 
         val KEY_HOST = stringPreferencesKey("host")
@@ -684,8 +678,8 @@ class DataStoreSettingsRepository(
         val KEY_HTTP_REQ_DOMAINS = stringPreferencesKey("http_req_domains")
         val KEY_BIOMETRIC_SERVICE = booleanPreferencesKey("biometric_for_service")
         val KEY_BIOMETRIC_SETTINGS = booleanPreferencesKey("biometric_for_settings")
-        val KEY_LOCK_ENABLED = booleanPreferencesKey("lock_enabled")
         val KEY_LOCK_TIMEOUT = intPreferencesKey("lock_timeout_minutes")
+        val KEY_USE_DEVICE_CREDENTIAL = booleanPreferencesKey("use_device_credential")
         val KEY_BIOMETRIC_UNLOCK = booleanPreferencesKey("biometric_unlock_enabled")
         val KEY_PLUGIN_REGISTRY_URL = stringPreferencesKey("plugin_registry_url")
         val KEY_PLUGIN_SYNC_ENABLED = booleanPreferencesKey("plugin_sync_enabled")

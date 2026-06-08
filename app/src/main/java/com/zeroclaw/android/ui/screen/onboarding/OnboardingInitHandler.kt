@@ -159,8 +159,7 @@ internal class OnboardingInitHandler(
     }
 
     private suspend fun prefillLockFromSettingsSuspending(settings: AppSettings) {
-        states.pinHash.value = settings.pinHash
-        states.lockEnabled.value = settings.lockEnabled
+        states.useDeviceCredential.value = settings.useDeviceCredential
     }
 
     @Suppress("TooGenericExceptionCaught")

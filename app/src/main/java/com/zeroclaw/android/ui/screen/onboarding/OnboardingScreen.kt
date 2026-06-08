@@ -48,6 +48,7 @@ import com.zeroclaw.android.ui.component.setup.ChannelSetupFlow
 import com.zeroclaw.android.ui.component.setup.MemoryConfigFlow
 import com.zeroclaw.android.ui.screen.onboarding.state.ChannelSubFlowState
 import com.zeroclaw.android.ui.screen.onboarding.steps.ActivationStep
+import com.zeroclaw.android.ui.screen.onboarding.steps.DeviceLockStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.OnDeviceAiStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.PermissionsStep
 import com.zeroclaw.android.ui.screen.onboarding.steps.ProviderStep
@@ -85,9 +86,9 @@ data class OnboardingState(
  * Onboarding wizard screen with step indicator and navigation buttons.
  *
  * Thin stateful wrapper that collects [OnboardingCoordinator] flows and
- * delegates rendering to [OnboardingContent]. Supports eight steps:
- * permissions, welcome, provider, channels, security, memory,
- * identity, and activation.
+ * delegates rendering to [OnboardingContent]. Supports ten steps:
+ * permissions, device lock, welcome, provider, on-device AI, channels,
+ * security, memory, identity, and activation.
  *
  * @param onComplete Callback invoked when onboarding finishes.
  * @param coordinator The [OnboardingCoordinator] for step management.
@@ -168,6 +169,8 @@ fun OnboardingScreen(
             when (step) {
                 OnboardingCoordinator.STEP_PERMISSIONS ->
                     PermissionsStepCollector(coordinator)
+                OnboardingCoordinator.STEP_DEVICE_LOCK ->
+                    DeviceLockStepCollector(coordinator)
                 OnboardingCoordinator.STEP_WELCOME ->
                     WelcomeStep()
                 OnboardingCoordinator.STEP_PROVIDER ->
@@ -305,20 +308,36 @@ internal fun OnboardingContent(
 }
 
 /**
- * Collects lock-related flows and delegates to [PermissionsStep].
+ * Renders the [PermissionsStep]. No collector state is needed today, but the
+ * indirection is kept so step dispatch stays uniform across the wizard.
  *
- * Isolating the flow collections here prevents lock state changes from
- * recomposing the parent [OnboardingScreen] layout.
- *
- * @param coordinator The [OnboardingCoordinator] owning the lock state flows.
+ * @param coordinator The [OnboardingCoordinator] (unused; reserved for symmetry).
  */
 @Composable
-private fun PermissionsStepCollector(coordinator: OnboardingCoordinator) {
-    val pinHash by coordinator.pinHash.collectAsStateWithLifecycle()
+private fun PermissionsStepCollector(
+    @Suppress("UNUSED_PARAMETER") coordinator: OnboardingCoordinator,
+) {
+    PermissionsStep()
+}
 
-    PermissionsStep(
-        pinHash = pinHash,
-        onPinSet = coordinator::setPinHash,
+/**
+ * Collects lock state and delegates to [DeviceLockStep].
+ *
+ * Isolating the flow collection here prevents lock state changes from
+ * recomposing the parent [OnboardingScreen] layout. Advancing on success is
+ * routed through [OnboardingCoordinator.nextStep] so it shares the wizard's
+ * cold-launch readiness gate.
+ *
+ * @param coordinator The [OnboardingCoordinator] owning the lock state flow.
+ */
+@Composable
+private fun DeviceLockStepCollector(coordinator: OnboardingCoordinator) {
+    val useDeviceCredential by coordinator.useDeviceCredential.collectAsStateWithLifecycle()
+
+    DeviceLockStep(
+        useDeviceCredential = useDeviceCredential,
+        onUseDeviceCredentialChange = coordinator::setUseDeviceCredential,
+        onAdvance = coordinator::nextStep,
     )
 }
 

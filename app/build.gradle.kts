@@ -230,6 +230,7 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.core.ktx)
     implementation(libs.security.crypto)
+    implementation(libs.biometric)
     implementation(libs.material)
     implementation(libs.profileinstaller)
     implementation(libs.coil.compose)

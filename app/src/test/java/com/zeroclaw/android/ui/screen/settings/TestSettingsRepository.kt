@@ -182,11 +182,9 @@ internal class TestSettingsRepository : SettingsRepository {
 
     override suspend fun setReliabilityApiKeysJson(json: String) = _settings.update { it.copy(reliabilityApiKeysJson = json) }
 
-    override suspend fun setLockEnabled(enabled: Boolean) = _settings.update { it.copy(lockEnabled = enabled) }
-
     override suspend fun setLockTimeoutMinutes(minutes: Int) = _settings.update { it.copy(lockTimeoutMinutes = minutes) }
 
-    override suspend fun setPinHash(hash: String) = _settings.update { it.copy(pinHash = hash) }
+    override suspend fun setUseDeviceCredential(enabled: Boolean) = _settings.update { it.copy(useDeviceCredential = enabled) }
 
     override suspend fun setPluginRegistryUrl(url: String) = _settings.update { it.copy(pluginRegistryUrl = url) }
 
