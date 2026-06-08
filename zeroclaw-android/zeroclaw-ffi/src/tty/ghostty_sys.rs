@@ -117,6 +117,12 @@ pub const GHOSTTY_MODE_BRACKETED_PASTE: GhosttyMode = 2004 & 0x7FFF;
 /// (lost) sequences when the window gains or loses focus.
 pub const GHOSTTY_MODE_FOCUS_REPORTING: GhosttyMode = 1004 & 0x7FFF;
 
+/// Application cursor keys mode (DECCKM, DEC private mode 1).
+///
+/// When active, the cursor and Home/End keys send SS3 (`ESC O x`)
+/// sequences instead of CSI (`ESC [ x`).
+pub const GHOSTTY_MODE_CURSOR_KEYS: GhosttyMode = 1 & 0x7FFF;
+
 // ── Focus Events ───────────────────────────────────────────────────
 
 /// Focus event type for [`ghostty_focus_encode`].

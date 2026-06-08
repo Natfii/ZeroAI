@@ -211,6 +211,10 @@ impl TerminalBackend for GhosttyBackend {
         MouseEncoder::is_tracking_active(&self.terminal)
     }
 
+    fn is_application_cursor_keys_active(&self) -> bool {
+        self.terminal.is_application_cursor_keys_active()
+    }
+
     fn encode_mouse_event(&mut self, action: u8, button: u8, x: f32, y: f32, mods: u32) -> Vec<u8> {
         self.mouse_encoder.encode(action, button, x, y, mods)
     }

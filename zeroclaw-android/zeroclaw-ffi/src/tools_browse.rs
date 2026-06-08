@@ -354,7 +354,10 @@ pub(crate) fn list_tools_inner() -> Result<Vec<FfiToolSpec>, FfiError> {
         specs.push(s);
     }
 
-    if composio_key.as_ref().is_some_and(|k: &String| !k.is_empty()) {
+    if composio_key
+        .as_ref()
+        .is_some_and(|k: &String| !k.is_empty())
+    {
         let mut s = builtin_to_spec(&COMPOSIO_TOOL);
         s.is_active = true;
         s.inactive_reason = String::new();
@@ -438,9 +441,15 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
         // behaviour rather than blocking all tools).
         use zeroclaw_config::policy::ToolOperation;
         use zeroclaw_runtime::security::SecurityPolicy;
-        if let Ok(policy) = SecurityPolicy::for_agent(&config, "default") {
+        // Resolve the actual active agent ("default", else the first enabled
+        // agent) rather than hardcoding "default": the gate must enforce
+        // whichever agent the config wires its risk_profile onto.
+        let agent_alias = config.resolved_runtime_agent_alias().unwrap_or("default");
+        if let Ok(policy) = SecurityPolicy::for_agent(&config, agent_alias) {
             let op = match name {
-                "memory_recall" | "memory_search" | "cron_list" | "cron_runs" => ToolOperation::Read,
+                "memory_recall" | "memory_search" | "cron_list" | "cron_runs" => {
+                    ToolOperation::Read
+                }
                 _ => ToolOperation::Act,
             };
             policy
@@ -483,7 +492,6 @@ pub(crate) fn invoke_tool_inner(name: &str, args_json: &str) -> Result<String, F
         })
     }
 }
-
 
 #[cfg(test)]
 #[path = "tools_browse_tests.rs"]

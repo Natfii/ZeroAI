@@ -253,6 +253,15 @@ pub(crate) trait TerminalBackend: Send {
         false
     }
 
+    /// Returns whether application cursor keys mode (DECCKM, DEC private
+    /// mode 1) is active. When active, the cursor and Home/End keys send
+    /// SS3 (`ESC O x`) instead of CSI (`ESC [ x`).
+    ///
+    /// Default returns `false` for backends that don't support this query.
+    fn is_application_cursor_keys_active(&self) -> bool {
+        false
+    }
+
     /// Encodes a mouse event into terminal escape sequence bytes.
     /// Returns empty bytes if tracking is inactive or encoding fails.
     fn encode_mouse_event(&mut self, action: u8, button: u8, x: f32, y: f32, mods: u32) -> Vec<u8> {

@@ -418,6 +418,28 @@ impl Terminal {
         active
     }
 
+    /// Returns whether application cursor keys mode (DECCKM, DEC private
+    /// mode 1) is active.
+    ///
+    /// When active, the cursor and Home/End keys send SS3 (`ESC O x`)
+    /// sequences instead of CSI (`ESC [ x`).
+    pub(crate) fn is_application_cursor_keys_active(&self) -> bool {
+        let mut active = false;
+        // SAFETY: The handle is valid. The output pointer is valid stack
+        // memory for a bool.
+        unsafe {
+            let result = ghostty_terminal_mode_get(
+                self.handle.as_raw(),
+                GHOSTTY_MODE_CURSOR_KEYS,
+                &mut active,
+            );
+            if result != GhosttyResult::Success {
+                return false;
+            }
+        }
+        active
+    }
+
     /// Registers a title-changed callback for OSC 0/2 events.
     ///
     /// # Safety

@@ -78,6 +78,7 @@ import com.zeroclaw.ffi.ttyCreate
 import com.zeroclaw.ffi.ttyDestroy
 import com.zeroclaw.ffi.ttyGetOutputSnapshot
 import com.zeroclaw.ffi.ttyGetRenderFrame
+import com.zeroclaw.ffi.ttyIsApplicationCursorKeysActive
 import com.zeroclaw.ffi.ttyIsBracketedPasteActive
 import com.zeroclaw.ffi.ttyIsMouseTrackingActive
 import com.zeroclaw.ffi.ttyIsPasteSafe
@@ -934,11 +935,29 @@ class TerminalViewModel(
             }
             else -> Unit
         }
-        val bytes = encodeTtyKey(key, _ttyCtrlActive.value, _ttyAltActive.value)
+        val appCursor = isApplicationCursorKeysActive()
+        val bytes = encodeTtyKey(key, _ttyCtrlActive.value, _ttyAltActive.value, appCursor)
         _ttyCtrlActive.value = false
         _ttyAltActive.value = false
         ttyWriteBytes(bytes)
     }
+
+    /**
+     * Reads whether the active terminal has application cursor keys mode
+     * (DECCKM) enabled, so the arrow and Home/End keys are encoded as SS3
+     * (`ESC O x`) instead of CSI (`ESC [ x`).
+     *
+     * @return `true` when application cursor mode is active; `false` on any
+     *   FFI error or when no session is running.
+     */
+    private fun isApplicationCursorKeysActive(): Boolean =
+        try {
+            ttyIsApplicationCursorKeysActive()
+        } catch (
+            @Suppress("SwallowedException") e: com.zeroclaw.ffi.FfiException,
+        ) {
+            false
+        }
 
     /**
      * Starts the coroutine that waits for render-signal notifications from the PTY read loop
@@ -3860,6 +3879,8 @@ class TerminalViewModel(
          * @param key The special key to encode.
          * @param ctrl Whether the Ctrl modifier is active.
          * @param alt Whether the Alt modifier is active.
+         * @param appCursor Whether application cursor keys mode (DECCKM) is
+         *   active, selecting SS3 over CSI for the cursor and Home/End keys.
          * @return Byte array to write to the PTY.
          */
         @Suppress("MagicNumber", "CyclomaticComplexMethod")
@@ -3867,6 +3888,7 @@ class TerminalViewModel(
             key: TtySpecialKey,
             ctrl: Boolean = false,
             alt: Boolean = false,
+            appCursor: Boolean = false,
         ): ByteArray {
             // Cursor + Home/End: standard CSI keys with xterm modifier params.
             val csiFinal =
@@ -3879,7 +3901,7 @@ class TerminalViewModel(
                     TtySpecialKey.END -> 'F'
                     else -> null
                 }
-            if (csiFinal != null) return encodeCsiFinal(csiFinal, ctrl, alt)
+            if (csiFinal != null) return encodeCsiFinal(csiFinal, ctrl, alt, appCursor)
 
             val tildeNum =
                 when (key) {
@@ -3970,6 +3992,8 @@ class TerminalViewModel(
          * @param final The CSI final byte identifying the key.
          * @param ctrl Whether the Ctrl modifier is active.
          * @param alt Whether the Alt modifier is active.
+         * @param appCursor Whether application cursor keys mode (DECCKM) is
+         *   active; when set and unmodified, emits SS3 (`ESC O <final>`).
          * @return The encoded byte sequence.
          */
         @Suppress("MagicNumber")
@@ -3977,10 +4001,12 @@ class TerminalViewModel(
             final: Char,
             ctrl: Boolean,
             alt: Boolean,
+            appCursor: Boolean,
         ): ByteArray {
             val mod = csiModifier(ctrl, alt)
             return if (mod == 1) {
-                byteArrayOf(0x1B) + "[$final".toByteArray(Charsets.US_ASCII)
+                val intro = if (appCursor) "O" else "["
+                byteArrayOf(0x1B) + "$intro$final".toByteArray(Charsets.US_ASCII)
             } else {
                 byteArrayOf(0x1B) + "[1;$mod$final".toByteArray(Charsets.US_ASCII)
             }

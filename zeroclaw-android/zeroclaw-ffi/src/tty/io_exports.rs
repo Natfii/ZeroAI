@@ -80,6 +80,18 @@ crate::ffi_export!(
 );
 
 crate::ffi_export!(
+    /// Returns whether application cursor keys mode (DECCKM, DEC private
+    /// mode 1) is active in the current terminal session. When active, the
+    /// cursor and Home/End keys must be encoded as SS3 (`ESC O x`) instead
+    /// of CSI (`ESC [ x`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn tty_is_application_cursor_keys_active() -> bool = tty_is_application_cursor_keys_active_inner
+);
+
+crate::ffi_export!(
     /// Sends a focus gained/lost event to the terminal if focus
     /// reporting (DEC 1004) is active. Silent no-op otherwise.
     ///
@@ -123,8 +135,7 @@ pub(crate) fn tty_is_paste_safe_inner(text: String) -> Result<bool, FfiError> {
     }
     #[cfg(not(feature = "ghostty-vt"))]
     {
-        let safe =
-            !text.contains('\n') && !text.contains('\r') && !text.contains("\x1b[201~");
+        let safe = !text.contains('\n') && !text.contains('\r') && !text.contains("\x1b[201~");
         Ok(safe)
     }
 }
@@ -143,6 +154,10 @@ pub(crate) fn tty_take_title_if_changed_inner() -> Result<Option<String>, FfiErr
 
 pub(crate) fn tty_is_mouse_tracking_active_inner() -> Result<bool, FfiError> {
     tty::session::is_mouse_tracking_active()
+}
+
+pub(crate) fn tty_is_application_cursor_keys_active_inner() -> Result<bool, FfiError> {
+    tty::session::is_application_cursor_keys_active()
 }
 
 pub(crate) fn tty_send_focus_event_inner(gained: bool) -> Result<(), FfiError> {

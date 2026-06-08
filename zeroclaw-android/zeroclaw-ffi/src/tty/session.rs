@@ -480,7 +480,6 @@ pub(crate) fn get_render_frame() -> Result<super::types::TtyRenderFrame, FfiErro
     Ok(super::render::snapshot_to_frame(snapshot))
 }
 
-
 // ── Internal implementation ─────────────────────────────────────────
 
 /// Forks a child shell process attached to a new PTY and starts the
@@ -562,9 +561,7 @@ fn spawn_local_shell(cols: u16, rows: u16) -> Result<TtySession, FfiError> {
             // it starts reading. The trailing clear (screen + scrollback +
             // home) wipes the echoed assignment and the system rc's first
             // prompt so only the clean prompt remains on screen.
-            let _ = write_tx.try_send(
-                b"PS1='$ '; print -n '\\033[H\\033[2J\\033[3J'\r".to_vec(),
-            );
+            let _ = write_tx.try_send(b"PS1='$ '; print -n '\\033[H\\033[2J\\033[3J'\r".to_vec());
 
             return Ok(TtySession {
                 _master_fd: pty.master,
@@ -967,6 +964,26 @@ pub(crate) fn is_focus_reporting_active() -> Result<bool, FfiError> {
         e.into_inner()
     });
     Ok(backend.is_focus_reporting_active())
+}
+
+/// Returns whether application cursor keys mode (DECCKM, DEC private mode
+/// 1) is active in the local shell session's terminal backend.
+///
+/// Returns `Ok(false)` when no session is running (safe default).
+pub(crate) fn is_application_cursor_keys_active() -> Result<bool, FfiError> {
+    let guard = lock_session();
+    let Some(session) = guard.as_ref() else {
+        return Ok(false);
+    };
+
+    let backend = session.backend.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            target: "tty::session",
+            "backend mutex poisoned while querying cursor keys mode; recovering"
+        );
+        e.into_inner()
+    });
+    Ok(backend.is_application_cursor_keys_active())
 }
 
 /// Returns `true` if a terminal bell (BEL) has fired since the last
