@@ -227,9 +227,16 @@ async fn authenticate_agent(
 ) -> Result<bool, BoxError> {
     let mut agent = match AgentClient::connect_env().await {
         Ok(agent) => agent,
-        Err(_) => return Ok(false),
+        Err(_) => {
+            hint_no_keys();
+            return Ok(false);
+        }
     };
     let identities = agent.request_identities().await?;
+    if identities.is_empty() {
+        hint_no_keys();
+        return Ok(false);
+    }
     for identity in identities {
         let public_key = identity.public_key().into_owned();
         let hash_alg = rsa_hash_alg(public_key.algorithm().is_rsa());
@@ -242,6 +249,12 @@ async fn authenticate_agent(
         }
     }
     Ok(false)
+}
+
+/// Prints a one-line hint pointing the user at SSH key generation, shown
+/// before the password fallback when the agent holds no usable identity.
+fn hint_no_keys() {
+    eprintln!("zssh: no SSH key loaded — generate one in Settings → SSH Keys for key auth.");
 }
 
 /// Runs the keyboard-interactive exchange, answering every prompt with the
