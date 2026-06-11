@@ -1,0 +1,25 @@
+# Copyright (c) 2026 @Natfii. All rights reserved.
+# DuckDuckGo no-JS HTML endpoint. Selectors verified against a live SERP
+# capture on 2026-06-11 (see fixtures/ddg_html.html).
+
+id = "ddg_html"
+display_name = "DuckDuckGo"
+weight = 1.0
+block_markers = ["anomaly-modal", "/wr.do?"]
+
+[request]
+url = "https://html.duckduckgo.com/html/?q={query}"
+
+[response]
+kind = "html"
+
+[response.html]
+result_selector = "div.result"
+title_selector = "a.result__a"
+url_selector = "a.result__a"
+snippet_selector = "a.result__snippet"
+url_unwrap_param = "uddg"
+
+[golden]
+query = "wikipedia"
+expected_domain = "wikipedia.org"

@@ -11,13 +11,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.oauth.AuthProfileStore
-import com.zeroclaw.android.model.ApiKey
 import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.DiagnosticCheck
 import com.zeroclaw.android.model.DoctorSummary
 import com.zeroclaw.android.service.ConfigTomlBuilder
+import com.zeroclaw.android.service.DaemonGlobalConfigMapper
 import com.zeroclaw.android.service.DoctorValidator
-import com.zeroclaw.android.service.GlobalTomlConfig
 import com.zeroclaw.android.service.SlotAwareAgentConfig
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -129,9 +128,10 @@ class DoctorViewModel(
      * Builds the full TOML config string from current settings, agents,
      * and channel configurations.
      *
-     * Mirrors the TOML assembly in
+     * Delegates the global section to [DaemonGlobalConfigMapper] — the
+     * single source of truth shared with
      * [ZeroAIDaemonService][com.zeroclaw.android.service.ZeroAIDaemonService]
-     * so the FFI doctor check sees the same config the daemon would use.
+     * — so the FFI doctor check sees the same config the daemon would use.
      *
      * @return A valid TOML configuration string.
      */
@@ -142,7 +142,14 @@ class DoctorViewModel(
             app.apiKeyRepository.getByProviderFresh(
                 effectiveSettings.defaultProvider,
             )
-        val globalConfig = buildGlobalTomlConfig(effectiveSettings, apiKey)
+        val globalConfig =
+            DaemonGlobalConfigMapper.toGlobalTomlConfig(
+                context = app,
+                settings = effectiveSettings,
+                apiKey = apiKey,
+                apiKeyValue = apiKey?.key.orEmpty(),
+                hubAppContext = null,
+            )
         val baseToml = ConfigTomlBuilder.build(globalConfig)
         val channelsToml =
             ConfigTomlBuilder.buildChannelsToml(
@@ -179,132 +186,8 @@ class DoctorViewModel(
         }
     }
 
-    /**
-     * Converts [AppSettings] and resolved API key into a [GlobalTomlConfig].
-     *
-     * Comma-separated string fields in [AppSettings] are split into lists
-     * for [GlobalTomlConfig] properties that expect `List<String>`. Mirrors
-     * the logic in
-     * [ZeroAIDaemonService][com.zeroclaw.android.service.ZeroAIDaemonService].
-     *
-     * @param settings Current application settings.
-     * @param apiKey Resolved API key for the default provider, or null.
-     * @return A fully populated [GlobalTomlConfig].
-     */
-    @Suppress("LongMethod")
-    private fun buildGlobalTomlConfig(
-        settings: AppSettings,
-        apiKey: ApiKey?,
-    ): GlobalTomlConfig =
-        GlobalTomlConfig(
-            provider = SlotAwareAgentConfig.configProvider(settings.defaultProvider),
-            model = settings.defaultModel,
-            apiKey = apiKey?.key.orEmpty(),
-            baseUrl = apiKey?.baseUrl.orEmpty(),
-            temperature = settings.defaultTemperature,
-            reasoningEffort = settings.reasoningEffort,
-            compactContext = settings.compactContext,
-            costEnabled = settings.costEnabled,
-            dailyLimitUsd = settings.dailyLimitUsd.toDouble(),
-            monthlyLimitUsd = settings.monthlyLimitUsd.toDouble(),
-            costWarnAtPercent = settings.costWarnAtPercent,
-            providerRetries = settings.providerRetries,
-            fallbackProviders = splitCsv(settings.fallbackProviders),
-            memoryBackend = settings.memoryBackend,
-            memoryAutoSave = settings.memoryAutoSave,
-            identityJson = settings.identityJson,
-            autonomyLevel = settings.autonomyLevel,
-            workspaceOnly = settings.workspaceOnly,
-            allowedCommands = splitCsv(settings.allowedCommands),
-            forbiddenPaths = splitCsv(settings.forbiddenPaths),
-            maxActionsPerHour = settings.maxActionsPerHour,
-            maxCostPerDayCents = settings.maxCostPerDayCents,
-            requireApprovalMediumRisk = settings.requireApprovalMediumRisk,
-            blockHighRiskCommands = settings.blockHighRiskCommands,
-            tunnelProvider = settings.tunnelProvider,
-            tunnelTailscaleFunnel = settings.tunnelTailscaleFunnel,
-            tunnelTailscaleHostname = settings.tunnelTailscaleHostname,
-            gatewayHost = settings.host,
-            gatewayPort = settings.port,
-            gatewayRequirePairing = settings.gatewayRequirePairing,
-            gatewayAllowPublicBind = settings.gatewayAllowPublicBind,
-            gatewayPairedTokens = splitCsv(settings.gatewayPairedTokens),
-            gatewayPairRateLimit = settings.gatewayPairRateLimit,
-            gatewayWebhookRateLimit = settings.gatewayWebhookRateLimit,
-            gatewayIdempotencyTtl = settings.gatewayIdempotencyTtl,
-            schedulerEnabled = settings.schedulerEnabled,
-            schedulerMaxTasks = settings.schedulerMaxTasks,
-            schedulerMaxConcurrent = settings.schedulerMaxConcurrent,
-            heartbeatEnabled = settings.heartbeatEnabled,
-            heartbeatIntervalMinutes = settings.heartbeatIntervalMinutes,
-            observabilityBackend = settings.observabilityBackend,
-            observabilityOtelEndpoint = settings.observabilityOtelEndpoint,
-            observabilityOtelServiceName = settings.observabilityOtelServiceName,
-            memoryHygieneEnabled = settings.memoryHygieneEnabled,
-            memoryArchiveAfterDays = settings.memoryArchiveAfterDays,
-            memoryPurgeAfterDays = settings.memoryPurgeAfterDays,
-            memoryEmbeddingProvider = settings.memoryEmbeddingProvider,
-            memoryEmbeddingModel = settings.memoryEmbeddingModel,
-            memoryVectorWeight = settings.memoryVectorWeight.toDouble(),
-            memoryKeywordWeight = settings.memoryKeywordWeight.toDouble(),
-            composioEnabled = settings.composioEnabled,
-            composioApiKey = settings.composioApiKey,
-            composioEntityId = settings.composioEntityId,
-            browserEnabled = settings.browserEnabled,
-            browserAllowedDomains = splitCsv(settings.browserAllowedDomains),
-            httpRequestEnabled = settings.httpRequestEnabled,
-            httpRequestAllowedDomains =
-                splitCsv(
-                    settings.httpRequestAllowedDomains,
-                ),
-            webFetchEnabled = settings.webFetchEnabled,
-            webFetchAllowedDomains = splitCsv(settings.webFetchAllowedDomains),
-            webFetchBlockedDomains = splitCsv(settings.webFetchBlockedDomains),
-            webFetchMaxResponseSize = settings.webFetchMaxResponseSize,
-            webFetchTimeoutSecs = settings.webFetchTimeoutSecs,
-            webSearchEnabled = settings.webSearchEnabled,
-            webSearchProvider = settings.webSearchProvider,
-            webSearchBraveApiKey = settings.webSearchBraveApiKey,
-            webSearchMaxResults = settings.webSearchMaxResults,
-            webSearchTimeoutSecs = settings.webSearchTimeoutSecs,
-            securitySandboxEnabled = settings.securitySandboxEnabled,
-            securitySandboxBackend = settings.securitySandboxBackend,
-            securitySandboxFirejailArgs =
-                splitCsv(
-                    settings.securitySandboxFirejailArgs,
-                ),
-            securityResourcesMaxMemoryMb = settings.securityResourcesMaxMemoryMb,
-            securityResourcesMaxCpuTimeSecs =
-                settings.securityResourcesMaxCpuTimeSecs,
-            securityResourcesMaxSubprocesses =
-                settings.securityResourcesMaxSubprocesses,
-            securityResourcesMemoryMonitoring =
-                settings.securityResourcesMemoryMonitoring,
-            securityAuditEnabled = settings.securityAuditEnabled,
-            securityEstopEnabled = settings.securityEstopEnabled,
-            securityEstopRequireOtpToResume =
-                settings.securityEstopRequireOtpToResume,
-            proxyEnabled = settings.proxyEnabled,
-            proxyHttpProxy = settings.proxyHttpProxy,
-            proxyHttpsProxy = settings.proxyHttpsProxy,
-            proxyAllProxy = settings.proxyAllProxy,
-            proxyNoProxy = splitCsv(settings.proxyNoProxy),
-            proxyScope = settings.proxyScope,
-            proxyServiceSelectors = splitCsv(settings.proxyServiceSelectors),
-            reliabilityBackoffMs = settings.reliabilityBackoffMs,
-            reliabilityApiKeysJson = settings.reliabilityApiKeysJson,
-        )
-
     /** Delegates to [AgentTomlAssembler] — the single source of truth. */
     private suspend fun buildAgentsToml(): String =
         com.zeroclaw.android.service.AgentTomlAssembler
             .assemble(app)
 }
-
-/**
- * Splits a comma-separated string into a trimmed, non-empty list of values.
- *
- * @param csv Comma-separated input string.
- * @return List of trimmed non-blank values.
- */
-private fun splitCsv(csv: String): List<String> = csv.split(",").map { it.trim() }.filter { it.isNotEmpty() }

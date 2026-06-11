@@ -27,7 +27,6 @@ use crate::session::DEFAULT_USER_AGENT;
 const MAX_SESSION_TOOLS: usize = 20;
 use crate::session_tools::{
     FfiHttpRequestTool, FfiMemoryForgetTool, FfiMemoryStoreTool, FfiWebFetchTool, FfiWebSearchTool,
-    resolve_ffi_provider,
 };
 use crate::url_helpers;
 
@@ -70,37 +69,24 @@ pub(crate) fn build_tools_registry(
     }
 
     if config.web_search.enabled {
-        // Upstream renamed `WebSearchConfig.provider` → `search_provider`
-        // (already wired below) and replaced Google CSE
-        // (`google_api_key` / `google_cx`) with Tavily and SearXNG.
-        // The Tavily/SearXNG keys exist on the upstream config
-        // (`tavily_api_key`, `searxng_instance_url`) but the Android
-        // settings UI does not surface them yet, so this site still
-        // only routes Brave.
-        let provider = resolve_ffi_provider(
-            &config.web_search.search_provider,
-            config.web_search.brave_api_key.as_ref(),
-            None,
-            None,
-        );
-        match reqwest::Client::builder()
-            .timeout(Duration::from_secs(config.web_search.timeout_secs))
-            .build()
-        {
-            Ok(client) => {
-                tools.push(Box::new(FfiWebSearchTool {
-                    provider,
-                    brave_api_key: config.web_search.brave_api_key.clone(),
-                    google_api_key: None,
-                    google_cx: None,
-                    max_results: config.web_search.max_results,
-                    client,
-                }));
-            }
-            Err(e) => {
-                tracing::error!("Failed to build web_search HTTP client: {e}; tool disabled");
-            }
-        }
+        // Delegates to the engine WebSearchTool, which routes all providers
+        // (meta / duckduckgo / brave / tavily / searxng) and owns the meta
+        // backend's rate limiting and self-repair overlays.
+        tools.push(Box::new(FfiWebSearchTool {
+            inner: zeroclaw_tools::web_search_tool::WebSearchTool::new_with_config(
+                config.web_search.search_provider.clone(),
+                config.web_search.brave_api_key.clone(),
+                config.web_search.tavily_api_key.clone(),
+                config.web_search.searxng_instance_url.clone(),
+                config.web_search.max_results,
+                config.web_search.timeout_secs,
+                config.config_path.clone(),
+                config.secrets.encrypt,
+                config.web_search.max_requests_per_minute,
+                Some(config.data_dir.join("metasearch")),
+                zeroclaw_tools::metasearch::RepairModelConfig::from_config(config),
+            ),
+        }));
     }
 
     if config.web_fetch.enabled {

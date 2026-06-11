@@ -675,6 +675,8 @@ pub fn all_tools_with_runtime(
 
     // Web search tool (enabled by default for GLM and other models)
     if root_config.web_search.enabled {
+        let metasearch_repair_model =
+            zeroclaw_tools::metasearch::RepairModelConfig::from_config(root_config);
         tool_arcs.push(Arc::new(WebSearchTool::new_with_config(
             root_config.web_search.search_provider.clone(),
             root_config.web_search.brave_api_key.clone(),
@@ -684,6 +686,9 @@ pub fn all_tools_with_runtime(
             root_config.web_search.timeout_secs,
             root_config.config_path.clone(),
             root_config.secrets.encrypt,
+            root_config.web_search.max_requests_per_minute,
+            Some(root_config.data_dir.join("metasearch")),
+            metasearch_repair_model,
         )));
     }
 

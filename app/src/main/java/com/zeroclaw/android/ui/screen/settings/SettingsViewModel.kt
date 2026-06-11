@@ -304,17 +304,27 @@ class SettingsViewModel(
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchBraveApiKey */
     fun updateWebSearchBraveApiKey(key: String) = tools.updateWebSearchBraveApiKey(key)
 
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchGoogleApiKey */
-    fun updateWebSearchGoogleApiKey(key: String) = tools.updateWebSearchGoogleApiKey(key)
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchTavilyApiKey */
+    fun updateWebSearchTavilyApiKey(key: String) = tools.updateWebSearchTavilyApiKey(key)
 
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchGoogleCx */
-    fun updateWebSearchGoogleCx(cx: String) = tools.updateWebSearchGoogleCx(cx)
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchSearxngUrl */
+    fun updateWebSearchSearxngUrl(url: String) = tools.updateWebSearchSearxngUrl(url)
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchMaxResults */
     fun updateWebSearchMaxResults(max: Long) = tools.updateWebSearchMaxResults(max)
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchTimeoutSecs */
     fun updateWebSearchTimeoutSecs(secs: Long) = tools.updateWebSearchTimeoutSecs(secs)
+
+    /**
+     * Updates the meta search rate limit, clamped into 1..60.
+     *
+     * The value is coerced because the engine treats 0 as unlimited,
+     * which the app never intends.
+     *
+     * @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchRequestsPerMinute
+     */
+    fun updateWebSearchRequestsPerMinute(requestsPerMinute: Long) = tools.updateWebSearchRequestsPerMinute(requestsPerMinute)
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTwitterBrowseEnabled */
     fun updateTwitterBrowseEnabled(enabled: Boolean) = tools.updateTwitterBrowseEnabled(enabled)

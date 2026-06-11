@@ -5973,7 +5973,7 @@ pub struct WebSearchConfig {
     /// Enable `web_search_tool` for web searches
     #[serde(default)]
     pub enabled: bool,
-    /// Search provider: "duckduckgo" (free), "brave" (requires API key), "tavily" (requires API key), or "searxng" (self-hosted)
+    /// Search provider: "meta" (default; keyless on-device multi-engine), "duckduckgo" (free), "brave" (requires API key), "tavily" (requires API key), or "searxng" (self-hosted)
     #[serde(default = "default_web_search_provider")]
     pub search_provider: String,
     /// Brave Search API key (required if search_provider is "brave")
@@ -5995,10 +5995,13 @@ pub struct WebSearchConfig {
     /// Request timeout in seconds
     #[serde(default = "default_web_search_timeout_secs")]
     pub timeout_secs: u64,
+    /// Maximum meta searches per minute (0 = unlimited; applies to the "meta" provider only)
+    #[serde(default = "default_web_search_max_requests_per_minute")]
+    pub max_requests_per_minute: u32,
 }
 
 fn default_web_search_provider() -> String {
-    "duckduckgo".into()
+    "meta".into()
 }
 
 fn default_web_search_max_results() -> usize {
@@ -6007,6 +6010,10 @@ fn default_web_search_max_results() -> usize {
 
 fn default_web_search_timeout_secs() -> u64 {
     15
+}
+
+fn default_web_search_max_requests_per_minute() -> u32 {
+    10
 }
 
 impl Default for WebSearchConfig {
@@ -6019,6 +6026,7 @@ impl Default for WebSearchConfig {
             searxng_instance_url: None,
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
+            max_requests_per_minute: default_web_search_max_requests_per_minute(),
         }
     }
 }

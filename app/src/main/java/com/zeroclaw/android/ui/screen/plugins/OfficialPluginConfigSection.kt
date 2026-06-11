@@ -37,12 +37,32 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.OfficialPlugins
+import com.zeroclaw.android.model.SearchEngineHealth
+import com.zeroclaw.android.model.WebSearchProviders
+import com.zeroclaw.android.ui.component.NumberSettingField
 import com.zeroclaw.android.ui.component.SecretTextField
 import com.zeroclaw.android.ui.component.SettingsToggleRow
+import com.zeroclaw.android.ui.component.SliderSettingField
 import com.zeroclaw.android.ui.screen.settings.SettingsViewModel
 
-/** Available web search engine options. */
-private val WEB_SEARCH_ENGINES = listOf("auto", "brave", "google")
+/** Selectable web search providers: stored id paired with its display label. */
+private val WEB_SEARCH_PROVIDER_OPTIONS =
+    listOf(
+        WebSearchProviders.META to "On-device meta search (recommended)",
+        WebSearchProviders.DUCKDUCKGO to "DuckDuckGo",
+        WebSearchProviders.BRAVE to "Brave (API key)",
+        WebSearchProviders.TAVILY to "Tavily (API key)",
+        WebSearchProviders.SEARXNG to "SearXNG (self-hosted)",
+    )
+
+/** User-selectable range for the meta backend's searches-per-minute slider. */
+private val META_REQUESTS_PER_MINUTE_RANGE = 1..30
+
+/** Under-the-hood description shown when the meta provider is selected. */
+private const val META_SEARCH_DESCRIPTION =
+    "Searches DuckDuckGo, Mojeek, Wikipedia and Marginalia directly from this " +
+        "device. No account, no API key; broken engines repair themselves " +
+        "automatically."
 
 /**
  * Renders a purpose-built configuration form for an official plugin.
@@ -55,6 +75,8 @@ private val WEB_SEARCH_ENGINES = listOf("auto", "brave", "google")
  * @param officialPluginId One of the [OfficialPlugins] constant IDs.
  * @param settings Current application settings.
  * @param viewModel The [SettingsViewModel] for persisting changes.
+ * @param searchEngineHealth Meta search engine health rows, consumed by the
+ *   web search section; empty hides the engine-status rows.
  * @param modifier Modifier applied to the root layout.
  */
 @Composable
@@ -62,11 +84,13 @@ fun OfficialPluginConfigSection(
     officialPluginId: String,
     settings: AppSettings,
     viewModel: SettingsViewModel,
+    searchEngineHealth: List<SearchEngineHealth> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
         when (officialPluginId) {
-            OfficialPlugins.WEB_SEARCH -> WebSearchConfig(settings, viewModel)
+            OfficialPlugins.WEB_SEARCH ->
+                WebSearchConfig(settings, viewModel, searchEngineHealth)
             OfficialPlugins.WEB_FETCH -> WebFetchConfig(settings, viewModel)
             OfficialPlugins.HTTP_REQUEST -> HttpRequestConfig(settings, viewModel)
             OfficialPlugins.COMPOSIO -> ComposioConfig(settings, viewModel)
@@ -79,76 +103,148 @@ fun OfficialPluginConfigSection(
 /**
  * Web search plugin configuration.
  *
- * Controls the search engine provider, max results, and timeout.
- * Maps to upstream `[tools.web_search]` TOML section.
+ * Controls the search provider, provider-specific credentials, max
+ * results, and timeout. Maps to the upstream `[web_search]` TOML section.
+ * Legacy stored provider ids are displayed as the meta provider via
+ * [WebSearchProviders.normalize].
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun WebSearchConfig(
     settings: AppSettings,
     viewModel: SettingsViewModel,
+    searchEngineHealth: List<SearchEngineHealth>,
 ) {
-    var engineExpanded by remember { mutableStateOf(false) }
+    val provider = WebSearchProviders.normalize(settings.webSearchProvider)
+
+    WebSearchProviderDropdown(
+        selectedProviderId = provider,
+        enabled = settings.webSearchEnabled,
+        onSelect = { viewModel.updateWebSearchProvider(it) },
+    )
+
+    when (provider) {
+        WebSearchProviders.META ->
+            WebSearchMetaSection(settings, viewModel, searchEngineHealth)
+        WebSearchProviders.BRAVE -> WebSearchBraveKeyField(settings, viewModel)
+        WebSearchProviders.TAVILY -> WebSearchTavilyKeyField(settings, viewModel)
+        WebSearchProviders.SEARXNG -> WebSearchSearxngUrlField(settings, viewModel)
+        else -> {}
+    }
+
+    NumberSettingField(
+        value = settings.webSearchMaxResults.toString(),
+        onValueChange = { v ->
+            v.toLongOrNull()?.let { viewModel.updateWebSearchMaxResults(it) }
+        },
+        label = "Max results",
+        supportingText = "Number of search results (1\u201310)",
+        enabled = settings.webSearchEnabled,
+    )
+
+    NumberSettingField(
+        value = settings.webSearchTimeoutSecs.toString(),
+        onValueChange = { v ->
+            v.toLongOrNull()?.let { viewModel.updateWebSearchTimeoutSecs(it) }
+        },
+        label = "Timeout (seconds)",
+        enabled = settings.webSearchEnabled,
+    )
+}
+
+/**
+ * Exposed dropdown listing the selectable web search providers.
+ *
+ * @param selectedProviderId Currently selected provider id (already normalized).
+ * @param enabled Whether the dropdown accepts input.
+ * @param onSelect Callback invoked with the chosen provider id.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WebSearchProviderDropdown(
+    selectedProviderId: String,
+    enabled: Boolean,
+    onSelect: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel =
+        WEB_SEARCH_PROVIDER_OPTIONS.firstOrNull { it.first == selectedProviderId }?.second
+            ?: selectedProviderId
 
     ExposedDropdownMenuBox(
-        expanded = engineExpanded,
-        onExpandedChange = { engineExpanded = it },
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
     ) {
         OutlinedTextField(
-            value = settings.webSearchProvider,
+            value = selectedLabel,
             onValueChange = {},
             readOnly = true,
-            label = { Text("Search engine") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(engineExpanded) },
-            enabled = settings.webSearchEnabled,
+            label = { Text("Search provider") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            enabled = enabled,
             modifier =
                 Modifier
                     .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     .fillMaxWidth(),
         )
         ExposedDropdownMenu(
-            expanded = engineExpanded,
-            onDismissRequest = { engineExpanded = false },
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
         ) {
-            for (engine in WEB_SEARCH_ENGINES) {
+            for ((id, label) in WEB_SEARCH_PROVIDER_OPTIONS) {
                 DropdownMenuItem(
-                    text = { Text(engine) },
+                    text = { Text(label) },
                     onClick = {
-                        viewModel.updateWebSearchProvider(engine)
-                        engineExpanded = false
+                        onSelect(id)
+                        expanded = false
                     },
                 )
             }
         }
     }
+}
 
-    OutlinedTextField(
-        value = settings.webSearchMaxResults.toString(),
-        onValueChange = { v ->
-            v.toLongOrNull()?.let { viewModel.updateWebSearchMaxResults(it) }
-        },
-        label = { Text("Max results") },
-        supportingText = { Text("Number of search results (1\u201310)") },
-        singleLine = true,
-        enabled = settings.webSearchEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
+/**
+ * Meta provider section: backend description, rate-limit slider, and
+ * per-engine status rows.
+ */
+@Composable
+private fun WebSearchMetaSection(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+    searchEngineHealth: List<SearchEngineHealth>,
+) {
+    Text(
+        text = META_SEARCH_DESCRIPTION,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 4.dp),
     )
-
-    OutlinedTextField(
-        value = settings.webSearchTimeoutSecs.toString(),
-        onValueChange = { v ->
-            v.toLongOrNull()?.let { viewModel.updateWebSearchTimeoutSecs(it) }
-        },
-        label = { Text("Timeout (seconds)") },
-        singleLine = true,
+    SliderSettingField(
+        value =
+            settings.webSearchRequestsPerMinute
+                .toInt()
+                .coerceIn(META_REQUESTS_PER_MINUTE_RANGE),
+        onValueChange = { viewModel.updateWebSearchRequestsPerMinute(it.toLong()) },
+        label = "Searches per minute",
+        valueRange = META_REQUESTS_PER_MINUTE_RANGE,
         enabled = settings.webSearchEnabled,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-        modifier = Modifier.fillMaxWidth(),
+        supportingText = "Rate limit for on-device meta searches",
+        modifier = Modifier.padding(top = 8.dp),
     )
+    WebSearchEngineStatusSection(
+        engines = searchEngineHealth,
+        modifier = Modifier.padding(top = 8.dp),
+    )
+}
 
+/** Brave provider credential field (masked API key). */
+@Composable
+private fun WebSearchBraveKeyField(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
     OutlinedTextField(
-        value = settings.webSearchBraveApiKey.ifBlank { "" },
+        value = settings.webSearchBraveApiKey,
         onValueChange = { viewModel.updateWebSearchBraveApiKey(it) },
         label = { Text("Brave API key") },
         supportingText = { Text("Brave Search API subscription token") },
@@ -157,25 +253,40 @@ private fun WebSearchConfig(
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth(),
     )
+}
 
+/** Tavily provider credential field (masked API key). */
+@Composable
+private fun WebSearchTavilyKeyField(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
     OutlinedTextField(
-        value = settings.webSearchGoogleApiKey.ifBlank { "" },
-        onValueChange = { viewModel.updateWebSearchGoogleApiKey(it) },
-        label = { Text("Google API key") },
-        supportingText = { Text("Google Custom Search API key") },
+        value = settings.webSearchTavilyApiKey,
+        onValueChange = { viewModel.updateWebSearchTavilyApiKey(it) },
+        label = { Text("Tavily API key") },
+        supportingText = { Text("Tavily Search API key") },
         singleLine = true,
         enabled = settings.webSearchEnabled,
         visualTransformation = PasswordVisualTransformation(),
         modifier = Modifier.fillMaxWidth(),
     )
+}
 
+/** SearXNG provider configuration field (instance URL). */
+@Composable
+private fun WebSearchSearxngUrlField(
+    settings: AppSettings,
+    viewModel: SettingsViewModel,
+) {
     OutlinedTextField(
-        value = settings.webSearchGoogleCx,
-        onValueChange = { viewModel.updateWebSearchGoogleCx(it) },
-        label = { Text("Google Search Engine ID") },
-        supportingText = { Text("Custom Search Engine ID (cx)") },
+        value = settings.webSearchSearxngUrl,
+        onValueChange = { viewModel.updateWebSearchSearxngUrl(it) },
+        label = { Text("SearXNG instance URL") },
+        supportingText = { Text("e.g. https://searx.example.com") },
         singleLine = true,
         enabled = settings.webSearchEnabled,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         modifier = Modifier.fillMaxWidth(),
     )
 }

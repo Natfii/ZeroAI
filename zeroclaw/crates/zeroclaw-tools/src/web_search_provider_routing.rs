@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebSearchProviderRoute {
+    Meta,
     DuckDuckGo,
     Brave,
     SearXNG,
@@ -13,7 +14,8 @@ pub struct WebSearchProviderResolution {
     pub used_fallback: bool,
 }
 
-pub const DEFAULT_WEB_SEARCH_PROVIDER: &str = "duckduckgo";
+pub const DEFAULT_WEB_SEARCH_PROVIDER: &str = "meta";
+const DUCKDUCKGO_PROVIDER: &str = "duckduckgo";
 const BRAVE_PROVIDER: &str = "brave";
 const SEARXNG_PROVIDER: &str = "searxng";
 const TAVILY_PROVIDER: &str = "tavily";
@@ -21,13 +23,18 @@ const TAVILY_PROVIDER: &str = "tavily";
 pub fn resolve_web_search_provider(raw_model_provider: &str) -> WebSearchProviderResolution {
     let normalized = raw_model_provider.trim().to_ascii_lowercase();
     match normalized.as_str() {
-        "" | "default" | "duckduckgo" | "ddg" | "duck-duck-go" | "duck_duck_go" => {
+        "" | "default" | "meta" | "auto" | "on-device" | "on_device" | "ondevice" => {
             WebSearchProviderResolution {
-                route: WebSearchProviderRoute::DuckDuckGo,
+                route: WebSearchProviderRoute::Meta,
                 canonical_provider: DEFAULT_WEB_SEARCH_PROVIDER,
                 used_fallback: false,
             }
         }
+        "duckduckgo" | "ddg" | "duck-duck-go" | "duck_duck_go" => WebSearchProviderResolution {
+            route: WebSearchProviderRoute::DuckDuckGo,
+            canonical_provider: DUCKDUCKGO_PROVIDER,
+            used_fallback: false,
+        },
         "brave" | "brave-search" | "brave_search" => WebSearchProviderResolution {
             route: WebSearchProviderRoute::Brave,
             canonical_provider: BRAVE_PROVIDER,
@@ -43,10 +50,10 @@ pub fn resolve_web_search_provider(raw_model_provider: &str) -> WebSearchProvide
             canonical_provider: TAVILY_PROVIDER,
             used_fallback: false,
         },
-        // Warns for unknown model_providers, falls back to default.
-        // Known non-default model_providers: Brave, SearXNG, Tavily.
+        // Warns for unknown model_providers, falls back to the keyless
+        // on-device meta backend (the most robust default).
         _ => WebSearchProviderResolution {
-            route: WebSearchProviderRoute::DuckDuckGo,
+            route: WebSearchProviderRoute::Meta,
             canonical_provider: DEFAULT_WEB_SEARCH_PROVIDER,
             used_fallback: true,
         },
@@ -58,12 +65,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolve_aliases_to_meta() {
+        let meta_aliases = ["", "default", "meta", "auto", "on-device", "on_device", "ondevice"];
+        for alias in meta_aliases {
+            let resolved = resolve_web_search_provider(alias);
+            assert_eq!(resolved.route, WebSearchProviderRoute::Meta);
+            assert_eq!(resolved.canonical_provider, DEFAULT_WEB_SEARCH_PROVIDER);
+            assert!(!resolved.used_fallback);
+        }
+    }
+
+    #[test]
     fn resolve_aliases_to_duckduckgo() {
         let ddg_aliases = ["duckduckgo", "ddg", "duck-duck-go", "duck_duck_go"];
         for alias in ddg_aliases {
             let resolved = resolve_web_search_provider(alias);
             assert_eq!(resolved.route, WebSearchProviderRoute::DuckDuckGo);
-            assert_eq!(resolved.canonical_provider, DEFAULT_WEB_SEARCH_PROVIDER);
+            assert_eq!(resolved.canonical_provider, DUCKDUCKGO_PROVIDER);
             assert!(!resolved.used_fallback);
         }
     }
@@ -102,14 +120,14 @@ mod tests {
     }
 
     #[test]
-    fn resolve_unknown_provider_falls_back_to_default() {
+    fn resolve_unknown_provider_falls_back_to_meta() {
         let resolved = resolve_web_search_provider("bing");
-        assert_eq!(resolved.route, WebSearchProviderRoute::DuckDuckGo);
+        assert_eq!(resolved.route, WebSearchProviderRoute::Meta);
         assert_eq!(resolved.canonical_provider, DEFAULT_WEB_SEARCH_PROVIDER);
         assert!(resolved.used_fallback);
 
         let resolved2 = resolve_web_search_provider("searxng-plus");
-        assert_eq!(resolved2.route, WebSearchProviderRoute::DuckDuckGo);
+        assert_eq!(resolved2.route, WebSearchProviderRoute::Meta);
         assert_eq!(resolved2.canonical_provider, DEFAULT_WEB_SEARCH_PROVIDER);
         assert!(resolved2.used_fallback);
     }

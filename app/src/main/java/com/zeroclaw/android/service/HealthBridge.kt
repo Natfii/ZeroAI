@@ -8,6 +8,7 @@ package com.zeroclaw.android.service
 
 import com.zeroclaw.android.model.ComponentHealth
 import com.zeroclaw.android.model.HealthDetail
+import com.zeroclaw.android.model.SearchEngineHealth
 import com.zeroclaw.ffi.FfiException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -51,5 +52,31 @@ class HealthBridge(
                         )
                     },
             )
+        }
+
+    /**
+     * Fetches per-engine health for the on-device meta search backend.
+     *
+     * Safe to call from the main thread; the underlying blocking FFI call is
+     * dispatched to [ioDispatcher]. Returns one row per bundled engine, with
+     * untouched engines reporting a "healthy" condition.
+     *
+     * @return Parsed [SearchEngineHealth] rows.
+     * @throws FfiException if the native layer reports an error.
+     */
+    @Throws(FfiException::class)
+    suspend fun getSearchEngineHealth(): List<SearchEngineHealth> =
+        withContext(ioDispatcher) {
+            com.zeroclaw.ffi.getSearchEngineHealth().map { engine ->
+                SearchEngineHealth(
+                    engineId = engine.engineId,
+                    displayName = engine.displayName,
+                    condition = engine.condition,
+                    lastError = engine.lastError,
+                    lastOkUnix = engine.lastOkUnix?.toLong(),
+                    repairedAtUnix = engine.repairedAtUnix?.toLong(),
+                    backoffRemainingSecs = engine.backoffRemainingSecs?.toLong(),
+                )
+            }
         }
 }

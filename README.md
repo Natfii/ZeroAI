@@ -3,7 +3,7 @@
 ![banner](https://github.com/user-attachments/assets/eca832d2-c90b-4aed-867b-06d69cc19a7f)
 
 <p align="center">                                                                                                                                                                                                            <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white"/>
-    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                         
+    <img alt="Min SDK" src="https://img.shields.io/badge/min%20SDK-28-brightgreen"/>                                                                                                                     
     <img alt="Target SDK" src="https://img.shields.io/badge/target%20SDK-35-brightgreen"/>
     <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-2.0-7F52FF?logo=kotlin&logoColor=white"/>
     <img alt="Rust" src="https://img.shields.io/badge/Rust-FFI-DEA584?logo=rust&logoColor=black"/>
@@ -129,8 +129,8 @@ Once in TTY mode, connect to any SSH server:
 </p>
 
 ```
-/ssh user@hostname
-/ssh user@hostname -p 2222   
+ssh user@hostname
+ssh user@hostname -p 2222   
 ```
 
 Zero handles host key verification (TOFU), password and keyboard-interactive auth, and renders the remote session with a GPU-accelerated VT terminal (powered by [libghostty-vt](https://github.com/ghostty-org/ghostty)). The extra key row provides Tab, Ctrl, Esc, Alt, arrow keys, and Enter for comfortable terminal use on a touchscreen.
@@ -233,13 +233,6 @@ Zero is not just "an Android chat app." It is an attempt to build a full agent p
 
 - Issues and pull requests are temporarily closed  (try making a fork you and your zero can grow together!)
 - Please do not use upstream ZeroClaw Labs issue trackers for this downstream fork.
-
-## Research
-
-Some of the reverse engineering and protocol work done for this project is documented
-publicly in case it helps others building similar integrations:
-
-- [**Google Messages Bugle Protocol**](docs/research/google-messages-bugle-protocol.md) — reverse engineering notes on Google's proprietary Messages-for-Web RPC protocol (pairing, encryption, contacts/message sync, media upload)
 
 ## License
 

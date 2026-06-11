@@ -140,13 +140,15 @@ internal class TestSettingsRepository : SettingsRepository {
 
     override suspend fun setWebSearchBraveApiKey(key: String) = _settings.update { it.copy(webSearchBraveApiKey = key) }
 
+    override suspend fun setWebSearchTavilyApiKey(key: String) = _settings.update { it.copy(webSearchTavilyApiKey = key) }
+
+    override suspend fun setWebSearchSearxngUrl(url: String) = _settings.update { it.copy(webSearchSearxngUrl = url) }
+
     override suspend fun setWebSearchMaxResults(max: Long) = _settings.update { it.copy(webSearchMaxResults = max) }
 
     override suspend fun setWebSearchTimeoutSecs(secs: Long) = _settings.update { it.copy(webSearchTimeoutSecs = secs) }
 
-    override suspend fun setWebSearchGoogleApiKey(value: String) { /* no-op */ }
-
-    override suspend fun setWebSearchGoogleCx(value: String) { /* no-op */ }
+    override suspend fun setWebSearchRequestsPerMinute(requestsPerMinute: Long) = _settings.update { it.copy(webSearchRequestsPerMinute = requestsPerMinute) }
 
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) = _settings.update { it.copy(twitterBrowseEnabled = enabled) }
 

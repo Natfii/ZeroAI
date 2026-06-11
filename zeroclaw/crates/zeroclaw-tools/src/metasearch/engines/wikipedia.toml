@@ -1,0 +1,26 @@
+# Copyright (c) 2026 @Natfii. All rights reserved.
+# Wikipedia official REST search API (keyless; ~200 req/min with a descriptive
+# User-Agent). Response shape verified live on 2026-06-11
+# (see fixtures/wikipedia.json). URLs are built from the page key.
+
+id = "wikipedia"
+display_name = "Wikipedia"
+weight = 0.7
+
+[request]
+url = "https://en.wikipedia.org/w/rest.php/v1/search/page?q={query}&limit={max_results}"
+user_agent = "ZeroAI/1.0 (Android; on-device meta search)"
+
+[response]
+kind = "json"
+
+[response.json]
+results_pointer = "/pages"
+title_pointer = "/title"
+snippet_pointer = "/excerpt"
+url_template = "https://en.wikipedia.org/wiki/{value}"
+url_template_value_pointer = "/key"
+
+[golden]
+query = "earth"
+expected_domain = "wikipedia.org"

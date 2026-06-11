@@ -198,6 +198,44 @@ class DataStoreSettingsRepositoryTest {
             assertEquals(25L, settings.twitterBrowseMaxItems)
             assertEquals(45L, settings.twitterBrowseTimeoutSecs)
         }
+
+    @Test
+    @DisplayName("web search defaults use the meta provider and 10 requests per minute")
+    fun `web search defaults use the meta provider and 10 requests per minute`() =
+        runTest {
+            val repo = InMemorySettingsRepository()
+            val settings = repo.settings.first()
+            assertEquals("meta", settings.webSearchProvider)
+            assertEquals(10L, settings.webSearchRequestsPerMinute)
+            assertEquals("", settings.webSearchTavilyApiKey)
+            assertEquals("", settings.webSearchSearxngUrl)
+        }
+
+    @Test
+    @DisplayName("web search setters persist and emit updated values")
+    fun `web search setters persist and emit updated values`() =
+        runTest {
+            val repo = InMemorySettingsRepository()
+
+            repo.setWebSearchEnabled(true)
+            repo.setWebSearchProvider("searxng")
+            repo.setWebSearchBraveApiKey("brave-key")
+            repo.setWebSearchTavilyApiKey("tvly-key")
+            repo.setWebSearchSearxngUrl("https://searx.example.com")
+            repo.setWebSearchMaxResults(7L)
+            repo.setWebSearchTimeoutSecs(20L)
+            repo.setWebSearchRequestsPerMinute(25L)
+
+            val settings = repo.settings.first()
+            assertEquals(true, settings.webSearchEnabled)
+            assertEquals("searxng", settings.webSearchProvider)
+            assertEquals("brave-key", settings.webSearchBraveApiKey)
+            assertEquals("tvly-key", settings.webSearchTavilyApiKey)
+            assertEquals("https://searx.example.com", settings.webSearchSearxngUrl)
+            assertEquals(7L, settings.webSearchMaxResults)
+            assertEquals(20L, settings.webSearchTimeoutSecs)
+            assertEquals(25L, settings.webSearchRequestsPerMinute)
+        }
 }
 
 /**
@@ -361,19 +399,37 @@ private class InMemorySettingsRepository : SettingsRepository {
 
     override suspend fun setWebFetchTimeoutSecs(secs: Long) { /* no-op */ }
 
-    override suspend fun setWebSearchEnabled(enabled: Boolean) { /* no-op */ }
+    override suspend fun setWebSearchEnabled(enabled: Boolean) {
+        _settings.update { it.copy(webSearchEnabled = enabled) }
+    }
 
-    override suspend fun setWebSearchProvider(provider: String) { /* no-op */ }
+    override suspend fun setWebSearchProvider(provider: String) {
+        _settings.update { it.copy(webSearchProvider = provider) }
+    }
 
-    override suspend fun setWebSearchBraveApiKey(key: String) { /* no-op */ }
+    override suspend fun setWebSearchBraveApiKey(key: String) {
+        _settings.update { it.copy(webSearchBraveApiKey = key) }
+    }
 
-    override suspend fun setWebSearchMaxResults(max: Long) { /* no-op */ }
+    override suspend fun setWebSearchTavilyApiKey(key: String) {
+        _settings.update { it.copy(webSearchTavilyApiKey = key) }
+    }
 
-    override suspend fun setWebSearchTimeoutSecs(secs: Long) { /* no-op */ }
+    override suspend fun setWebSearchSearxngUrl(url: String) {
+        _settings.update { it.copy(webSearchSearxngUrl = url) }
+    }
 
-    override suspend fun setWebSearchGoogleApiKey(value: String) { /* no-op */ }
+    override suspend fun setWebSearchMaxResults(max: Long) {
+        _settings.update { it.copy(webSearchMaxResults = max) }
+    }
 
-    override suspend fun setWebSearchGoogleCx(value: String) { /* no-op */ }
+    override suspend fun setWebSearchTimeoutSecs(secs: Long) {
+        _settings.update { it.copy(webSearchTimeoutSecs = secs) }
+    }
+
+    override suspend fun setWebSearchRequestsPerMinute(requestsPerMinute: Long) {
+        _settings.update { it.copy(webSearchRequestsPerMinute = requestsPerMinute) }
+    }
 
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) {
         _settings.update { it.copy(twitterBrowseEnabled = enabled) }

@@ -32,7 +32,7 @@ object SeedData {
             PluginEntity(
                 id = OfficialPlugins.WEB_SEARCH,
                 name = "Web Search",
-                description = "Search the web via Brave or Google.",
+                description = "Search the web with keyless on-device meta search.",
                 version = "1.0.0",
                 author = "ZeroAI",
                 category = PluginCategory.TOOL.name,

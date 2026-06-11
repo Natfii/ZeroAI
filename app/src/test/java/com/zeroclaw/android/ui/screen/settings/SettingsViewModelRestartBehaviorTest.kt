@@ -144,6 +144,57 @@ class SettingsViewModelRestartBehaviorTest {
         }
 
     @Test
+    @DisplayName("updateWebSearchRequestsPerMinute clamps 0 to 1 and marks restart required")
+    fun `updateWebSearchRequestsPerMinute clamps zero to one and marks restart`() =
+        runTest {
+            viewModel.updateWebSearchRequestsPerMinute(0L)
+
+            assertEquals(1L, repository.settings.first().webSearchRequestsPerMinute)
+            verify(exactly = 1) { bridge.markRestartRequired() }
+        }
+
+    @Test
+    @DisplayName("updateWebSearchRequestsPerMinute clamps 100 to 60")
+    fun `updateWebSearchRequestsPerMinute clamps one hundred to sixty`() =
+        runTest {
+            viewModel.updateWebSearchRequestsPerMinute(100L)
+
+            assertEquals(60L, repository.settings.first().webSearchRequestsPerMinute)
+        }
+
+    @Test
+    @DisplayName("updateWebSearchRequestsPerMinute keeps an in-range value unclamped")
+    fun `updateWebSearchRequestsPerMinute keeps in-range value`() =
+        runTest {
+            viewModel.updateWebSearchRequestsPerMinute(25L)
+
+            assertEquals(25L, repository.settings.first().webSearchRequestsPerMinute)
+        }
+
+    @Test
+    @DisplayName("updateWebSearchTavilyApiKey persists and marks restart required")
+    fun `updateWebSearchTavilyApiKey persists and marks restart`() =
+        runTest {
+            viewModel.updateWebSearchTavilyApiKey("tvly-key")
+
+            assertEquals("tvly-key", repository.settings.first().webSearchTavilyApiKey)
+            verify(exactly = 1) { bridge.markRestartRequired() }
+        }
+
+    @Test
+    @DisplayName("updateWebSearchSearxngUrl persists and marks restart required")
+    fun `updateWebSearchSearxngUrl persists and marks restart`() =
+        runTest {
+            viewModel.updateWebSearchSearxngUrl("https://searx.example.com")
+
+            assertEquals(
+                "https://searx.example.com",
+                repository.settings.first().webSearchSearxngUrl,
+            )
+            verify(exactly = 1) { bridge.markRestartRequired() }
+        }
+
+    @Test
     @DisplayName("selectFallbackRouteOption with unknown id is a no-op")
     fun `selectFallbackRouteOption unknown id is a no-op`() =
         runTest {

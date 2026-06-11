@@ -60,7 +60,7 @@ import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
         MemoryFactEntity::class,
         InteractionOutcomeEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 abstract class ZeroAIDatabase : RoomDatabase() {
@@ -472,6 +472,18 @@ abstract class ZeroAIDatabase : RoomDatabase() {
                 }
             }
 
+        /** Migration from schema version 17 to 18: refreshes the web search description. */
+        private val MIGRATION_17_18 =
+            object : Migration(17, 18) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        """UPDATE plugins
+                           SET description = 'Search the web with keyless on-device meta search.'
+                           WHERE id = 'official-web-search'""",
+                    )
+                }
+            }
+
         /**
          * Ordered array of schema migrations.
          *
@@ -496,6 +508,7 @@ abstract class ZeroAIDatabase : RoomDatabase() {
                 MIGRATION_14_15,
                 MIGRATION_15_16,
                 MIGRATION_16_17,
+                MIGRATION_17_18,
             )
 
         /**
