@@ -21,7 +21,7 @@ use futures_util::StreamExt;
 use zeroclaw::providers::traits::StreamOptions;
 
 use crate::error::FfiError;
-use crate::runtime::{try_with_daemon_config, with_daemon_config};
+use crate::runtime::try_with_daemon_config;
 use crate::session::extract_thinking_from_text;
 
 /// Per-stream cancellation token.
@@ -57,25 +57,25 @@ pub trait FfiStreamListener: Send + Sync {
     fn on_error(&self, error: String);
 }
 
-/// Sends a message to the configured provider and streams the response.
-///
-/// Reads the daemon configuration to build a provider, then opens a
-/// streaming chat request. Each chunk is forwarded to the `listener`
-/// callback. The cancel flag is checked between chunks.
-///
-/// Config field mappings (verified against `zeroclaw::Config` in
-/// `zeroclaw/src/config/schema.rs`):
-/// - `config.default_provider` (`Option<String>`) -> provider factory name
-/// - `config.default_model` (`Option<String>`) -> model string
-/// - `config.default_temperature` (`f64`) -> temperature float
-/// - `config.api_key` (`Option<String>`) -> API key for provider creation
-/// - `config.api_url` (`Option<String>`) -> optional custom endpoint URL
-/// - `config.routing` ([`zeroclaw::config::RoutingConfig`]) -> tier routing overrides
-/// - `config.reliability` ([`zeroclaw::config::ReliabilityConfig`]) -> retry/fallback settings
-///
-/// Provider factory: `zeroclaw::providers::create_resilient_model_provider_with_options`
-/// with message classification via `zeroai::router::classify`.
 crate::ffi_export!(
+    /// Sends a message to the configured provider and streams the response.
+    ///
+    /// Reads the daemon configuration to build a provider, then opens a
+    /// streaming chat request. Each chunk is forwarded to the `listener`
+    /// callback. The cancel flag is checked between chunks.
+    ///
+    /// Config field mappings (verified against `zeroclaw::Config` in
+    /// `zeroclaw/src/config/schema.rs`):
+    /// - `config.default_provider` (`Option<String>`) -> provider factory name
+    /// - `config.default_model` (`Option<String>`) -> model string
+    /// - `config.default_temperature` (`f64`) -> temperature float
+    /// - `config.api_key` (`Option<String>`) -> API key for provider creation
+    /// - `config.api_url` (`Option<String>`) -> optional custom endpoint URL
+    /// - `config.routing` ([`zeroclaw::config::RoutingConfig`]) -> tier routing overrides
+    /// - `config.reliability` ([`zeroclaw::config::ReliabilityConfig`]) -> retry/fallback settings
+    ///
+    /// Provider factory: `zeroclaw::providers::create_resilient_model_provider_with_options`
+    /// with message classification via `zeroai::router::classify`.
     /// Sends a streaming message directly to the configured provider.
     ///
     /// Bypasses the agent loop and calls the provider's streaming API.
@@ -193,14 +193,14 @@ pub(crate) fn send_message_streaming_inner(
     })
 }
 
-/// Signals the current streaming operation to cancel.
-///
-/// Sets the per-stream cancellation token (if a stream is active) so that
-/// the next chunk-polling iteration will observe the flag and stop.
-///
-/// Returns `Result` for consistency with the `catch_unwind` wrapper in
-/// `lib.rs` — the caller expects `Result<(), FfiError>`.
 crate::ffi_export!(
+    /// Signals the current streaming operation to cancel.
+    ///
+    /// Sets the per-stream cancellation token (if a stream is active) so that
+    /// the next chunk-polling iteration will observe the flag and stop.
+    ///
+    /// Returns `Result` for consistency with the `catch_unwind` wrapper in
+    /// `lib.rs` — the caller expects `Result<(), FfiError>`.
     /// Signals the current streaming operation to cancel.
     ///
     /// Sets an internal cancel flag that is checked between stream chunks.

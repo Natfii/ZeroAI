@@ -607,9 +607,13 @@ async fn run_tick_loop(
             let tx = decision_tx.clone();
 
             tokio::spawn(async move {
-                let result = match std::panic::AssertUnwindSafe(execute_decision(ctx, config))
-                    .catch_unwind()
-                    .await
+                // Box::pin: the decision future is ~33KB; keep it off the
+                // spawned task's stack frame.
+                let result = match std::panic::AssertUnwindSafe(Box::pin(execute_decision(
+                    ctx, config,
+                )))
+                .catch_unwind()
+                .await
                 {
                     Ok(r) => r,
                     Err(panic) => {

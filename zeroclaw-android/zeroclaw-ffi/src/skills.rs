@@ -25,7 +25,7 @@ use crate::skills_community::{
 #[cfg(test)]
 use crate::skills_install::WINDOWS_RESERVED;
 use crate::skills_install::{
-    copy_dir_recursive, install_skill_from_path, install_skill_from_url, validate_skill_name,
+    install_skill_from_path, install_skill_from_url, validate_skill_name,
 };
 use crate::skills_loader::load_skills_from_workspace;
 #[cfg(test)]

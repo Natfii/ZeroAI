@@ -244,15 +244,12 @@ pub async fn begin_pairing(data_dir: &Path) -> Result<String, anyhow::Error> {
 /// pairing.
 pub fn complete_pairing(paired_device: PairedDevice) {
     let mut guard = BRIDGE_SESSION.lock();
-    let session = match guard.as_mut() {
-        Some(s) => s,
-        None => {
-            warn!(
-                target: "messages_bridge::session",
-                "complete_pairing called with no active session"
-            );
-            return;
-        }
+    let Some(session) = guard.as_mut() else {
+        warn!(
+            target: "messages_bridge::session",
+            "complete_pairing called with no active session"
+        );
+        return;
     };
 
     // Build long-poll credentials from the paired device.
@@ -266,8 +263,6 @@ pub fn complete_pairing(paired_device: PairedDevice) {
     };
     let tachyon_auth_token = paired_device.tachyon_auth_token.clone();
     let tachyon_ttl = paired_device.tachyon_ttl;
-    let signing_key_for_fetch = paired_device.signing_key.clone();
-    let browser_id_for_fetch = paired_device.browser_id.clone();
 
     // Clone the store Arc so the event consumer task can share it.
     let store = Arc::clone(&session.store);
@@ -295,8 +290,6 @@ pub fn complete_pairing(paired_device: PairedDevice) {
     let fetch_token = tachyon_auth_token.clone();
     let fetch_ttl = tachyon_ttl;
     let fetch_devices = device_pair.clone();
-    let _fetch_signing_key = signing_key_for_fetch;
-    let _fetch_browser_id = browser_id_for_fetch;
 
     // Take the HTTP client from the pairing flow so its cookies
     // (set by RegisterPhoneRelay) are available for SendMessage.
@@ -355,14 +348,14 @@ pub fn complete_pairing(paired_device: PairedDevice) {
         };
 
         // Mark the session as active so the phone starts pushing data.
-        let session_id = match methods::set_active_session(
-            &http,
-            &fetch_crypto,
-            &active_token,
-            &fetch_devices,
-        )
-        .await
-        {
+        let rpc_session = methods::RpcSession {
+            http: &http,
+            crypto_keys: &fetch_crypto,
+            auth_token: &active_token,
+            ttl: active_ttl,
+            device_pair: &fetch_devices,
+        };
+        let session_id = match methods::set_active_session(&rpc_session).await {
             Ok(sid) => {
                 info!(
                     target: "messages_bridge::session",
@@ -380,16 +373,7 @@ pub fn complete_pairing(paired_device: PairedDevice) {
         };
 
         // Request the initial conversation list.
-        match methods::list_conversations(
-            &http,
-            &fetch_crypto,
-            &active_token,
-            active_ttl,
-            &fetch_devices,
-            &session_id,
-        )
-        .await
-        {
+        match methods::list_conversations(&rpc_session, &session_id).await {
             Ok(()) => {
                 info!(
                     target: "messages_bridge::session",
@@ -482,11 +466,13 @@ pub async fn fetch_conversation_history(
 
     // Send the ListMessages RPC.
     methods::list_messages(
-        &http,
-        &crypto,
-        &token,
-        ttl,
-        &devices,
+        &methods::RpcSession {
+            http: &http,
+            crypto_keys: &crypto,
+            auth_token: &token,
+            ttl,
+            device_pair: &devices,
+        },
         &session_id,
         conversation_id,
         count,
@@ -630,15 +616,15 @@ async fn watch_for_pairing(
         // Check if we've been disconnected or pairing was cancelled.
         {
             let guard = BRIDGE_SESSION.lock();
-            match guard.as_ref().map(|s| &s.status) {
-                Some(BridgeStatus::AwaitingPairing { .. }) => {}
-                _ => {
-                    info!(
-                        target: "messages_bridge::session",
-                        "pairing watcher: session no longer awaiting pairing, exiting"
-                    );
-                    return;
-                }
+            if !matches!(
+                guard.as_ref().map(|s| &s.status),
+                Some(BridgeStatus::AwaitingPairing { .. })
+            ) {
+                info!(
+                    target: "messages_bridge::session",
+                    "pairing watcher: session no longer awaiting pairing, exiting"
+                );
+                return;
             }
         }
 
@@ -736,16 +722,13 @@ async fn watch_for_pairing(
                 return true;
             }
 
-            let rpc_msg = match &lp_payload.data {
-                Some(msg) => msg,
-                None => {
-                    warn!(
-                        target: "messages_bridge::session",
-                        %preview,
-                        "watcher: payload has no data/heartbeat/ack/startRead"
-                    );
-                    return true;
-                }
+            let Some(rpc_msg) = &lp_payload.data else {
+                warn!(
+                    target: "messages_bridge::session",
+                    %preview,
+                    "watcher: payload has no data/heartbeat/ack/startRead"
+                );
+                return true;
             };
 
             let route = rpc_msg.bugle_route;

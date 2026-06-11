@@ -39,7 +39,7 @@ pub(crate) struct FfiMemoryStoreTool {
 
 impl Attributable for FfiMemoryStoreTool {
     fn role(&self) -> Role { Role::Tool(ToolKind::Memory) }
-    fn alias(&self) -> &str { "memory_store" }
+    fn alias(&self) -> &'static str { "memory_store" }
 }
 
 #[async_trait]
@@ -120,7 +120,7 @@ pub(crate) struct FfiMemoryForgetTool {
 
 impl Attributable for FfiMemoryForgetTool {
     fn role(&self) -> Role { Role::Tool(ToolKind::Memory) }
-    fn alias(&self) -> &str { "memory_forget" }
+    fn alias(&self) -> &'static str { "memory_forget" }
 }
 
 #[async_trait]
@@ -388,7 +388,7 @@ impl FfiWebSearchTool {
 
 impl Attributable for FfiWebSearchTool {
     fn role(&self) -> Role { Role::Tool(ToolKind::Search) }
-    fn alias(&self) -> &str { "web_search" }
+    fn alias(&self) -> &'static str { "web_search" }
 }
 
 #[async_trait]
@@ -567,7 +567,7 @@ pub(crate) fn fail_result(error: String) -> ToolResult {
 
 impl Attributable for FfiWebFetchTool {
     fn role(&self) -> Role { Role::Tool(ToolKind::FetchUrl) }
-    fn alias(&self) -> &str { "web_fetch" }
+    fn alias(&self) -> &'static str { "web_fetch" }
 }
 
 #[async_trait]
@@ -786,7 +786,7 @@ impl FfiHttpRequestTool {
 
 impl Attributable for FfiHttpRequestTool {
     fn role(&self) -> Role { Role::Tool(ToolKind::HttpRequest) }
-    fn alias(&self) -> &str { "http_request" }
+    fn alias(&self) -> &'static str { "http_request" }
 }
 
 #[async_trait]

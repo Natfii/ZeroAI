@@ -225,12 +225,9 @@ async fn authenticate_agent(
     handle: &mut client::Handle<CliHandler>,
     args: &Args,
 ) -> Result<bool, BoxError> {
-    let mut agent = match AgentClient::connect_env().await {
-        Ok(agent) => agent,
-        Err(_) => {
-            hint_no_keys();
-            return Ok(false);
-        }
+    let Ok(mut agent) = AgentClient::connect_env().await else {
+        hint_no_keys();
+        return Ok(false);
     };
     let identities = agent.request_identities().await?;
     if identities.is_empty() {

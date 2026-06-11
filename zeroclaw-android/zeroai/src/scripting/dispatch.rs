@@ -101,7 +101,7 @@ impl RhaiScriptRuntime {
         match runtime {
             ScriptRuntimeKind::Rhai => self.validate_rhai_source(source, manifest),
             ScriptRuntimeKind::WasmComponent | ScriptRuntimeKind::Python => {
-                self.validate_guest_manifest(manifest, source.as_bytes().len())
+                self.validate_guest_manifest(manifest, source.len())
             }
         }
     }
@@ -125,11 +125,10 @@ impl RhaiScriptRuntime {
             }
             #[cfg(not(feature = "scripting-wasm-component"))]
             {
-                let detail = format!(
-                    "WasmComponent runtime not available in this build. \
+                let detail = "WasmComponent runtime not available in this build. \
                      Enable with: features.add(\"scripting-wasm-component\") in \
                      lib/build.gradle.kts"
-                );
+                    .to_string();
                 record_script_audit_event(
                     "script_run",
                     &validation_failure_audit(&validation, detail.clone()),
@@ -232,11 +231,10 @@ impl RhaiScriptRuntime {
             }
             #[cfg(not(feature = "scripting-wasm-component"))]
             {
-                let detail = format!(
-                    "WasmComponent runtime not available in this build. \
+                let detail = "WasmComponent runtime not available in this build. \
                      Enable with: features.add(\"scripting-wasm-component\") in \
                      lib/build.gradle.kts"
-                );
+                    .to_string();
                 record_script_audit_event(
                     "script_run",
                     &validation_failure_audit(&validation, detail.clone()),
@@ -331,7 +329,7 @@ impl RhaiScriptRuntime {
         let had_explicit_capabilities = manifest
             .as_ref()
             .is_some_and(|value| value.explicit_capabilities || !value.capabilities.is_empty());
-        if source.as_bytes().len() > self.limits.max_script_bytes {
+        if source.len() > self.limits.max_script_bytes {
             return Err(ScriptError::ValidationError {
                 detail: format!(
                     "script exceeds the {} byte safety limit",
@@ -1579,7 +1577,7 @@ fn call_string(
     operation: ScriptOperation,
     args: serde_json::Value,
 ) -> Result<String, Box<EvalAltResult>> {
-    Ok(call_host(host, session, operation, args)?.to_display_string())
+    Ok(call_host(host, session, operation, args)?.into_display_string())
 }
 
 fn call_bool(
@@ -1606,6 +1604,9 @@ fn call_int(
     }
 }
 
+// Precision loss above 2^52 is inherent to surfacing an integer host
+// value through Rhai's f64 float type and acceptable for script display.
+#[allow(clippy::cast_precision_loss)]
 fn call_float(
     host: &Arc<dyn ScriptHost>,
     session: &Arc<Mutex<ScriptExecutionSession>>,

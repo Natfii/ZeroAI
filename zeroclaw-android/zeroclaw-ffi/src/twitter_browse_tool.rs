@@ -46,18 +46,18 @@ impl Attributable for TwitterReadProfileTool {
     fn role(&self) -> Role {
         Role::Tool(ToolKind::Plugin)
     }
-    fn alias(&self) -> &str {
+    fn alias(&self) -> &'static str {
         "twitter_read_profile"
     }
 }
 
 #[async_trait]
 impl Tool for TwitterReadProfileTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "twitter_read_profile"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read recent public tweets from an X (Twitter) user's profile. \
          Returns a JSON array of tweets with text, timestamp, like count, \
          and repost count. Public profiles only -- protected accounts \

@@ -339,14 +339,14 @@ impl MessagesBridgeStore {
 
         if let Some(cid) = conversation_id {
             use std::fmt::Write as _;
-            write!(sql, " AND m.conversation_id = ?{param_idx}").unwrap();
+            let _ = write!(sql, " AND m.conversation_id = ?{param_idx}");
             params_vec.push(Box::new(cid.to_string()));
             param_idx += 1;
         }
 
         {
             use std::fmt::Write as _;
-            write!(sql, " ORDER BY m.timestamp DESC LIMIT ?{param_idx}").unwrap();
+            let _ = write!(sql, " ORDER BY m.timestamp DESC LIMIT ?{param_idx}");
         }
         params_vec.push(Box::new(i64::from(limit)));
 

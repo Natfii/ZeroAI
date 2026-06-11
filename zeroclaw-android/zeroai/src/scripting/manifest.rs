@@ -369,7 +369,7 @@ pub enum ScriptValue {
 }
 
 impl ScriptValue {
-    pub(crate) fn to_display_string(self) -> String {
+    pub(crate) fn into_display_string(self) -> String {
         match self {
             Self::Unit => "ok".to_string(),
             Self::String(value) => value,

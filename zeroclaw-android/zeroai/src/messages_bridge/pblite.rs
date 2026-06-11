@@ -151,7 +151,7 @@ fn encode_field(
         }
 
         Value::Bool(b) => {
-            encode_varint_field(buf, field_number, if *b { 1 } else { 0 });
+            encode_varint_field(buf, field_number, u64::from(*b));
         }
 
         Value::Number(n) => {

@@ -14,7 +14,7 @@ use once_cell::sync::OnceCell;
 
 use crate::error::FfiError;
 use crate::repl_args::{
-    float_arg, i32_arg, int_arg, json_error, map_script_error, optional_string_arg,
+    float_arg, i32_arg, json_error, map_script_error, optional_string_arg,
     script_host_error, string_arg, string_list_arg, to_json, u32_arg, u64_arg,
 };
 use crate::{

@@ -26,15 +26,10 @@
 
 use std::fmt::Write;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
-use async_trait::async_trait;
-use futures_util::StreamExt;
 use tokio_util::sync::CancellationToken;
-use zeroclaw::memory::MemoryCategory;
-use zeroclaw::providers::{ChatMessage, ChatRequest, ModelProvider, ToolCall};
-use zeroclaw::tools::{Tool, ToolResult, ToolSpec};
-use zeroclaw_api::attribution::{Attributable, Role, ToolKind};
+use zeroclaw::providers::{ChatMessage, ChatRequest, ModelProvider};
+use zeroclaw::tools::{Tool, ToolSpec};
 
 use crate::error::FfiError;
 use crate::runtime::{clone_daemon_config, clone_daemon_memory};
@@ -45,7 +40,7 @@ use crate::session_text::{append_android_identity_extras, compose_multimodal_mes
 // `streaming.rs`) and the `super::*` glob in `session_tests.rs` resolve
 // against the canonical implementations in `session_text`.
 pub(crate) use crate::session_text::{
-    extract_thinking_from_text, parse_xml_tool_calls, truncate_chars, truncate_tool_args_hint,
+    extract_thinking_from_text, parse_xml_tool_calls, truncate_tool_args_hint,
 };
 use crate::session_tool_specs::{
     build_android_tool_descs, build_android_tool_specs, build_tool_use_protocol,

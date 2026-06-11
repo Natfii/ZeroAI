@@ -22,24 +22,24 @@ const DEFAULT_COMM_STYLE: &str = "Be warm, natural, and clear. Use occasional re
 /// Subdirectories created inside the workspace.
 const SUBDIRS: [&str; 5] = ["sessions", "memory", "state", "cron", "skills"];
 
-/// Creates the `ZeroClaw` workspace directory structure and identity files.
-///
-/// Writes 8 markdown template files and creates 5 subdirectories inside
-/// `workspace_path`. Existing files are never overwritten (idempotent).
-/// Directories are created with `create_dir_all` so partial state from
-/// a previous failed run is handled cleanly.
-///
-/// Empty parameter strings are replaced with upstream defaults:
-/// - `agent_name` -> `"ZeroAI"`
-/// - `user_name` -> `"User"`
-/// - `timezone` -> `"UTC"`
-/// - `communication_style` -> warm/natural default
-///
-/// # Errors
-///
-/// Returns [`FfiError::ConfigError`] if directory creation or file
-/// writing fails due to I/O errors.
 crate::ffi_export!(
+    /// Creates the `ZeroClaw` workspace directory structure and identity files.
+    ///
+    /// Writes 8 markdown template files and creates 5 subdirectories inside
+    /// `workspace_path`. Existing files are never overwritten (idempotent).
+    /// Directories are created with `create_dir_all` so partial state from
+    /// a previous failed run is handled cleanly.
+    ///
+    /// Empty parameter strings are replaced with upstream defaults:
+    /// - `agent_name` -> `"ZeroAI"`
+    /// - `user_name` -> `"User"`
+    /// - `timezone` -> `"UTC"`
+    /// - `communication_style` -> warm/natural default
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FfiError::ConfigError`] if directory creation or file
+    /// writing fails due to I/O errors.
     /// Scaffolds the `ZeroAI` workspace directory with identity files.
     ///
     /// Writes `IDENTITY.md`, `MEMORIES.md`, and `INSTRUCTIONS.md` into

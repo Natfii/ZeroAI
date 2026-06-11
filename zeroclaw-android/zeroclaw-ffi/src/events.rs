@@ -156,8 +156,6 @@ impl Observer for AndroidObserver {
     }
 }
 
-/// Registers a Kotlin-side event listener.
-///
 // ── FFI exports ────────────────────────────────────────────────────────────
 
 crate::ffi_export!(

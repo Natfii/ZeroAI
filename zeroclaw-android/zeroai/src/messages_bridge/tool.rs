@@ -61,18 +61,18 @@ impl Attributable for ReadMessagesTool {
     fn role(&self) -> Role {
         Role::Tool(ToolKind::Plugin)
     }
-    fn alias(&self) -> &str {
+    fn alias(&self) -> &'static str {
         "messages_bridge_read"
     }
 }
 
 #[async_trait]
 impl Tool for ReadMessagesTool {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "read_messages"
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> &'static str {
         "Read text messages from Google Messages conversations that the user has allowed. \
         Returns a timestamped transcript."
     }

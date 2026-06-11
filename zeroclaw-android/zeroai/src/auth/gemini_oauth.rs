@@ -366,8 +366,8 @@ pub async fn receive_loopback_code(expected_state: &str, timeout: Duration) -> R
         }
     };
 
-    println!("Waiting for callback at http://localhost:1456/auth/callback ...");
-    println!("(Or paste the full callback URL / authorization code here if running remotely)");
+    eprintln!("Waiting for callback at http://localhost:1456/auth/callback ...");
+    eprintln!("(Or paste the full callback URL / authorization code here if running remotely)");
 
     tokio::select! {
         accept_result = async {
@@ -495,6 +495,11 @@ pub fn parse_code_from_redirect(input: &str, expected_state: Option<&str>) -> Re
 
 /// Extract account email from Google ID token.
 pub fn extract_account_email_from_id_token(id_token: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct IdTokenPayload {
+        email: Option<String>,
+    }
+
     let parts: Vec<&str> = id_token.split('.').collect();
     if parts.len() != 3 {
         return None;
@@ -503,11 +508,6 @@ pub fn extract_account_email_from_id_token(id_token: &str) -> Option<String> {
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(parts[1])
         .ok()?;
-
-    #[derive(Deserialize)]
-    struct IdTokenPayload {
-        email: Option<String>,
-    }
 
     let payload: IdTokenPayload = serde_json::from_slice(&payload).ok()?;
     payload.email

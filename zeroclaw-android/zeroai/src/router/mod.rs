@@ -25,29 +25,29 @@ pub struct RoutingConfig {
 
 /// Fenced code blocks: ``` ... ```
 static CODE_FENCE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)```.*?```").unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)```.*?```").expect("literal regex pattern must compile"));
 
 /// Inline code: `something`
 static INLINE_CODE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"`[^`]+`").unwrap());
+    LazyLock::new(|| Regex::new(r"`[^`]+`").expect("literal regex pattern must compile"));
 
 /// JSON-like structure: { "key": ... }
 static JSON_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?s)\{.*?"[^"]+"\s*:"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?s)\{.*?"[^"]+"\s*:"#).expect("literal regex pattern must compile"));
 
 /// XML/HTML tags.
 static XML_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<[a-zA-Z][a-zA-Z0-9]*[\s>]").unwrap());
+    LazyLock::new(|| Regex::new(r"<[a-zA-Z][a-zA-Z0-9]*[\s>]").expect("literal regex pattern must compile"));
 
 /// SQL keywords at word boundaries.
 static SQL_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| {
-        Regex::new(r"(?i)\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b").unwrap()
+        Regex::new(r"(?i)\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP)\b").expect("literal regex pattern must compile")
     });
 
 /// LaTeX math notation.
 static MATH_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$[^$]+\$|\\(frac|sqrt|sum|int|begin)\{").unwrap());
+    LazyLock::new(|| Regex::new(r"\$[^$]+\$|\\(frac|sqrt|sum|int|begin)\{").expect("literal regex pattern must compile"));
 
 /// Tool-use action verbs.
 static TOOL_USE_PATTERN: LazyLock<Regex> =
@@ -55,7 +55,7 @@ static TOOL_USE_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)\b(search for|look\s+up|calculate|fetch|find all|run|execute|check the)\b",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Creative task verbs.
@@ -64,7 +64,7 @@ static CREATIVE_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)\b(write a|write me|compose|brainstorm|imagine|invent|draft a|come up with|create a story|make up)\b",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Simple factual question patterns.
@@ -73,7 +73,7 @@ static SIMPLE_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)\b(what is|what's|define|who is|who's|when did|when was|how many|how much|translate|name the|list the|list all)\b",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Greetings (must match entire trimmed message).
@@ -82,7 +82,7 @@ static GREETING_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)^(hi|hello|hey|howdy|good morning|good afternoon|good evening|sup|yo|what's up|thanks|thank you|ok|okay)\s*[!?.]*$",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Complex reasoning verbs.
@@ -91,7 +91,7 @@ static COMPLEX_VERB_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)\b(explain|compare|contrast|analyze|evaluate|synthesize|design|implement|debug|refactor|optimize|prove|derive|why does|how does)\b",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Multi-part question indicators.
@@ -100,7 +100,7 @@ static MULTI_PART_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?im)(^\s*\d+[.)]\s)|(\b(additionally|furthermore|also|moreover|first[\s,].*second|and also)\b)",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Constraint-heavy language.
@@ -109,7 +109,7 @@ static CONSTRAINT_PATTERN: LazyLock<Regex> =
         Regex::new(
             r"(?i)\b(do not|don't|without|except|only if|make sure|must not|avoid|never)\b",
         )
-        .unwrap()
+        .expect("literal regex pattern must compile")
     });
 
 /// Messages shorter than this word count are likely simple.
@@ -157,11 +157,10 @@ pub fn classify(message: &str) -> RouteHint {
 
         if word_count <= SHORT_MESSAGE_WORDS && SIMPLE_PATTERN.is_match(trimmed) {
             RouteHint::Simple
-        } else if COMPLEX_VERB_PATTERN.is_match(trimmed) {
-            RouteHint::Complex
-        } else if MULTI_PART_PATTERN.is_match(trimmed) {
-            RouteHint::Complex
-        } else if word_count > LONG_MESSAGE_WORDS {
+        } else if COMPLEX_VERB_PATTERN.is_match(trimmed)
+            || MULTI_PART_PATTERN.is_match(trimmed)
+            || word_count > LONG_MESSAGE_WORDS
+        {
             RouteHint::Complex
         } else {
             let mut score: i32 = 0;

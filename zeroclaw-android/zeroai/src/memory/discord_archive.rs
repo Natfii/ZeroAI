@@ -306,6 +306,8 @@ impl DiscordArchive {
         days_back: Option<u32>,
         limit: usize,
     ) -> Result<Vec<ArchiveMessage>> {
+        use std::fmt::Write as _;
+
         let conn = self.conn.lock();
 
         let mut sql = String::from(
@@ -321,19 +323,19 @@ impl DiscordArchive {
             vec![Box::new(query.to_string())];
 
         if let Some(cid) = channel_id {
-            sql.push_str(&format!(" AND m.channel_id = ?{param_idx}"));
+            let _ = write!(sql, " AND m.channel_id = ?{param_idx}");
             params_vec.push(Box::new(cid.to_string()));
             param_idx += 1;
         }
 
         if let Some(days) = days_back {
             let cutoff = Utc::now().timestamp() - i64::from(days) * 86_400;
-            sql.push_str(&format!(" AND m.timestamp >= ?{param_idx}"));
+            let _ = write!(sql, " AND m.timestamp >= ?{param_idx}");
             params_vec.push(Box::new(cutoff));
             param_idx += 1;
         }
 
-        sql.push_str(&format!(" ORDER BY m.timestamp DESC LIMIT ?{param_idx}"));
+        let _ = write!(sql, " ORDER BY m.timestamp DESC LIMIT ?{param_idx}");
         params_vec.push(Box::new(limit as i64));
 
         let mut stmt = conn.prepare(&sql)?;

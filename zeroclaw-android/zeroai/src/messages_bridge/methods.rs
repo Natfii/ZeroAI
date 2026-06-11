@@ -21,32 +21,43 @@ use super::longpoll::DevicePair;
 use super::pblite;
 use super::proto::{authentication, client, rpc, util};
 
+/// Borrowed transport context shared by every paired-session RPC.
+///
+/// Bundles the connection values that every Bugle RPC needs so the
+/// individual method signatures stay focused on their own request
+/// parameters.
+#[derive(Clone, Copy)]
+pub struct RpcSession<'a> {
+    /// Cookie-enabled HTTP client from the pairing session.
+    pub http: &'a BugleHttpClient,
+    /// AES/HMAC keys negotiated during pairing.
+    pub crypto_keys: &'a BugleCryptoKeys,
+    /// Current Tachyon auth token.
+    pub auth_token: &'a [u8],
+    /// Tachyon token TTL; `0` omits the TTL field.
+    pub ttl: i64,
+    /// Serialised browser/mobile device pair from pairing.
+    pub device_pair: &'a DevicePair,
+}
+
 /// Sends a `GET_UPDATES` action to mark the session as active.
 ///
 /// This tells the phone that we're actively listening for data. Without
 /// this call, the phone won't push conversations or messages on the
-/// long-poll stream. Matches upstream `SetActiveSession()`.
+/// long-poll stream. Matches upstream `SetActiveSession()`, which always
+/// omits the TTL regardless of the session's token TTL.
 ///
 /// # Errors
 ///
 /// Returns [`BugleHttpError`] on transport failure or non-2xx server
 /// response.
 /// Returns the generated session ID on success.
-pub async fn set_active_session(
-    http: &BugleHttpClient,
-    crypto_keys: &BugleCryptoKeys,
-    auth_token: &[u8],
-    device_pair: &DevicePair,
-) -> Result<String, BugleHttpError> {
+pub async fn set_active_session(session: &RpcSession<'_>) -> Result<String, BugleHttpError> {
     let session_id = uuid::Uuid::new_v4().to_string();
 
     // GET_UPDATES with requestID = sessionID (upstream pattern).
     send_rpc_action_with_session(
-        http,
-        crypto_keys,
-        auth_token,
-        0, // OmitTTL
-        device_pair,
+        &RpcSession { ttl: 0, ..*session },
         rpc::ActionType::GetUpdates,
         rpc::MessageType::BugleMessage,
         &util::EmptyArr {}, // no data
@@ -72,11 +83,7 @@ pub async fn set_active_session(
 /// Returns [`BugleHttpError`] on transport failure or non-2xx server
 /// response.
 pub async fn list_conversations(
-    http: &BugleHttpClient,
-    crypto_keys: &BugleCryptoKeys,
-    auth_token: &[u8],
-    ttl: i64,
-    device_pair: &DevicePair,
+    session: &RpcSession<'_>,
     session_id: &str,
 ) -> Result<(), BugleHttpError> {
     let inner_request = client::ListConversationsRequest {
@@ -86,11 +93,7 @@ pub async fn list_conversations(
     };
 
     send_rpc_action_with_session(
-        http,
-        crypto_keys,
-        auth_token,
-        ttl,
-        device_pair,
+        session,
         rpc::ActionType::ListConversations,
         rpc::MessageType::BugleAnnotation,
         &inner_request,
@@ -111,11 +114,7 @@ pub async fn list_conversations(
 /// Returns [`BugleHttpError`] on transport failure or non-2xx server
 /// response.
 pub async fn list_messages(
-    http: &BugleHttpClient,
-    crypto_keys: &BugleCryptoKeys,
-    auth_token: &[u8],
-    ttl: i64,
-    device_pair: &DevicePair,
+    session: &RpcSession<'_>,
     session_id: &str,
     conversation_id: &str,
     count: i64,
@@ -127,11 +126,7 @@ pub async fn list_messages(
     };
 
     send_rpc_action_with_session(
-        http,
-        crypto_keys,
-        auth_token,
-        ttl,
-        device_pair,
+        session,
         rpc::ActionType::ListMessages,
         rpc::MessageType::BugleAnnotation,
         &inner_request,
@@ -251,17 +246,20 @@ pub async fn refresh_auth_token(
 /// PBLite-encodes the envelope, and POSTs it to the `SendMessage` endpoint
 /// using `application/json+protobuf` content type.
 async fn send_rpc_action_with_session(
-    http: &BugleHttpClient,
-    crypto_keys: &BugleCryptoKeys,
-    auth_token: &[u8],
-    ttl: i64,
-    device_pair: &DevicePair,
+    session: &RpcSession<'_>,
     action: rpc::ActionType,
     message_type: rpc::MessageType,
     inner_request: &impl Message,
     session_id: &str,
     override_request_id: Option<&str>,
 ) -> Result<(), BugleHttpError> {
+    let RpcSession {
+        http,
+        crypto_keys,
+        auth_token,
+        ttl,
+        device_pair,
+    } = *session;
     let request_id = override_request_id
         .map(String::from)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());

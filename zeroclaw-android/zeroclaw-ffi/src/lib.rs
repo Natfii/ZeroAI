@@ -67,8 +67,6 @@ mod messages_bridge_page;
 mod tailnet;
 mod tty;
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
 
 pub use error::FfiError;
 
@@ -112,6 +110,9 @@ macro_rules! ffi_export {
     ($(#[$attr:meta])* fn $name:ident($($arg:ident: $ty:ty),+ $(,)?) -> $ret:ty = $inner:path) => {
         $(#[$attr])*
         #[uniffi::export]
+        // The generated wrapper mirrors its inner function's parameter
+        // list verbatim — wide UniFFI surfaces are intentional here.
+        #[allow(clippy::too_many_arguments)]
         pub fn $name($($arg: $ty),+) -> Result<$ret, $crate::FfiError> {
             ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(move || $inner($($arg),+)))
                 .unwrap_or_else(|e| Err($crate::FfiError::InternalPanic {

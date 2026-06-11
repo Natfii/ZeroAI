@@ -13,23 +13,23 @@
 use crate::error::FfiError;
 use crate::runtime;
 
-/// Queries runtime trace events from the JSONL file.
-///
-/// Reads `{workspace}/state/runtime-trace.jsonl`, applies optional
-/// filters, and returns the newest `limit` events as a JSON array string.
-///
-/// # Arguments
-///
-/// * `filter` - Optional case-insensitive substring match on message/payload.
-/// * `event_type` - Optional exact match on `event_type` field.
-/// * `limit` - Maximum number of events to return (newest first).
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running,
-/// or [`FfiError::SpawnError`] if the trace file cannot be read or
-/// the result cannot be serialised.
 crate::ffi_export!(
+    /// Queries runtime trace events from the JSONL file.
+    ///
+    /// Reads `{workspace}/state/runtime-trace.jsonl`, applies optional
+    /// filters, and returns the newest `limit` events as a JSON array string.
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - Optional case-insensitive substring match on message/payload.
+    /// * `event_type` - Optional exact match on `event_type` field.
+    /// * `limit` - Maximum number of events to return (newest first).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FfiError::StateError`] if the daemon is not running,
+    /// or [`FfiError::SpawnError`] if the trace file cannot be read or
+    /// the result cannot be serialised.
     /// Queries runtime trace events from the daemon's JSONL trace file.
     ///
     /// Returns a JSON array of trace event objects, newest last.

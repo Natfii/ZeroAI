@@ -273,16 +273,16 @@ fn builtin_to_spec(tool: &BuiltInTool) -> FfiToolSpec {
     }
 }
 
-/// Lists all available tools based on daemon configuration and installed skills.
-///
-/// Enumerates built-in tools that are always active, conditionally adds
-/// browser/HTTP/Composio/delegate tools based on config flags, then
-/// appends tools from all installed skills.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running.
 crate::ffi_export!(
+    /// Lists all available tools based on daemon configuration and installed skills.
+    ///
+    /// Enumerates built-in tools that are always active, conditionally adds
+    /// browser/HTTP/Composio/delegate tools based on config flags, then
+    /// appends tools from all installed skills.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FfiError::StateError`] if the daemon is not running.
     /// Lists all available tools based on daemon config and installed skills.
     ///
     /// Returns built-in tools (always present), conditional tools (browser,

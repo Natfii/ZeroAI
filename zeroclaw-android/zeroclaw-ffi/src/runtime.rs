@@ -444,7 +444,9 @@ pub(crate) fn build_active_provider(
     options.zeroclaw_dir = config.config_path.parent().map(PathBuf::from);
     options.secrets_encrypt = config.secrets.encrypt;
     options.reasoning_enabled = config.runtime.reasoning_enabled;
-    options.reasoning_effort = config.runtime.reasoning_effort.clone();
+    options
+        .reasoning_effort
+        .clone_from(&config.runtime.reasoning_effort);
     let api_key = config
         .providers
         .models
@@ -666,8 +668,10 @@ pub(crate) fn start_daemon_inner(
     config.data_dir = data_path.join("workspace");
     config.config_path = data_path.join("config.toml");
 
-    // open-skills auto-sync was removed during channel gutting (supply-chain risk).
-    // SkillsConfig no longer has open_skills_enabled or open_skills_dir fields.
+    // open-skills auto-sync stays disabled on Android (supply-chain risk).
+    // The upstream crates/ realignment restored the SkillsConfig
+    // open_skills_* fields, but the Android TOML builder never emits
+    // them, so they keep their off-by-default values.
 
     // Upstream moved `autonomy.non_cli_excluded_tools` off the
     // top-level Config — the exclusion guard now lives in
@@ -791,7 +795,12 @@ pub(crate) fn start_daemon_inner(
                     // PairingGuard internally; we no longer pass ours
                     // in. Signature: `(host, port, config,
                     // external_event_tx, reload_tx, canvas_store)`.
-                    async move { zeroclaw::gateway::run_gateway(&h, port, cfg, None, None, None).await }
+                    // Box::pin: the gateway future is ~35KB; keep it off
+                    // the supervisor task's stack frame.
+                    async move {
+                        Box::pin(zeroclaw::gateway::run_gateway(&h, port, cfg, None, None, None))
+                            .await
+                    }
                 },
             ));
         }
@@ -810,7 +819,9 @@ pub(crate) fn start_daemon_inner(
                     // channel restart gets a fresh lifecycle.
                     async move {
                         let cancel = tokio_util::sync::CancellationToken::new();
-                        zeroclaw::channels::start_channels(cfg, None, cancel).await
+                        // Box::pin: the channel-orchestrator future is ~35KB;
+                        // keep it off the supervisor task's stack frame.
+                        Box::pin(zeroclaw::channels::start_channels(cfg, None, cancel)).await
                     }
                 },
             ));
@@ -955,7 +966,9 @@ pub(crate) fn send_message_inner(message: String) -> Result<String, FfiError> {
     let config = with_daemon_config(Config::clone)?;
 
     handle.block_on(async {
-        zeroclaw::agent::process_message(config, "default", &message, None)
+        // Box::pin: the agent-loop future is ~56KB; keep it heap-allocated
+        // rather than inlined into the block_on frame.
+        Box::pin(zeroclaw::agent::process_message(config, "default", &message, None))
             .await
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("agent processing failed: {e}"),
@@ -999,7 +1012,9 @@ pub(crate) fn send_message_routed_inner(
         // classifier), but it is unused at the call site until upstream
         // restores a router config or we wire a local pre-classifier.
         let _ = hint;
-        zeroclaw::agent::process_message(config, "default", &message, None)
+        // Box::pin: the agent-loop future is ~56KB; keep it heap-allocated
+        // rather than inlined into the block_on frame.
+        Box::pin(zeroclaw::agent::process_message(config, "default", &message, None))
             .await
             .map_err(|e| FfiError::SpawnError {
                 detail: format!("agent processing failed: {e}"),

@@ -12,7 +12,7 @@
 //! Ollama (OpenAI-compatible wire format).
 
 use crate::error::FfiError;
-use crate::runtime::{effective_model_provider_type, try_with_daemon_config, with_daemon_config};
+use crate::runtime::{effective_model_provider_type, try_with_daemon_config};
 use serde_json::{Value, json};
 use tokio::time::Duration;
 
@@ -66,17 +66,17 @@ pub(crate) fn classify_provider(name: &str) -> Option<VisionProvider> {
     }
 }
 
-/// Returns whether the active provider supports vision (image input).
-///
-/// Reads the default provider from the running daemon's configuration and
-/// checks it against [`classify_provider`]. Returns `true` if the provider
-/// has a known vision wire format, `false` otherwise.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running or the
-/// daemon mutex is poisoned.
 crate::ffi_export!(
+    /// Returns whether the active provider supports vision (image input).
+    ///
+    /// Reads the default provider from the running daemon's configuration and
+    /// checks it against [`classify_provider`]. Returns `true` if the provider
+    /// has a known vision wire format, `false` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FfiError::StateError`] if the daemon is not running or the
+    /// daemon mutex is poisoned.
     /// Returns whether the active cloud provider supports vision (image input).
     ///
     /// Reads the daemon's default provider and checks if it has a known
@@ -230,22 +230,22 @@ pub(crate) fn parse_gemini_response(body: &Value) -> Result<String, FfiError> {
         })
 }
 
-/// Sends a vision (image + text) message directly to the configured provider.
-///
-/// Reads the active provider, model, and API key from `DaemonState`
-/// config, builds the appropriate request body, and dispatches an
-/// HTTP POST. Returns the assistant's text reply.
-///
-/// # Errors
-///
-/// Returns [`FfiError::ConfigError`] for validation failures (empty
-/// images, too many images, mismatched counts),
-/// [`FfiError::InvalidArgument`] for unsupported provider names or
-/// invalid MIME types,
-/// [`FfiError::StateError`] if the daemon is not running or
-/// response parsing fails,
-/// [`FfiError::SpawnError`] for HTTP client or network failures.
 crate::ffi_export!(
+    /// Sends a vision (image + text) message directly to the configured provider.
+    ///
+    /// Reads the active provider, model, and API key from `DaemonState`
+    /// config, builds the appropriate request body, and dispatches an
+    /// HTTP POST. Returns the assistant's text reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FfiError::ConfigError`] for validation failures (empty
+    /// images, too many images, mismatched counts),
+    /// [`FfiError::InvalidArgument`] for unsupported provider names or
+    /// invalid MIME types,
+    /// [`FfiError::StateError`] if the daemon is not running or
+    /// response parsing fails,
+    /// [`FfiError::SpawnError`] for HTTP client or network failures.
     /// Sends a vision (image + text) message directly to the provider.
     ///
     /// Each entry in `image_data` is a base64-encoded image, paired with a

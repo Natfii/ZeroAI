@@ -485,7 +485,7 @@ async fn call_llm(
     // from `effective_model_provider_type`; the provider factory reads
     // its own auth + endpoint from the matching
     // `[providers.models.<type>.<alias>]` block on construction.
-    let provider_name_owned = crate::runtime::effective_model_provider_type(&config).map_err(|e| e.to_string())?;
+    let provider_name_owned = crate::runtime::effective_model_provider_type(config).map_err(|e| e.to_string())?;
     let provider_name = provider_name_owned.as_str();
 
     let provider = zeroclaw::providers::create_resilient_model_provider_with_options(

@@ -52,7 +52,7 @@ impl ScriptHostPluginAdapter {
     fn call_str(&self, op: ScriptOperation, args: serde_json::Value) -> Result<String, String> {
         self.host
             .call(op, args)
-            .map(|v| v.to_display_string())
+            .map(|v| v.into_display_string())
             .map_err(|e| e.to_string())
     }
 }

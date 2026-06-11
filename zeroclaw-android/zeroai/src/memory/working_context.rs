@@ -91,12 +91,14 @@ fn truncate_to_budget(text: &str, budget: usize) -> &str {
 ///
 /// Each entry appears as `- {key}: {content}` on its own line.
 fn format_identity_block(entries: &[(String, String)]) -> String {
+    use std::fmt::Write as _;
+
     let mut buf = String::new();
     for (key, content) in entries {
         if !buf.is_empty() {
             buf.push('\n');
         }
-        buf.push_str(&format!("- {key}: {content}"));
+        let _ = write!(buf, "- {key}: {content}");
     }
     buf
 }
@@ -105,12 +107,14 @@ fn format_identity_block(entries: &[(String, String)]) -> String {
 ///
 /// Each entry appears as `- {content} (score: {score:.2})` on its own line.
 fn format_recall_block(entries: &[(String, f64)]) -> String {
+    use std::fmt::Write as _;
+
     let mut buf = String::new();
     for (content, score) in entries {
         if !buf.is_empty() {
             buf.push('\n');
         }
-        buf.push_str(&format!("- {content} (score: {score:.2})"));
+        let _ = write!(buf, "- {content} (score: {score:.2})");
     }
     buf
 }

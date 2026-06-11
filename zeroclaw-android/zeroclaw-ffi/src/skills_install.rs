@@ -7,7 +7,6 @@
 //! names. Kept separate from `skills.rs` so the parser/loader and FFI
 //! exports there can stay focused.
 
-use std::path::Path;
 
 use crate::error::FfiError;
 use crate::skills_parser::resolve_manifest_path;

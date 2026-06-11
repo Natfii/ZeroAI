@@ -31,15 +31,14 @@ pub struct FfiTwitterUser {
     pub display_name: String,
 }
 
-/// Reads the current twitter browse config from the daemon.
-///
-/// Disabled: `Config.twitter_browse` was removed upstream during the
-/// workspace split (zeroclaw v0.8.0-beta-1). Returns disabled defaults
-/// so the Android settings UI can render without a twitter config block.
 // ── FFI exports ────────────────────────────────────────────────────────────
 
 crate::ffi_export!(
     /// Returns the current twitter browse tool configuration.
+    ///
+    /// Disabled: `Config.twitter_browse` was removed upstream during the
+    /// workspace split (zeroclaw v0.8.0-beta-1). Returns disabled defaults
+    /// so the Android settings UI can render without a twitter config block.
     ///
     /// # Errors
     ///

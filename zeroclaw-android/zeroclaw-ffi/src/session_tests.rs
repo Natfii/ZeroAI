@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::session_history::{build_compaction_transcript, trim_history};
+use crate::session_text::truncate_chars;
 use std::sync::Mutex as StdMutex;
 
 /// A test listener that records all callback invocations as strings.

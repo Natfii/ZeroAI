@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use crate::skills_install::copy_dir_recursive;
 
 #[test]
 fn test_list_skills_not_running() {

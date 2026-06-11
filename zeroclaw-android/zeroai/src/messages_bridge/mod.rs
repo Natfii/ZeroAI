@@ -33,6 +33,9 @@ pub mod proto {
     pub mod settings {
         include!(concat!(env!("OUT_DIR"), "/settings.rs"));
     }
+    // The generated file nests its own `config` module (the protobuf
+    // package name), which trips module_inception on prost output.
+    #[allow(clippy::module_inception)]
     pub mod config {
         include!(concat!(env!("OUT_DIR"), "/config.rs"));
     }

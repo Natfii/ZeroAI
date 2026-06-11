@@ -11,6 +11,13 @@ name = "zeroai"
 [lints]
 workspace = true
 
+[features]
+# Future guest-script runtimes. The scripting module cfg-gates its
+# scaffolding on these flags; declaring them (empty) keeps the cfgs
+# valid even though no build enables them yet.
+scripting-wasm-component = []
+scripting-python = []
+
 [dependencies]
 # Upstream zeroclaw re-export layer — gives us Memory, Config, ChatMessage etc.
 zeroclaw = { package = "zeroclawlabs", path = "../../zeroclaw", default-features = false, features = [

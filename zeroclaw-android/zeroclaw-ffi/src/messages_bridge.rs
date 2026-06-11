@@ -182,14 +182,6 @@ pub(crate) fn get_status_inner() -> Result<FfiBridgeStatus, FfiError> {
     Ok(status_to_ffi(&status))
 }
 
-/// Lists all bridged conversations from the message store.
-///
-/// Conversations are ordered by last message timestamp descending.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the bridge session is not active,
-/// or [`FfiError::SpawnError`] if the store query fails.
 // ── FFI exports ────────────────────────────────────────────────────────────
 
 crate::ffi_export!(

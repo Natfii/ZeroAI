@@ -129,17 +129,6 @@ fn parse_category(cat: &str) -> zeroclaw::memory::MemoryCategory {
     }
 }
 
-/// Lists memory entries, optionally filtered by category.
-///
-/// When `category` is `None`, returns all entries. When provided, only
-/// entries matching the category are returned. Results are truncated to
-/// `limit` entries.
-///
-/// # Errors
-///
-/// Returns [`FfiError::StateError`] if the daemon is not running or
-/// the memory backend is not available, or [`FfiError::SpawnError`]
-/// on backend access failure.
 // ── FFI exports ────────────────────────────────────────────────────────────
 
 crate::ffi_export!(
@@ -413,7 +402,7 @@ pub(crate) fn store_memory_with_metadata_inner(
     // We still validate them above so the Android caller gets the same
     // surface-level guarantees, but they are not forwarded to the
     // backend until upstream restores per-entry metadata.
-    let _unused_metadata = (&source, &tags, decay_half_life_days);
+    let _ = (&source, &tags, decay_half_life_days);
 
     crate::runtime::with_memory(|memory, handle| {
         handle
