@@ -36,6 +36,7 @@ mod repl;
 mod repl_args;
 mod runtime;
 mod runtime_channels;
+mod search_repair;
 mod session;
 mod session_history;
 mod session_persistence;

@@ -74,6 +74,26 @@ pub async fn derive(
     parse_model_selectors(&response)
 }
 
+/// Asks the registered on-device completer (e.g. Gemini Nano) to derive
+/// fresh selectors from the same skeletonized prompt the provider rung
+/// uses. Runs the completion on the blocking pool — on-device models can
+/// take tens of seconds on first load. The result must still pass the
+/// validation gate.
+pub(crate) async fn derive_with_completer(
+    completer: std::sync::Arc<dyn super::completer::RepairCompleter>,
+    engine_id: &str,
+    body: &str,
+) -> anyhow::Result<HtmlResponseSpec> {
+    let skeleton = skeletonize(body, MAX_SKELETON_BYTES);
+    let prompt = build_repair_prompt(engine_id, &skeleton);
+    let response = tokio::task::spawn_blocking(move || completer.complete(prompt))
+        .await
+        .map_err(|join_error| {
+            anyhow::Error::msg(format!("on-device completion task failed: {join_error}"))
+        })??;
+    parse_model_selectors(&response)
+}
+
 /// Collapses an HTML document into an indented structural outline: tag,
 /// classes, id, truncated href, and truncated text — everything a model
 /// needs to write CSS selectors, at a fraction of the size.

@@ -45,9 +45,11 @@ import com.zeroclaw.ffi.FfiAuthProfile
 import com.zeroclaw.ffi.FfiException
 import com.zeroclaw.ffi.clawboyStopSession
 import com.zeroclaw.ffi.listPersistedSessions
+import com.zeroclaw.ffi.registerSearchRepairHandler
 import com.zeroclaw.ffi.registerSharedFolderHandler
 import com.zeroclaw.ffi.restoreSessionState
 import com.zeroclaw.ffi.saveSessionState
+import com.zeroclaw.ffi.unregisterSearchRepairHandler
 import com.zeroclaw.ffi.unregisterSharedFolderHandler
 import com.zeroclaw.ffi.validateConfig
 import kotlinx.coroutines.CoroutineDispatcher
@@ -136,6 +138,7 @@ class ZeroAIDaemonService : Service() {
     private var statusPollJob: Job? = null
     private var startJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var searchRepairNanoHandler: SearchRepairNanoHandler? = null
 
     @Volatile private var isScreenOn: Boolean = true
     private var screenReceiver: BroadcastReceiver? = null
@@ -881,6 +884,9 @@ class ZeroAIDaemonService : Service() {
 
     private fun handleStop() {
         unregisterSharedFolderHandler()
+        unregisterSearchRepairHandler()
+        searchRepairNanoHandler?.close()
+        searchRepairNanoHandler = null
         startJob?.cancel()
         statusPollJob?.cancel()
         retryPolicy.reset()
@@ -1054,6 +1060,17 @@ class ZeroAIDaemonService : Service() {
                                 @Suppress("TooGenericExceptionCaught") e: Exception,
                             ) {
                                 Log.w(TAG, "SharedFolder handler registration failed: ${e.message}")
+                            }
+                            try {
+                                if (isAiCoreInstalled(applicationContext)) {
+                                    val nanoHandler = SearchRepairNanoHandler()
+                                    searchRepairNanoHandler = nanoHandler
+                                    registerSearchRepairHandler(nanoHandler)
+                                }
+                            } catch (
+                                @Suppress("TooGenericExceptionCaught") e: Exception,
+                            ) {
+                                Log.w(TAG, "Search repair handler registration failed: ${e.message}")
                             }
                             try {
                                 PendingDiscordOpsStore.drain(

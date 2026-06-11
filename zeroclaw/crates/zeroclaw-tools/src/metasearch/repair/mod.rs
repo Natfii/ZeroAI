@@ -11,18 +11,23 @@
 //! 2. **Bundled revert** — if a previously adopted overlay went stale, the
 //!    factory spec is probed and restored.
 //! 3. **Wrapper induction** — deterministic selector re-derivation.
-//! 4. **Model derivation** — a skeletonized page is handed to the configured
-//!    model.
+//! 4. **On-device derivation** — when the app registered a local
+//!    [`RepairCompleter`] (e.g. Gemini Nano), the skeletonized page is
+//!    tried there first; a failure costs one local completion.
+//! 5. **Model derivation** — a skeletonized page is handed to the
+//!    configured provider's model.
 //!
 //! Every candidate passes the model-free validation gate before adoption,
 //! and adoption is atomic: overlay written to disk first, then the live
 //! spec swapped. Single-flight and cooldown guards keep repair attempts
 //! rare and non-overlapping.
 
+pub mod completer;
 pub mod induction;
 pub mod model;
 pub mod validate;
 
+pub use completer::{RepairCompleter, set_repair_completer};
 pub use model::RepairModelConfig;
 
 use crate::metasearch::executor::{self, EngineFailure};
@@ -63,6 +68,8 @@ pub enum RepairOutcome {
     RevertedToBundled,
     /// Wrapper induction produced a gate-passing spec.
     RepairedByInduction,
+    /// The on-device completer rung produced a gate-passing spec.
+    RepairedByOnDevice,
     /// The model rung produced a gate-passing spec.
     RepairedByModel,
     /// No candidate passed, or the engine was not in a repairable state.
@@ -75,6 +82,7 @@ impl std::fmt::Display for RepairOutcome {
             Self::NotBroken => write!(f, "not broken (golden probe passed)"),
             Self::RevertedToBundled => write!(f, "reverted to bundled spec"),
             Self::RepairedByInduction => write!(f, "repaired via wrapper induction"),
+            Self::RepairedByOnDevice => write!(f, "repaired via on-device derivation"),
             Self::RepairedByModel => write!(f, "repaired via model derivation"),
             Self::Failed(detail) => write!(f, "repair failed: {detail}"),
         }
@@ -208,52 +216,101 @@ pub(crate) async fn run_repair(context: &RepairContext, engine_id: &str) -> Repa
     };
 
     // Tier 3: deterministic wrapper induction.
-    if let Some(derived) = induction::derive(&body, &current.golden.expected_domain) {
-        let candidate = with_html(&current, derived);
-        match validate::gate(&candidate, &body) {
-            Ok(()) => {
-                return match adopt(context, &candidate, OverlayAction::Write) {
-                    Ok(()) => RepairOutcome::RepairedByInduction,
-                    Err(err) => RepairOutcome::Failed(format!("adoption failed: {err:#}")),
-                };
+    if let Some(derived) = induction::derive(&body, &current.golden.expected_domain)
+        && let Some(outcome) = gate_and_adopt(
+            context,
+            engine_id,
+            &current,
+            &body,
+            "induction",
+            derived,
+            RepairOutcome::RepairedByInduction,
+        )
+    {
+        return outcome;
+    }
+
+    // Tier 4: on-device derivation via the app-registered completer.
+    if let Some(on_device) = completer::current() {
+        match model::derive_with_completer(on_device, engine_id, &body).await {
+            Ok(derived) => {
+                if let Some(outcome) = gate_and_adopt(
+                    context,
+                    engine_id,
+                    &current,
+                    &body,
+                    "on-device",
+                    derived,
+                    RepairOutcome::RepairedByOnDevice,
+                ) {
+                    return outcome;
+                }
             }
-            Err(err) => log_gate_rejection(engine_id, "induction", &err),
+            Err(err) => log_derivation_failure(engine_id, "on-device", &err),
         }
     }
 
-    // Tier 4: model derivation from a skeletonized page.
+    // Tier 5: model derivation via the configured provider.
     if let Some(model_config) = &context.model_config {
         match model::derive(model_config, engine_id, &body).await {
             Ok(derived) => {
-                let candidate = with_html(&current, derived);
-                match validate::gate(&candidate, &body) {
-                    Ok(()) => {
-                        return match adopt(context, &candidate, OverlayAction::Write) {
-                            Ok(()) => RepairOutcome::RepairedByModel,
-                            Err(err) => {
-                                RepairOutcome::Failed(format!("adoption failed: {err:#}"))
-                            }
-                        };
-                    }
-                    Err(err) => log_gate_rejection(engine_id, "model", &err),
+                if let Some(outcome) = gate_and_adopt(
+                    context,
+                    engine_id,
+                    &current,
+                    &body,
+                    "model",
+                    derived,
+                    RepairOutcome::RepairedByModel,
+                ) {
+                    return outcome;
                 }
             }
-            Err(err) => {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                        .with_attrs(::serde_json::json!({
-                            "engine": engine_id,
-                            "error": format!("{err:#}"),
-                        })),
-                    "metasearch: model derivation failed"
-                );
-            }
+            Err(err) => log_derivation_failure(engine_id, "model", &err),
         }
     }
 
     RepairOutcome::Failed("no candidate passed the validation gate".into())
+}
+
+/// Gates a derived candidate and adopts it on success. Returns the terminal
+/// outcome when the gate passes (adopted, or adoption failed); `None` when
+/// the gate rejects, letting the ladder continue to the next rung.
+#[allow(clippy::too_many_arguments)]
+fn gate_and_adopt(
+    context: &RepairContext,
+    engine_id: &str,
+    current: &EngineSpec,
+    body: &str,
+    source: &str,
+    derived: HtmlResponseSpec,
+    adopted: RepairOutcome,
+) -> Option<RepairOutcome> {
+    let candidate = with_html(current, derived);
+    match validate::gate(&candidate, body) {
+        Ok(()) => Some(match adopt(context, &candidate, OverlayAction::Write) {
+            Ok(()) => adopted,
+            Err(err) => RepairOutcome::Failed(format!("adoption failed: {err:#}")),
+        }),
+        Err(err) => {
+            log_gate_rejection(engine_id, source, &err);
+            None
+        }
+    }
+}
+
+fn log_derivation_failure(engine_id: &str, source: &str, err: &anyhow::Error) {
+    ::zeroclaw_log::record!(
+        WARN,
+        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
+            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+            .with_attrs(::serde_json::json!({
+                "engine": engine_id,
+                "source": source,
+                "error": format!("{err:#}"),
+            })),
+        "metasearch: selector derivation failed"
+    );
 }
 
 enum OverlayAction {
@@ -470,6 +527,147 @@ mod tests {
         assert!(
             matches!(outcome, RepairOutcome::Failed(ref detail) if detail.contains("blocked")),
             "{outcome}"
+        );
+    }
+
+    /// Serializes tests that touch the process-global completer slot, per
+    /// the project rule for process-global state under the parallel runner.
+    static COMPLETER_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Clears the completer slot when a test ends, even on panic.
+    struct CompleterSlotGuard;
+
+    impl Drop for CompleterSlotGuard {
+        fn drop(&mut self) {
+            completer::set_repair_completer(None);
+        }
+    }
+
+    struct StubCompleter {
+        response: &'static str,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl completer::RepairCompleter for StubCompleter {
+        fn complete(&self, _prompt: String) -> anyhow::Result<String> {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.response.to_owned())
+        }
+    }
+
+    /// A redirect-style SERP: every result link is a path-relative
+    /// `/l/?uddg=<encoded>` redirect, which wrapper induction cannot seed
+    /// from (no absolute golden-domain anchor) while an unwrap-aware spec
+    /// parses it fine — exactly the page shape that needs the model rungs.
+    fn redirect_serp() -> String {
+        let mut items = String::new();
+        let sites = [
+            ("https://en.wikipedia.org/wiki/Wikipedia", "Wikipedia - The Free Encyclopedia"),
+            ("https://example.com/alpha", "Alpha Example Result"),
+            ("https://example.org/beta", "Beta Example Result"),
+            ("https://example.net/gamma", "Gamma Example Result"),
+        ];
+        for (url, title) in sites {
+            let encoded = urlencoding::encode(url);
+            items.push_str(&format!(
+                "<li class=\"hit\"><h3><a class=\"headline\" href=\"/l/?uddg={encoded}\">{title}</a></h3>\
+                 <p class=\"blurb\">A descriptive snippet about {title} long enough to qualify.</p></li>"
+            ));
+        }
+        format!(
+            "<html><body><ul class=\"fresh-results\">{items}</ul><!-- {} --></body></html>",
+            "padding ".repeat(300)
+        )
+    }
+
+    #[tokio::test]
+    async fn repair_ladder_recovers_via_on_device_completer() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _lock = COMPLETER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _slot_guard = CompleterSlotGuard;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(redirect_serp()))
+            .mount(&server)
+            .await;
+
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        completer::set_repair_completer(Some(Arc::new(StubCompleter {
+            response: r#"{"result_selector": "li.hit", "title_selector": "a.headline",
+                "url_selector": "a.headline", "snippet_selector": "p.blurb",
+                "url_unwrap_param": "uddg"}"#,
+            calls: Arc::clone(&calls),
+        })));
+
+        let spec = broken_mock_spec("repair_ondevice_engine", &server.uri());
+        let context = RepairContext {
+            specs: Arc::new(parking_lot::RwLock::new(vec![spec])),
+            overlay_dir: None,
+            timeout_secs: 5,
+            model_config: None,
+        };
+        let outcome = run_repair(&context, "repair_ondevice_engine").await;
+        assert_eq!(outcome, RepairOutcome::RepairedByOnDevice, "{outcome}");
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        let repaired = context.specs.read()[0].clone();
+        let results = executor::run_engine(&repaired, "wikipedia", 8, 5)
+            .await
+            .unwrap();
+        assert!(validate::golden_hit(&results, "wikipedia.org"));
+        assert!(
+            results.iter().any(|r| r.url.starts_with("https://")),
+            "redirect hrefs must be unwrapped to absolute URLs"
+        );
+    }
+
+    #[tokio::test]
+    async fn bad_on_device_answer_is_gated_and_ladder_fails_closed() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let _lock = COMPLETER_TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _slot_guard = CompleterSlotGuard;
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(redirect_serp()))
+            .mount(&server)
+            .await;
+
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        completer::set_repair_completer(Some(Arc::new(StubCompleter {
+            response: "I could not work out any selectors, sorry!",
+            calls: Arc::clone(&calls),
+        })));
+
+        let spec = broken_mock_spec("repair_ondevice_bad_engine", &server.uri());
+        let context = RepairContext {
+            specs: Arc::new(parking_lot::RwLock::new(vec![spec.clone()])),
+            overlay_dir: None,
+            timeout_secs: 5,
+            model_config: None,
+        };
+        let outcome = run_repair(&context, "repair_ondevice_bad_engine").await;
+        assert!(
+            matches!(outcome, RepairOutcome::Failed(_)),
+            "a garbage on-device answer must never adopt: {outcome}"
+        );
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            toml::to_string(&context.specs.read()[0]).ok(),
+            toml::to_string(&spec).ok(),
+            "live spec must be untouched after a failed repair"
         );
     }
 
