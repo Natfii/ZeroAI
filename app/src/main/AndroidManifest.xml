@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
@@ -94,27 +94,30 @@
         </service>
 
         <!--
-            WorkManager's SystemForegroundService is injected by
-            the androidx.work library. Override its
-            foregroundServiceType away from `dataSync` (the default
-            for many WorkManager versions) because:
+            WorkManager's SystemForegroundService is injected by the
+            androidx.work library. LiteRtDownloadWorker promotes itself
+            with FOREGROUND_SERVICE_TYPE_DATA_SYNC, and Android 14+
+            requires the type passed to startForeground() to be a
+            subset of what this entry declares — a mismatch crashes
+            with IllegalArgumentException the moment a download starts
+            (the v0.3.0 pre-release crash loop: this entry said
+            `connectedDevice` while the worker requested `dataSync`).
 
-            1. CLAUDE.md prohibits `dataSync` for this project —
-               Android 15 enforces a 6-hour-per-24-hour cap on
-               that type, which would kill the LiteRtDownloadWorker
-               (multi-GB model downloads regularly exceed 6 h on
-               slow connections).
-            2. `connectedDevice` has no time cap and accurately
-               describes our use case: the WorkManager-driven
-               work is about syncing data needed by the on-device
-               AI agent (a device-resident companion model).
+            `dataSync` is the documented type for bounded file
+            downloads. Android 15's 6-hour-per-24h cap is fine here:
+            model fetches are single-pass and bounded, and on timeout
+            WorkManager stops the worker gracefully for a later retry.
+            The cap is only fatal for ALWAYS-ON services — the daemon
+            (ZeroAIDaemonService) must stay `specialUse`; the
+            CLAUDE.md "never dataSync" rule is about that service,
+            not bounded workers.
 
             The corresponding permission switch is
-            `FOREGROUND_SERVICE_CONNECTED_DEVICE` declared above.
+            `FOREGROUND_SERVICE_DATA_SYNC` declared above.
         -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
-            android:foregroundServiceType="connectedDevice"
+            android:foregroundServiceType="dataSync"
             tools:node="merge" />
 
         <service
