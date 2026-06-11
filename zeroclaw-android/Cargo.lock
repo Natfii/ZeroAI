@@ -7497,6 +7497,7 @@ dependencies = [
  "zeroclaw-api",
  "zeroclaw-config",
  "zeroclaw-runtime",
+ "zeroclaw-tools",
  "zeroclawlabs",
  "zeroize",
 ]
@@ -7758,6 +7759,7 @@ dependencies = [
  "base64",
  "chrono",
  "directories",
+ "ego-tree",
  "futures-util",
  "glob",
  "hex",

@@ -36,6 +36,7 @@ zeroclaw = { package = "zeroclawlabs", path = "../../zeroclaw", default-features
 zeroclaw-api = { path = "../../zeroclaw/crates/zeroclaw-api" }
 zeroclaw-config = { path = "../../zeroclaw/crates/zeroclaw-config" }
 zeroclaw-runtime = { path = "../../zeroclaw/crates/zeroclaw-runtime" }
+zeroclaw-tools = { path = "../../zeroclaw/crates/zeroclaw-tools" }
 # Local Android-only Rust additions (scripting, Google Messages bridge,
 # ClawBoy triggers, FFI credential hook, custom auth, Discord
 # backfill/buffer, memory extras,).
