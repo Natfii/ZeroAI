@@ -648,7 +648,7 @@ class ApiKeysViewModel(
         if (providerId.isBlank()) return
         val info = ProviderRegistry.findById(providerId) ?: return
         if (info.modelListFormat == ModelListFormat.NONE) return
-        if (apiKey.isBlank() && baseUrl.isBlank()) return
+        if (info.modelListRequiresKey && apiKey.isBlank()) return
 
         _isLoadingModels.value = true
         try {
@@ -968,8 +968,7 @@ class ApiKeysViewModel(
         val defaultModel =
             ProviderRegistry
                 .findById(targetProvider)
-                ?.suggestedModels
-                ?.firstOrNull()
+                ?.oauthDefaultModel
                 .orEmpty()
         if (defaultModel.isNotEmpty()) {
             settingsRepository.setDefaultModel(defaultModel)

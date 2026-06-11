@@ -76,12 +76,16 @@ enum class ModelListFormat {
  * @property displayName Human-readable name for UI display.
  * @property authType Authentication mechanism required by this provider.
  * @property defaultBaseUrl Pre-filled base URL for providers that need one, empty otherwise.
- * @property suggestedModels Popular model names offered as suggestions.
  * @property aliases Alternative IDs that resolve to this provider (e.g. "grok" for xAI).
  * @property category Grouping for sectioned dropdown display.
  * @property iconUrl URL to the provider's logo image for display in the UI.
  * @property modelListUrl URL for fetching available models from this provider's API.
  * @property modelListFormat Response format of the model listing endpoint.
+ * @property modelListRequiresKey Whether the model listing endpoint needs an API key.
+ *   False for public listings (OpenRouter) and local servers (Ollama), where models
+ *   can be fetched before any credential is entered.
+ * @property oauthDefaultModel Model pinned as the default after an OAuth login
+ *   completes (a flow with no model picker), empty for providers without OAuth.
  * @property keyCreationUrl URL to the provider's API key creation page, opened in the system browser.
  * @property keyPrefix Expected prefix for client-side key format validation (e.g. "sk-").
  * @property keyPrefixHint Human-readable hint shown when the key does not match [keyPrefix].
@@ -97,12 +101,13 @@ data class ProviderInfo(
     val displayName: String,
     val authType: ProviderAuthType,
     val defaultBaseUrl: String = "",
-    val suggestedModels: List<String> = emptyList(),
     val aliases: List<String> = emptyList(),
     val category: ProviderCategory = ProviderCategory.ECOSYSTEM,
     val iconUrl: String = "",
     val modelListUrl: String = "",
     val modelListFormat: ModelListFormat = ModelListFormat.NONE,
+    val modelListRequiresKey: Boolean = true,
+    val oauthDefaultModel: String = "",
     val keyCreationUrl: String = "",
     val keyPrefix: String = "",
     val keyPrefixHint: String = "",

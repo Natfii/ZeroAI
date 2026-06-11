@@ -51,6 +51,7 @@ import com.zeroclaw.android.model.DiscoveredServer
 import com.zeroclaw.android.model.ProviderAuthType
 import com.zeroclaw.android.ui.component.ModelSuggestionField
 import com.zeroclaw.android.ui.component.ProviderCredentialForm
+import com.zeroclaw.android.ui.component.modelSuggestionEmptyHint
 import com.zeroclaw.android.ui.theme.ZeroAITheme
 import com.zeroclaw.android.util.DeepLinkTarget
 import com.zeroclaw.android.util.ExternalAppLauncher
@@ -146,7 +147,6 @@ private val ChipIconTextSpacing = 8.dp
  * @param showSkipHint Whether to display a "skip this step" hint at the bottom.
  * @param modifier Modifier applied to the root scrollable [Column].
  * @param isLoadingModels Whether live model data is currently being fetched.
- * @param isLiveModelData Whether [availableModels] represents real-time data.
  * @param onServerSelected Optional callback invoked when a server is picked from
  *   the network scan sheet for local providers.
  * @param isOAuthInProgress Whether an OAuth login flow is currently running.
@@ -180,7 +180,6 @@ fun ProviderSetupFlow(
     showSkipHint: Boolean = false,
     modifier: Modifier = Modifier,
     isLoadingModels: Boolean = false,
-    isLiveModelData: Boolean = false,
     onServerSelected: ((DiscoveredServer) -> Unit)? = null,
     isOAuthInProgress: Boolean = false,
     oauthEmail: String = "",
@@ -193,7 +192,6 @@ fun ProviderSetupFlow(
     showModelPicker: Boolean = true,
 ) {
     val providerInfo = ProviderRegistry.findById(selectedProvider)
-    val suggestedModels = providerInfo?.suggestedModels.orEmpty()
     val consoleTarget = ExternalAppLauncher.providerConsoleTarget(selectedProvider)
     val isOAuthConnected = oauthEmail.isNotEmpty()
     val validateEnabled =
@@ -369,10 +367,13 @@ fun ProviderSetupFlow(
             ModelSuggestionField(
                 value = selectedModel,
                 onValueChanged = onModelChanged,
-                suggestions = suggestedModels,
-                liveSuggestions = availableModels,
-                isLoadingLive = isLoadingModels,
-                isLiveData = isLiveModelData,
+                suggestions = availableModels,
+                isLoading = isLoadingModels,
+                emptyHint =
+                    modelSuggestionEmptyHint(
+                        providerInfo = providerInfo,
+                        hasCredential = apiKey.isNotBlank() || isOAuthConnected,
+                    ),
                 modifier = Modifier.fillMaxWidth(),
             )
         }

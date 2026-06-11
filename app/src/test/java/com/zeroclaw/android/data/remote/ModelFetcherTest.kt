@@ -73,6 +73,26 @@ class ModelFetcherTest {
     }
 
     @Test
+    @DisplayName("parseModels filters Gemini models without generateContent support")
+    fun `parseModels filters Gemini models without generateContent support`() {
+        val json =
+            """
+            {
+                "models": [
+                    {"name": "models/gemini-x-pro",
+                     "supportedGenerationMethods": ["generateContent", "countTokens"]},
+                    {"name": "models/text-embedding-004",
+                     "supportedGenerationMethods": ["embedContent"]},
+                    {"name": "models/future-model-without-methods"}
+                ]
+            }
+            """.trimIndent()
+
+        val models = ModelFetcher.parseModels(json, ModelListFormat.GOOGLE_GEMINI)
+        assertEquals(listOf("gemini-x-pro", "future-model-without-methods"), models)
+    }
+
+    @Test
     @DisplayName("parseModels handles Ollama format")
     fun `parseModels handles Ollama format`() {
         val json =

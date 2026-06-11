@@ -236,22 +236,46 @@ object ModelFetcher {
     /**
      * Parses Google Gemini format: `{"models": [{"name": "models/gemini-..."}]}`.
      *
-     * Strips the `models/` prefix from each name.
+     * Strips the `models/` prefix from each name. Entries that declare
+     * `supportedGenerationMethods` without `generateContent` are skipped —
+     * the Gemini listing mixes chat models with embedding and TTS models
+     * that cannot serve as a chat provider. Entries without the field are
+     * kept (lenient towards future response shapes).
      *
      * @param json Raw JSON response.
-     * @return List of model IDs without the `models/` prefix.
+     * @return Chat-capable model IDs without the `models/` prefix.
      */
     private fun parseGeminiModels(json: String): List<String> {
         val root = JSONObject(json)
         val models = root.getJSONArray("models")
         return buildList {
             for (i in 0 until models.length()) {
-                val name = models.getJSONObject(i).optString("name", "")
-                if (name.isNotEmpty()) {
+                val entry = models.getJSONObject(i)
+                val name = entry.optString("name", "")
+                val methods = entry.optJSONArray("supportedGenerationMethods")
+                val chatCapable = methods == null || jsonArrayContains(methods, "generateContent")
+                if (name.isNotEmpty() && chatCapable) {
                     add(name.removePrefix("models/"))
                 }
             }
         }
+    }
+
+    /**
+     * Reports whether a JSON string array contains [value].
+     *
+     * @param array JSON array of strings.
+     * @param value Value to search for.
+     * @return True when any element equals [value].
+     */
+    private fun jsonArrayContains(
+        array: JSONArray,
+        value: String,
+    ): Boolean {
+        for (i in 0 until array.length()) {
+            if (array.optString(i) == value) return true
+        }
+        return false
     }
 
     /**

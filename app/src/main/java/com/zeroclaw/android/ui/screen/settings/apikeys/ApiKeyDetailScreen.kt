@@ -57,6 +57,7 @@ import com.zeroclaw.android.ui.component.LoadingIndicator
 import com.zeroclaw.android.ui.component.ModelSuggestionField
 import com.zeroclaw.android.ui.component.ProviderCredentialForm
 import com.zeroclaw.android.ui.component.SectionHeader
+import com.zeroclaw.android.ui.component.modelSuggestionEmptyHint
 import com.zeroclaw.android.ui.component.setup.ProviderSetupFlow
 
 /** Standard vertical spacing between form fields. */
@@ -185,9 +186,6 @@ fun ApiKeyDetailScreen(
     LaunchedEffect(providerId) {
         if (existingKey == null && providerInfo?.defaultBaseUrl?.isNotEmpty() == true) {
             baseUrl = providerInfo.defaultBaseUrl
-        }
-        if (existingKey == null) {
-            model = providerInfo?.suggestedModels?.firstOrNull().orEmpty()
         }
     }
 
@@ -364,7 +362,6 @@ private fun NewKeyForm(
         onModelChanged = onModelChanged,
         onValidate = onValidate,
         isLoadingModels = isLoadingModels,
-        isLiveModelData = availableModels.isNotEmpty(),
         isOAuthInProgress = oauthInProgress,
         onOAuthLogin = { onOAuthLogin(context) },
         scrollable = false,
@@ -447,10 +444,13 @@ private fun EditKeyForm(
         ModelSuggestionField(
             value = model,
             onValueChanged = onModelChanged,
-            suggestions = providerInfo?.suggestedModels.orEmpty(),
-            liveSuggestions = availableModels,
-            isLoadingLive = isLoadingModels,
-            isLiveData = availableModels.isNotEmpty(),
+            suggestions = availableModels,
+            isLoading = isLoadingModels,
+            emptyHint =
+                modelSuggestionEmptyHint(
+                    providerInfo = providerInfo,
+                    hasCredential = apiKey.isNotBlank(),
+                ),
             modifier = Modifier.fillMaxWidth(),
         )
     }

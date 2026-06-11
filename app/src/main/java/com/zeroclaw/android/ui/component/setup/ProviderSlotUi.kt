@@ -200,7 +200,6 @@ fun ProviderSlotSetupSection(
             onValidate = onValidate,
             showSkipHint = showSkipHint,
             isLoadingModels = isLoadingModels,
-            isLiveModelData = availableModels.isNotEmpty(),
             isOAuthInProgress = isOAuthInProgress,
             oauthEmail = oauthEmail,
             onOAuthLogin = onOAuthLogin,

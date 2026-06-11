@@ -29,7 +29,24 @@ class ProviderRegistryTest {
         assertEquals("openai", openai!!.id)
         assertEquals("OpenAI", openai.displayName)
         assertEquals(ProviderAuthType.API_KEY_OR_OAUTH, openai.authType)
-        assertTrue(openai.suggestedModels.isNotEmpty())
+        assertTrue(openai.oauthDefaultModel.isNotBlank())
+    }
+
+    @Test
+    @DisplayName("keyless model listings are flagged for OpenRouter and Ollama")
+    fun `keyless model listings are flagged for OpenRouter and Ollama`() {
+        assertEquals(false, ProviderRegistry.findById("openrouter")!!.modelListRequiresKey)
+        assertEquals(false, ProviderRegistry.findById("ollama")!!.modelListRequiresKey)
+        assertEquals(true, ProviderRegistry.findById("openai")!!.modelListRequiresKey)
+        assertEquals(true, ProviderRegistry.findById("anthropic")!!.modelListRequiresKey)
+        assertEquals(true, ProviderRegistry.findById("google-gemini")!!.modelListRequiresKey)
+    }
+
+    @Test
+    @DisplayName("OAuth providers pin a default model for login flows")
+    fun `OAuth providers pin a default model for login flows`() {
+        assertTrue(ProviderRegistry.findById("openai")!!.oauthDefaultModel.isNotBlank())
+        assertTrue(ProviderRegistry.findById("anthropic")!!.oauthDefaultModel.isNotBlank())
     }
 
     @Test

@@ -52,8 +52,9 @@ internal class OnboardingProviderHandler(
     val userChangedProvider: Boolean get() = _userChangedProvider
 
     /**
-     * Sets the selected provider, auto-populates base URL and model from
-     * the registry, and triggers a debounced model fetch.
+     * Sets the selected provider, auto-populates the base URL from the
+     * registry, and triggers a debounced model fetch. The model field
+     * starts empty and is chosen from live-fetched suggestions.
      *
      * @param id Canonical provider ID from the registry.
      */
@@ -70,7 +71,7 @@ internal class OnboardingProviderHandler(
                 slotId = "",
                 providerId = id,
                 baseUrl = info?.defaultBaseUrl.orEmpty(),
-                model = info?.suggestedModels?.firstOrNull().orEmpty(),
+                model = "",
                 validationResult = ValidationResult.Idle,
                 availableModels = emptyList(),
             )
@@ -105,7 +106,7 @@ internal class OnboardingProviderHandler(
                         .orEmpty()
                         .takeIf { slot.credentialType == SlotCredentialType.URL_KEY }
                         .orEmpty(),
-                model = info?.suggestedModels?.firstOrNull().orEmpty(),
+                model = "",
                 validationResult = ValidationResult.Idle,
                 availableModels = emptyList(),
                 oauthEmail = profile?.accountId.orEmpty(),
@@ -183,7 +184,7 @@ internal class OnboardingProviderHandler(
         if (state.providerId.isBlank()) return
         val info = ProviderRegistry.findById(state.providerId) ?: return
         if (info.modelListFormat == ModelListFormat.NONE) return
-        if (state.apiKey.isBlank() && state.baseUrl.isBlank()) return
+        if (info.modelListRequiresKey && state.apiKey.isBlank()) return
 
         providerState.value = state.copy(isLoadingModels = true)
         try {

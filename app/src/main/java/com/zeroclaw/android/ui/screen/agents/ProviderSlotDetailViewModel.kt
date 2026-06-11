@@ -505,7 +505,7 @@ class ProviderSlotDetailViewModel(
         if (slot.credentialType == SlotCredentialType.OAUTH) return
         val info = ProviderRegistry.findById(slot.providerRegistryId) ?: return
         if (info.modelListFormat == ModelListFormat.NONE) return
-        if (detail.apiKeyInput.isBlank() && detail.baseUrlInput.isBlank()) return
+        if (info.modelListRequiresKey && detail.apiKeyInput.isBlank()) return
 
         updateContent { copy(isLoadingModels = true) }
         try {
