@@ -33,6 +33,12 @@ use std::sync::Arc;
 /// few more than the final cut improves cross-engine overlap detection.
 const PER_ENGINE_RESULTS: usize = 8;
 
+/// Bundled spec id of the DuckDuckGo HTML engine. The explicit `duckduckgo`
+/// web-search provider routes through this engine via
+/// [`MetaSearcher::search_engine`] so it shares the spec-driven parser,
+/// health backoff, and self-repair pipeline with the `meta` backend.
+pub const DDG_ENGINE_ID: &str = "ddg_html";
+
 /// Orchestrates the engine set for the `meta` web-search backend.
 pub struct MetaSearcher {
     specs: SharedSpecs,
@@ -76,7 +82,11 @@ impl MetaSearcher {
     }
 
     #[cfg(test)]
-    fn with_specs(specs: Vec<EngineSpec>, max_requests_per_minute: u32, timeout_secs: u64) -> Self {
+    pub(crate) fn with_specs(
+        specs: Vec<EngineSpec>,
+        max_requests_per_minute: u32,
+        timeout_secs: u64,
+    ) -> Self {
         Self {
             specs: Arc::new(parking_lot::RwLock::new(specs)),
             overlay_dir: None,
@@ -107,11 +117,91 @@ impl MetaSearcher {
             "No search engines are currently available (all are backing off); try again shortly."
         );
 
-        let timeout_secs = self.timeout_secs;
-        let handles: Vec<_> = active
+        let (batches, failures) = self.run_engines(active, query).await;
+        match fuse_and_format(query, &batches, max_results) {
+            Some(output) => Ok(output),
+            None => {
+                if batches.is_empty() && !failures.is_empty() {
+                    let summary: Vec<String> = failures
+                        .iter()
+                        .map(|(name, failure)| format!("{name}: {failure}"))
+                        .collect();
+                    anyhow::bail!("All search engines failed — {}", summary.join("; "));
+                }
+                Ok(format!("No results found for: {query}"))
+            }
+        }
+    }
+
+    /// Runs a meta search restricted to one engine — the spec-driven path
+    /// for an explicitly selected provider (e.g. `duckduckgo`). The engine
+    /// keeps the full meta treatment: block detection, health backoff, and
+    /// self-repair arming.
+    pub async fn search_engine(
+        &self,
+        engine_id: &str,
+        query: &str,
+        max_results: usize,
+    ) -> anyhow::Result<String> {
+        if let Err(retry_secs) = self.limiter.try_acquire() {
+            anyhow::bail!(
+                "Meta search rate limit reached; try again in about {retry_secs} seconds."
+            );
+        }
+        let spec = self
+            .specs
+            .read()
             .iter()
+            .find(|spec| spec.id == engine_id)
+            .cloned()
+            .ok_or_else(|| {
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({"engine": engine_id})),
+                    "metasearch: unknown engine id requested"
+                );
+                anyhow::Error::msg(format!("Search engine '{engine_id}' is not available."))
+            })?;
+        if !health::global().is_available(engine_id) {
+            anyhow::bail!(
+                "{} is temporarily backing off after repeated failures; try again shortly, \
+                 or use the default meta search provider.",
+                spec.display_name
+            );
+        }
+
+        let (batches, failures) = self.run_engines(vec![spec], query).await;
+        if batches.is_empty()
+            && let Some((display_name, failure)) = failures.first()
+        {
+            if matches!(failure, EngineFailure::Blocked(_)) {
+                anyhow::bail!(
+                    "{display_name} blocked the automated search request. Try the default \
+                     meta search provider, or configure SearXNG, Brave, or Tavily as the \
+                     web search provider."
+                );
+            }
+            anyhow::bail!("{display_name} search failed — {failure}");
+        }
+        Ok(fuse_and_format(query, &batches, max_results)
+            .unwrap_or_else(|| format!("No results found for: {query}")))
+    }
+
+    /// Fans the query out to `engines` concurrently and performs the shared
+    /// per-engine bookkeeping: health recording, failure logging, and
+    /// self-repair arming on layout-suspect streaks.
+    async fn run_engines(
+        &self,
+        engines: Vec<EngineSpec>,
+        query: &str,
+    ) -> (Vec<EngineBatch>, Vec<(String, EngineFailure)>) {
+        let registry = health::global();
+        let timeout_secs = self.timeout_secs;
+        let handles: Vec<_> = engines
+            .into_iter()
             .map(|spec| {
-                let spec = spec.clone();
                 let query = query.to_owned();
                 tokio::spawn(async move {
                     let outcome =
@@ -160,20 +250,18 @@ impl MetaSearcher {
                 }
             }
         }
-
-        let merged = merge::merge_engine_results(&batches, max_results.clamp(1, 10));
-        if merged.is_empty() {
-            if batches.is_empty() && !failures.is_empty() {
-                let summary: Vec<String> = failures
-                    .iter()
-                    .map(|(name, failure)| format!("{name}: {failure}"))
-                    .collect();
-                anyhow::bail!("All search engines failed — {}", summary.join("; "));
-            }
-            return Ok(format!("No results found for: {query}"));
-        }
-        Ok(format_results(query, &batches, &merged))
+        (batches, failures)
     }
+}
+
+/// Fuses engine batches and formats the agent-facing output, or `None` when
+/// fusion produced no results.
+fn fuse_and_format(query: &str, batches: &[EngineBatch], max_results: usize) -> Option<String> {
+    let merged = merge::merge_engine_results(batches, max_results.clamp(1, 10));
+    if merged.is_empty() {
+        return None;
+    }
+    Some(format_results(query, batches, &merged))
 }
 
 fn log_engine_failure(engine_id: &str, failure: &EngineFailure) {
@@ -321,6 +409,137 @@ mod tests {
     fn new_loads_bundled_specs() {
         let searcher = MetaSearcher::new(None, 10, 15, None);
         assert_eq!(searcher.specs.read().len(), 4);
+    }
+
+    #[test]
+    fn bundled_specs_include_the_ddg_engine() {
+        let searcher = MetaSearcher::new(None, 10, 15, None);
+        assert!(
+            searcher
+                .specs
+                .read()
+                .iter()
+                .any(|spec| spec.id == DDG_ENGINE_ID),
+            "the duckduckgo provider route depends on the bundled '{DDG_ENGINE_ID}' spec"
+        );
+    }
+
+    #[tokio::test]
+    async fn search_engine_queries_only_the_selected_engine() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(MOCK_SERP))
+            .mount(&server)
+            .await;
+
+        let mut other = mock_spec("mod_test_single_other", &server.uri());
+        other.display_name = "OtherEngine".into();
+        let searcher = MetaSearcher::with_specs(
+            vec![mock_spec("mod_test_single_selected", &server.uri()), other],
+            0,
+            5,
+        );
+        let output = searcher
+            .search_engine("mod_test_single_selected", "test query", 5)
+            .await
+            .unwrap();
+        assert!(output.contains("via MockEngine"));
+        assert!(!output.contains("OtherEngine"));
+
+        let recorded = server.received_requests().await.unwrap();
+        assert_eq!(recorded.len(), 1, "only the selected engine may be queried");
+    }
+
+    #[tokio::test]
+    async fn search_engine_rejects_unknown_engine_id() {
+        let searcher = MetaSearcher::with_specs(vec![], 0, 5);
+        let err = searcher
+            .search_engine("mod_test_single_missing", "test", 5)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("not available"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn search_engine_reports_block_with_provider_guidance() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+
+        let searcher = MetaSearcher::with_specs(
+            vec![mock_spec("mod_test_single_blocked", &server.uri())],
+            0,
+            5,
+        );
+        let err = searcher
+            .search_engine("mod_test_single_blocked", "test", 5)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("MockEngine blocked the automated search request"),
+            "got: {err}"
+        );
+        assert!(err.to_string().contains("SearXNG"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn search_engine_reports_failure_detail() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/search"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+
+        let searcher = MetaSearcher::with_specs(
+            vec![mock_spec("mod_test_single_failed", &server.uri())],
+            0,
+            5,
+        );
+        let err = searcher
+            .search_engine("mod_test_single_failed", "test", 5)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("MockEngine search failed"),
+            "got: {err}"
+        );
+        assert!(err.to_string().contains("network error"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn search_engine_respects_backoff() {
+        let searcher = MetaSearcher::with_specs(
+            vec![mock_spec(
+                "mod_test_single_backoff",
+                "https://unused.example",
+            )],
+            0,
+            5,
+        );
+        health::global().record_failure(
+            "mod_test_single_backoff",
+            &EngineFailure::Blocked("HTTP 403".into()),
+        );
+        let err = searcher
+            .search_engine("mod_test_single_backoff", "test", 5)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("backing off"), "got: {err}");
     }
 
     #[test]
