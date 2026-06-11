@@ -514,6 +514,7 @@ pub fn extract_account_email_from_id_token(id_token: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

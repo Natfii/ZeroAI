@@ -112,6 +112,7 @@ pub fn matching_script_names(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

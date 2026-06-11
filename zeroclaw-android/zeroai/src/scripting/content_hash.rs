@@ -22,6 +22,7 @@ pub fn hash_bytes(data: &[u8]) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

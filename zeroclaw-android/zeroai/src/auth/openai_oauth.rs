@@ -368,6 +368,7 @@ async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

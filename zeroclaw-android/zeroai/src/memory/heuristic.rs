@@ -166,6 +166,7 @@ pub fn extract_facts(user_message: &str) -> Vec<ExtractedFact> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

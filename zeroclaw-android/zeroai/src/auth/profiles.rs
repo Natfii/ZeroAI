@@ -631,6 +631,7 @@ pub fn profile_id(provider: &str, profile_name: &str) -> String {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use tempfile::TempDir;

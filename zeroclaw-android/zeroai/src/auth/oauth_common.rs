@@ -109,6 +109,7 @@ pub fn parse_query_params(input: &str) -> BTreeMap<String, String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

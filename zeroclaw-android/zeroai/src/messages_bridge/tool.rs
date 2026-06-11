@@ -311,6 +311,7 @@ impl Tool for ReadMessagesTool {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::messages_bridge::store::MessagesBridgeStore;

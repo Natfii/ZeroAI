@@ -2,6 +2,8 @@
 
 //! Integration tests for the scripting module.
 
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 use crate::scripting::capabilities::{is_safe_url, open_workspace_file};
 use std::collections::HashMap;

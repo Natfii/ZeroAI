@@ -115,6 +115,7 @@ impl PluginHost for ScriptHostPluginAdapter {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::scripting::ScriptValue;

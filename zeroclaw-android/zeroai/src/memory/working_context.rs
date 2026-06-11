@@ -167,6 +167,7 @@ pub async fn assemble_working_context(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use zeroclaw::memory::none::NoneMemory;

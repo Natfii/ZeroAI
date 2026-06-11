@@ -508,6 +508,7 @@ fn clear_refresh_backoff(profile_id: &str) {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::auth::profiles::{AuthProfile, AuthProfileKind};

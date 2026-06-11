@@ -1018,6 +1018,7 @@ async fn consume_bridge_events(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

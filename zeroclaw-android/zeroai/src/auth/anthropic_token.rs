@@ -47,6 +47,7 @@ pub fn detect_auth_kind(token: &str, explicit: Option<&str>) -> AnthropicAuthKin
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

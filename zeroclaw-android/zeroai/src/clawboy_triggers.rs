@@ -79,6 +79,7 @@ pub fn trigger_handler() -> Option<&'static TriggerHandler> {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

@@ -105,6 +105,7 @@ pub fn decrypt(keys: &BugleCryptoKeys, data: &[u8]) -> Result<Vec<u8>, CryptoErr
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

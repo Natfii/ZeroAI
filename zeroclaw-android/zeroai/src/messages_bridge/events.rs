@@ -338,6 +338,7 @@ fn proto_message_to_bridged(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
