@@ -566,8 +566,10 @@ impl Drop for Terminal {
 /// Owns all three handles and reuses them across frames to avoid
 /// repeated allocation. Caches metadata from the last non-clean
 /// frame so that [`DirtyState::Clean`] snapshots can short-circuit
-/// without calling into the C library for dimensions, cursor, or
-/// colors.
+/// without calling into the C library for dimensions or colors.
+/// The cursor is deliberately NOT cached: cursor movement does not
+/// damage any cells, so a Clean snapshot must still read it live or
+/// arrow-key moves within a line would freeze the on-screen cursor.
 ///
 /// Field order matters: Rust drops fields in declaration order, so
 /// `row_cells` is listed before `row_iter` before `state`. This
@@ -581,8 +583,6 @@ pub(crate) struct RenderState {
     last_cols: u16,
     /// Cached row count from the last non-clean snapshot.
     last_num_rows: u16,
-    /// Cached cursor state from the last non-clean snapshot.
-    last_cursor: RenderCursor,
     /// Cached default background color from the last non-clean snapshot.
     last_default_bg: RenderColor,
     /// Cached default foreground color from the last non-clean snapshot.
@@ -630,7 +630,6 @@ impl RenderState {
             state,
             last_cols: 0,
             last_num_rows: 0,
-            last_cursor: RenderCursor::default(),
             last_default_bg: RenderColor::default(),
             last_default_fg: RenderColor::default(),
         })
@@ -657,18 +656,19 @@ impl RenderState {
 
         let dirty = self.get_dirty()?;
 
-        // Short-circuit: when nothing changed, skip the ~50 C library
+        // Short-circuit: when no cells changed, skip the ~50 C library
         // calls for row iteration / cell extraction and return cached
-        // metadata with an empty row list. The Kotlin ViewModel already
-        // discards Clean frames, so the only cost is the dirty check
-        // itself (~2 C calls).
+        // metadata with an empty row list. The cursor is always read
+        // live: cursor-only moves (arrow keys, Home/End) leave the
+        // grid Clean, and the Kotlin ViewModel relies on the fresh
+        // position to repaint the cursor while dropping everything else.
         if dirty == DirtyState::Clean {
             return Ok(TerminalRenderSnapshot {
                 dirty: DirtyState::Clean,
                 rows: Vec::new(),
                 cols: self.last_cols,
                 num_rows: self.last_num_rows,
-                cursor: self.last_cursor,
+                cursor: self.get_cursor()?,
                 default_bg: self.last_default_bg,
                 default_fg: self.last_default_fg,
                 palette: Vec::new(),
@@ -686,7 +686,6 @@ impl RenderState {
         // Cache metadata for future Clean short-circuits.
         self.last_cols = cols;
         self.last_num_rows = num_rows;
-        self.last_cursor = cursor;
         self.last_default_bg = default_bg;
         self.last_default_fg = default_fg;
 
@@ -1553,5 +1552,50 @@ pub(crate) fn optimize_mode() -> Option<GhosttyOptimizeMode> {
         Some(mode)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// Regression test: a cursor-only move (arrow key, no cell damage)
+    /// must surface the live cursor position in the snapshot. The Clean
+    /// short-circuit once returned a cursor cached from the last
+    /// non-clean frame, which froze the on-screen cursor whenever the
+    /// arrow keys moved it within a line.
+    #[test]
+    fn clean_snapshot_reports_live_cursor() {
+        let mut terminal = Terminal::new(80, 24, 1000).unwrap();
+        let mut render_state = RenderState::new().unwrap();
+
+        terminal.vt_write(b"abc");
+        let first = render_state.snapshot(&terminal).unwrap();
+        assert_eq!(first.cursor.x, 3, "cursor should sit after 'abc'");
+        assert_ne!(first.dirty, DirtyState::Clean, "typed text must damage cells");
+
+        terminal.vt_write(b"\x1b[D");
+        let second = render_state.snapshot(&terminal).unwrap();
+        assert_eq!(
+            second.cursor.x, 2,
+            "cursor-left must move the snapshot cursor even without cell damage"
+        );
+    }
+
+    /// A snapshot with no terminal activity at all stays Clean and keeps
+    /// reporting the same (live) cursor position.
+    #[test]
+    fn idle_clean_snapshot_keeps_cursor_stable() {
+        let mut terminal = Terminal::new(80, 24, 1000).unwrap();
+        let mut render_state = RenderState::new().unwrap();
+
+        terminal.vt_write(b"hi");
+        let first = render_state.snapshot(&terminal).unwrap();
+
+        let second = render_state.snapshot(&terminal).unwrap();
+        assert_eq!(second.dirty, DirtyState::Clean, "idle frame should be Clean");
+        assert_eq!(second.cursor.x, first.cursor.x);
+        assert_eq!(second.cursor.y, first.cursor.y);
     }
 }

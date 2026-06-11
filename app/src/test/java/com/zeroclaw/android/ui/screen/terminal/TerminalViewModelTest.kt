@@ -7,6 +7,11 @@
 package com.zeroclaw.android.ui.screen.terminal
 
 import com.zeroclaw.android.model.TerminalEntry
+import com.zeroclaw.ffi.TtyCursorState
+import com.zeroclaw.ffi.TtyCursorStyle
+import com.zeroclaw.ffi.TtyDirtyState
+import com.zeroclaw.ffi.TtyRenderFrame
+import com.zeroclaw.ffi.TtyRenderRow
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -61,6 +66,65 @@ class TerminalViewModelTest {
                     caughtError = "No active session",
                 ),
             )
+        }
+    }
+
+    @Nested
+    @DisplayName("mergeCursorOnlyFrame")
+    inner class MergeCursorOnlyFrame {
+        /**
+         * Builds a render frame with a block cursor at [cursorCol].
+         *
+         * @param cursorCol Cursor column for the frame.
+         * @param rows Row content; defaults to a single populated row.
+         * @param dirtyState Dirty state to stamp on the frame.
+         */
+        private fun frame(
+            cursorCol: Int,
+            rows: List<TtyRenderRow> =
+                listOf(TtyRenderRow("hello", emptyList(), emptyList(), dirty = true)),
+            dirtyState: TtyDirtyState = TtyDirtyState.FULL,
+        ): TtyRenderFrame =
+            TtyRenderFrame(
+                rows = rows,
+                cols = 80u.toUShort(),
+                numRows = rows.size.toUShort(),
+                cursor =
+                    TtyCursorState(
+                        col = cursorCol.toUShort(),
+                        row = 0u.toUShort(),
+                        visible = true,
+                        style = TtyCursorStyle.BLOCK,
+                        blinking = false,
+                    ),
+                defaultBgArgb = 0xFF000000u,
+                defaultFgArgb = 0xFFFFFFFFu,
+                dirtyState = dirtyState,
+            )
+
+        @Test
+        @DisplayName("returns null when the cursor has not moved")
+        fun `returns null when the cursor has not moved`() {
+            val current = frame(cursorCol = 5)
+            val polled = frame(cursorCol = 5, rows = emptyList(), dirtyState = TtyDirtyState.CLEAN)
+
+            assertNull(TerminalViewModel.mergeCursorOnlyFrame(current, polled))
+        }
+
+        @Test
+        @DisplayName("carries content rows forward with the fresh cursor")
+        fun `carries content rows forward with the fresh cursor`() {
+            val current = frame(cursorCol = 5)
+            val polled = frame(cursorCol = 4, rows = emptyList(), dirtyState = TtyDirtyState.CLEAN)
+
+            val merged =
+                requireNotNull(TerminalViewModel.mergeCursorOnlyFrame(current, polled)) {
+                    "a moved cursor must produce a frame to publish"
+                }
+            assertEquals(current.rows, merged.rows, "content rows must be carried forward")
+            assertEquals(polled.cursor, merged.cursor, "fresh cursor must be taken")
+            assertEquals(current.cols, merged.cols, "grid metadata must come from current")
+            assertEquals(current.numRows, merged.numRows)
         }
     }
 

@@ -1046,18 +1046,23 @@ class TerminalViewModel(
 
     /**
      * Reads the latest PTY output snapshot and render frame from Rust, then pushes both to
-     * [_ttyOutputLines] and [_ttyRenderFrame]. Falls back to [buildFallbackFrame] if the frame
-     * is empty or an FFI exception is thrown.
+     * [_ttyOutputLines] and [_ttyRenderFrame].
+     *
+     * A rowless frame means no cell damage since the last poll (CLEAN): it is merged into
+     * the previously published frame via [mergeCursorOnlyFrame] so cursor-only moves
+     * (arrow keys, Home/End) still repaint. Falls back to [buildFallbackFrame] when no
+     * frame has ever been published or an FFI exception is thrown.
      */
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private fun applyTtyRenderFrame() {
+        val current = _ttyRenderFrame.value
         val nextFrame =
             try {
                 val frame = ttyGetRenderFrame()
                 if (frame.rows.isNotEmpty()) {
                     frame
-                } else if (_ttyRenderFrame.value != null) {
-                    return
+                } else if (current != null) {
+                    mergeCursorOnlyFrame(current, frame) ?: return
                 } else {
                     val textLines =
                         try {
@@ -1073,17 +1078,6 @@ class TerminalViewModel(
                 val textLines = _ttyOutputLines.value
                 buildFallbackFrame(textLines)
             }
-        val current = _ttyRenderFrame.value
-        // A CLEAN frame has no cell-content damage, but the cursor may still
-        // have moved (Left/Right within a line, Home/End, an app repositioning
-        // it). Dropping those frames froze the on-screen cursor and made the
-        // arrow keys look dead, so still emit when the cursor changed.
-        if (nextFrame.dirtyState == TtyDirtyState.CLEAN &&
-            current != null &&
-            current.cursor == nextFrame.cursor
-        ) {
-            return
-        }
         _ttyRenderFrame.value = nextFrame
     }
 
@@ -3812,6 +3806,31 @@ class TerminalViewModel(
             listenerError: String?,
             caughtError: String,
         ): Boolean = listenerError == null || listenerError != caughtError
+
+        /**
+         * Merges a rowless (CLEAN) render frame into the previously published frame.
+         *
+         * A CLEAN frame carries no cell content, but its cursor is live: arrow keys,
+         * Home/End, and applications repositioning the cursor all move it without
+         * damaging any cells. [TtyCanvasView] draws content straight from the
+         * published frame, so a CLEAN frame can never be published as-is — its empty
+         * row list would blank the screen. Instead the previous frame's rows are
+         * carried forward with the fresh cursor.
+         *
+         * @param current The frame currently published to the renderer.
+         * @param polled The freshly polled frame whose row list is empty.
+         * @return The merged frame to publish, or null when the cursor has not
+         *   moved and no repaint is needed.
+         */
+        internal fun mergeCursorOnlyFrame(
+            current: TtyRenderFrame,
+            polled: TtyRenderFrame,
+        ): TtyRenderFrame? =
+            if (polled.cursor == current.cursor) {
+                null
+            } else {
+                current.copy(cursor = polled.cursor)
+            }
 
         /**
          * Chooses the default route for a plain-text terminal message.
