@@ -346,7 +346,7 @@ mod tests {
     fn seen_hashes_evicts_oldest() {
         let mut seen = VecDeque::new();
         for i in 0..MAX_SEEN_HASHES + 10 {
-            let hash: [u8; 32] = Sha256::digest(&i.to_le_bytes()).into();
+            let hash: [u8; 32] = Sha256::digest(i.to_le_bytes()).into();
             seen.push_back(hash);
             if seen.len() > MAX_SEEN_HASHES {
                 seen.pop_front();

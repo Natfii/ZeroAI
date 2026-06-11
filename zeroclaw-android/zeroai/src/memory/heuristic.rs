@@ -167,6 +167,9 @@ pub fn extract_facts(user_message: &str) -> Vec<ExtractedFact> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+// Extracted facts carry literal confidence values, so exact float
+// equality is the intended assertion.
+#[allow(clippy::float_cmp)]
 mod tests {
     use super::*;
 
