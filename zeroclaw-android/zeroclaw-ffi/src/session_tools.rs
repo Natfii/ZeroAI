@@ -173,217 +173,16 @@ impl Tool for FfiMemoryForgetTool {
     }
 }
 
-/// FFI-specific web search tool using Brave Search or Google Custom Search Engine JSON APIs.
-///
-/// Upstream [`zeroclaw::tools::WebSearchTool`] requires `Arc<SecurityPolicy>`,
-/// which is `pub(crate)` and inaccessible from external crates. This standalone
-/// implementation provides equivalent Brave + Google CSE support for the FFI layer.
+/// FFI-facing web search tool delegating to the engine's
+/// [`zeroclaw_tools::web_search_tool::WebSearchTool`], which owns all
+/// provider routing (meta / duckduckgo / brave / tavily / searxng), the
+/// meta backend's rate limiting, and engine self-repair.
 ///
 /// Uses the name `"web_search"` (not upstream's `"web_search_tool"`) because models
 /// fine-tuned for function calling generate calls to `"web_search"`.
 pub(crate) struct FfiWebSearchTool {
-    /// Resolved search provider: `"brave"`, `"google"`, or `"none"`.
-    pub(crate) provider: String,
-    /// Brave Search API subscription token.
-    pub(crate) brave_api_key: Option<String>,
-    /// Google Custom Search JSON API key.
-    pub(crate) google_api_key: Option<String>,
-    /// Google Custom Search Engine ID.
-    pub(crate) google_cx: Option<String>,
-    /// Maximum search results to return (1-10).
-    pub(crate) max_results: usize,
-    /// Shared HTTP client (reuses TLS sessions and connection pools).
-    pub(crate) client: reqwest::Client,
-}
-
-/// Resolves the effective FFI search provider from the configured value and available keys.
-///
-/// When `provider` is `"auto"`, picks the first available provider:
-/// brave (if `brave_key` is `Some`) → google (if both `google_key` and `google_cx`
-/// are `Some`) → `"none"` (no providers configured). Any other value is returned
-/// lowercased and trimmed as-is.
-pub(crate) fn resolve_ffi_provider(
-    provider: &str,
-    brave_key: Option<&String>,
-    google_key: Option<&String>,
-    google_cx: Option<&String>,
-) -> String {
-    let p = provider.trim().to_lowercase();
-    if p != "auto" {
-        return p;
-    }
-    if brave_key.is_some() {
-        return "brave".into();
-    }
-    if google_key.is_some() && google_cx.is_some() {
-        return "google".into();
-    }
-    "none".into()
-}
-
-impl FfiWebSearchTool {
-    /// Issue a Brave Search API query and return formatted results.
-    ///
-    /// Uses `X-Subscription-Token` header. Maps 401 to invalid-key error and
-    /// 429 to rate-limit error for clear operator-facing messages.
-    async fn search_brave(&self, query: &str) -> anyhow::Result<String> {
-        let api_key = self
-            .brave_api_key
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Brave API key not configured"))?;
-
-        let encoded_query = urlencoding::encode(query);
-        let search_url = format!(
-            "https://api.search.brave.com/res/v1/web/search?q={}&count={}",
-            encoded_query, self.max_results
-        );
-
-        let response = self
-            .client
-            .get(&search_url)
-            .header("Accept", "application/json")
-            .header("X-Subscription-Token", api_key)
-            .send()
-            .await?;
-
-        let status = response.status();
-        if !status.is_success() {
-            match status.as_u16() {
-                401 => anyhow::bail!("Brave search failed: invalid API key (401 Unauthorized)"),
-                429 => anyhow::bail!(
-                    "Brave search failed: rate limit exceeded (429 Too Many Requests)"
-                ),
-                _ => anyhow::bail!("Brave search failed with status: {status}"),
-            }
-        }
-
-        let json: serde_json::Value = response.json().await?;
-        self.parse_brave_results(&json, query)
-    }
-
-    /// Parse Brave Search API JSON response into a formatted result string.
-    ///
-    /// Extracts `web.results[].{title, url, description}` from the response object.
-    fn parse_brave_results(&self, json: &serde_json::Value, query: &str) -> anyhow::Result<String> {
-        let results = json
-            .get("web")
-            .and_then(|w| w.get("results"))
-            .and_then(|r| r.as_array())
-            .ok_or_else(|| anyhow::anyhow!("Invalid Brave API response"))?;
-
-        if results.is_empty() {
-            return Ok(format!("No results found for: {query}"));
-        }
-
-        let mut lines = vec![format!("Search results for: {query} (via Brave)")];
-
-        for (i, result) in results.iter().take(self.max_results).enumerate() {
-            let title = result
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("No title");
-            let url = result.get("url").and_then(|u| u.as_str()).unwrap_or("");
-            let description = result
-                .get("description")
-                .and_then(|d| d.as_str())
-                .unwrap_or("");
-
-            lines.push(format!("{}. {title}", i + 1));
-            lines.push(format!("   {url}"));
-            if !description.is_empty() {
-                lines.push(format!("   {description}"));
-            }
-        }
-
-        Ok(lines.join("\n"))
-    }
-
-    /// Issue a Google Custom Search Engine JSON API query and return formatted results.
-    ///
-    /// Maps 403+dailyLimitExceeded to quota error, other 403 to forbidden, 400 to bad-cx,
-    /// and 429 to rate-limit error for clear operator-facing messages.
-    async fn search_google(&self, query: &str) -> anyhow::Result<String> {
-        let api_key = self
-            .google_api_key
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Google API key not configured"))?;
-
-        let cx = self
-            .google_cx
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Google Custom Search Engine ID (cx) not configured"))?;
-
-        let encoded_query = urlencoding::encode(query);
-        let search_url = format!(
-            "https://www.googleapis.com/customsearch/v1?key={}&cx={}&q={}&num={}",
-            api_key, cx, encoded_query, self.max_results
-        );
-
-        let response = self
-            .client
-            .get(&search_url)
-            .header("Accept", "application/json")
-            .send()
-            .await?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body: serde_json::Value = response.json().await.unwrap_or(serde_json::Value::Null);
-            match status.as_u16() {
-                400 => anyhow::bail!(
-                    "Google search failed: bad request — check your CX value (400 Bad Request)"
-                ),
-                403 => {
-                    let reason = body
-                        .pointer("/error/errors/0/reason")
-                        .and_then(|r| r.as_str())
-                        .unwrap_or("");
-                    if reason == "dailyLimitExceeded" {
-                        anyhow::bail!("Google search failed: daily quota exceeded (403 Forbidden)");
-                    }
-                    anyhow::bail!(
-                        "Google search failed: forbidden — check your API key (403 Forbidden)"
-                    );
-                }
-                429 => anyhow::bail!(
-                    "Google search failed: rate limit exceeded (429 Too Many Requests)"
-                ),
-                _ => anyhow::bail!("Google search failed with status: {status}"),
-            }
-        }
-
-        let json: serde_json::Value = response.json().await?;
-        Ok(self.parse_google_results(&json, query))
-    }
-
-    /// Parse Google CSE JSON response into a formatted result string.
-    ///
-    /// Extracts `items[].{title, link, snippet}` from the response object.
-    fn parse_google_results(&self, json: &serde_json::Value, query: &str) -> String {
-        let items = match json.get("items").and_then(|i| i.as_array()) {
-            Some(arr) if !arr.is_empty() => arr,
-            _ => return format!("No results found for: {query}"),
-        };
-
-        let mut lines = vec![format!("Search results for: {query} (via Google)")];
-
-        for (i, item) in items.iter().take(self.max_results).enumerate() {
-            let title = item
-                .get("title")
-                .and_then(|t| t.as_str())
-                .unwrap_or("No title");
-            let link = item.get("link").and_then(|l| l.as_str()).unwrap_or("");
-            let snippet = item.get("snippet").and_then(|s| s.as_str()).unwrap_or("");
-
-            lines.push(format!("{}. {title}", i + 1));
-            lines.push(format!("   {link}"));
-            if !snippet.is_empty() {
-                lines.push(format!("   {snippet}"));
-            }
-        }
-
-        lines.join("\n")
-    }
+    /// Engine web search implementation.
+    pub(crate) inner: zeroclaw_tools::web_search_tool::WebSearchTool,
 }
 
 impl Attributable for FfiWebSearchTool {
@@ -427,43 +226,9 @@ impl Tool for FfiWebSearchTool {
             anyhow::bail!("Search query cannot be empty");
         }
 
-        tracing::info!(
-            query_len = query.len(),
-            provider = %self.provider,
-            "web_search: executing"
-        );
+        tracing::info!(query_len = query.len(), "web_search: executing");
 
-        let output = match self.provider.as_str() {
-            "brave" => self.search_brave(query).await?,
-            "google" => self.search_google(query).await?,
-            "none" => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(
-                        "No search provider configured. Set brave_api_key or \
-                         google_api_key + google_cx in [web_search] config."
-                            .to_string(),
-                    ),
-                });
-            }
-            other => {
-                return Ok(ToolResult {
-                    success: false,
-                    output: String::new(),
-                    error: Some(format!(
-                        "Unknown search provider: \"{other}\". \
-                         Valid values: \"brave\", \"google\", \"auto\"."
-                    )),
-                });
-            }
-        };
-
-        Ok(ToolResult {
-            success: true,
-            output,
-            error: None,
-        })
+        self.inner.execute(args).await
     }
 }
 

@@ -31,6 +31,29 @@ pub struct RepairModelConfig {
     pub runtime_options: zeroclaw_providers::ModelProviderRuntimeOptions,
 }
 
+impl RepairModelConfig {
+    /// Derives the repair-model settings from the first configured model
+    /// provider — the same provider the active agent chats through.
+    ///
+    /// Returns `None` (disabling the model rung) when no provider or no
+    /// model is configured; the deterministic repair tiers still run.
+    pub fn from_config(config: &zeroclaw_config::schema::Config) -> Option<Self> {
+        let provider = config.first_model_provider_type()?.to_owned();
+        let model = config
+            .first_model_provider()
+            .and_then(|entry| entry.model.clone())
+            .filter(|model| !model.trim().is_empty())?;
+        Some(Self {
+            provider,
+            model,
+            api_key: config
+                .first_model_provider()
+                .and_then(|entry| entry.api_key.clone()),
+            runtime_options: zeroclaw_providers::provider_runtime_options_from_config(config),
+        })
+    }
+}
+
 /// Asks the configured model to derive fresh selectors from a skeletonized
 /// SERP body. The result must still pass the validation gate.
 pub async fn derive(
