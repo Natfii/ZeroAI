@@ -4,8 +4,9 @@
 //!
 //! Returns a `Vec<Box<dyn Tool>>` made up of FFI tool wrappers (memory,
 //! web search, web fetch, http request, shared folder), upstream cron
-//! tools, plugin script tools, and the messages bridge tool when its
-//! store is available. The list is capped at
+//! tools, the on-demand skill reader (compact skills mode), plugin
+//! script tools, and the messages bridge tool when its store is
+//! available. The list is capped at
 //! [`MAX_SESSION_TOOLS`](crate::session::MAX_SESSION_TOOLS) entries to
 //! protect the LLM's tool-spec budget.
 
@@ -49,6 +50,24 @@ pub(crate) fn build_tools_registry(
         Box::new(zeroclaw::tools::CronRunsTool::new(config_arc)),
     ];
     tools.push(Box::new(crate::eval_script_tool::EvalScriptTool::new()));
+
+    // In compact skills mode the system prompt only carries skill
+    // summaries and instructs the model to call `read_skill(name)` for
+    // the full instructions. Upstream registers the tool inside
+    // `all_tools_with_runtime` (the channel/gateway/agent-loop path);
+    // the Terminal session builds its registry here, so mirror that
+    // registration or the prompt points at a tool that does not exist.
+    if matches!(
+        config.skills.prompt_injection_mode,
+        zeroclaw_config::schema::SkillsPromptInjectionMode::Compact
+    ) {
+        tools.push(Box::new(zeroclaw::tools::ReadSkillTool::new(
+            config.data_dir.clone(),
+            config.skills.open_skills_enabled,
+            config.skills.open_skills_dir.clone(),
+            config.skills.allow_scripts,
+        )));
+    }
 
     if config.web_search.enabled {
         // Upstream renamed `WebSearchConfig.provider` → `search_provider`
@@ -185,4 +204,45 @@ pub(crate) fn build_tools_registry(
     }
 
     tools
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn registry_names(config: &zeroclaw::Config) -> Vec<String> {
+        let memory = zeroclaw::memory::create_memory(&config.memory, &config.data_dir, None)
+            .expect("markdown memory backend should initialise in a temp dir");
+        build_tools_registry(config, Arc::from(memory))
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
+    }
+
+    fn test_config(tmp: &tempfile::TempDir) -> zeroclaw::Config {
+        let mut config = zeroclaw::Config::default();
+        config.data_dir = tmp.path().to_path_buf();
+        config.memory.backend = "markdown".into();
+        config
+    }
+
+    #[test]
+    fn compact_skills_mode_registers_read_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config = test_config(&tmp);
+        config.skills.prompt_injection_mode =
+            zeroclaw_config::schema::SkillsPromptInjectionMode::Compact;
+
+        assert!(registry_names(&config).iter().any(|n| n == "read_skill"));
+    }
+
+    #[test]
+    fn full_skills_mode_omits_read_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut config = test_config(&tmp);
+        config.skills.prompt_injection_mode =
+            zeroclaw_config::schema::SkillsPromptInjectionMode::Full;
+
+        assert!(!registry_names(&config).iter().any(|n| n == "read_skill"));
+    }
 }
