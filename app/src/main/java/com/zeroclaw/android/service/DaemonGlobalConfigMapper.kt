@@ -11,20 +11,51 @@ import com.zeroclaw.android.model.AppSettings
 /**
  * Pure mapping from [AppSettings] + resolved API key → [GlobalTomlConfig].
  *
- * Previously this logic lived in two near-duplicate copies — one inside
- * [ZeroAIDaemonService] (canonical, complete) and one inside
- * `ApiKeysViewModel` (drifted, missing several fields like
- * `sharedFolderEnabled`, `twitterBrowse*`,
- * `multimodal*`, and `securityEstopStateFile`/`securityAuditLogPath`).
- * Drift between the two meant a hot-reload triggered from
- * Settings → API Keys produced a *different* daemon config than a fresh
- * cold start. Centralising removes that hazard.
+ * Previously this logic lived in near-duplicate copies — one inside
+ * [ZeroAIDaemonService] (canonical, complete) and drifted clones in
+ * `ApiKeysViewModel` and `DoctorViewModel` (missing fields like
+ * `sharedFolderEnabled`, `twitterBrowse*`, `multimodal*`,
+ * `skillsPromptInjectionMode`, and the security file paths). Drift meant a
+ * hot-reload, a doctor check, or a fresh cold start could each see a
+ * *different* daemon config. Centralising removes that hazard.
  *
- * Anything that needs the file-system-dependent paths
- * (`securityEstopStateFile` / `securityAuditLogPath`) passes a [Context]
- * for `filesDir`; everything else is settings-driven.
+ * The full field mapping lives in the context-free overload so JVM unit
+ * tests and ViewModels can exercise it directly; the [Context] overload is
+ * a thin wrapper that derives [SecurityFilePaths] from `filesDir`.
  */
 object DaemonGlobalConfigMapper {
+    /**
+     * Filesystem locations of the security artefacts the daemon persists.
+     *
+     * Bundled into one value type so the context-free
+     * [toGlobalTomlConfig] overload stays within the detekt parameter
+     * threshold and callers cannot supply one path without the other.
+     *
+     * @property estopStateFile Absolute path of the emergency-stop state file.
+     * @property auditLogPath Absolute path of the security audit log.
+     */
+    data class SecurityFilePaths(
+        val estopStateFile: String,
+        val auditLogPath: String,
+    ) {
+        /** Factory helpers for [SecurityFilePaths]. */
+        companion object {
+            /**
+             * Derives the canonical daemon paths under the app-private files directory.
+             *
+             * @param context Any context; only `filesDir` is read.
+             * @return Paths matching what [ZeroAIDaemonService] hands the engine.
+             */
+            fun fromContext(context: Context): SecurityFilePaths {
+                val filesDir = context.filesDir.absolutePath
+                return SecurityFilePaths(
+                    estopStateFile = "$filesDir/estop-state.json",
+                    auditLogPath = "$filesDir/audit.log",
+                )
+            }
+        }
+    }
+
     /**
      * Build a [GlobalTomlConfig] from the active state.
      *
@@ -35,13 +66,39 @@ object DaemonGlobalConfigMapper {
      *   for OAuth bearer paths — caller resolves).
      * @param hubAppContext Awareness fragments accumulated by feature contributors.
      */
-    @Suppress("LongMethod")
     fun toGlobalTomlConfig(
         context: Context,
         settings: AppSettings,
         apiKey: ApiKey?,
         apiKeyValue: String,
         hubAppContext: String?,
+    ): GlobalTomlConfig =
+        toGlobalTomlConfig(
+            settings = settings,
+            apiKey = apiKey,
+            apiKeyValue = apiKeyValue,
+            hubAppContext = hubAppContext,
+            securityFilePaths = SecurityFilePaths.fromContext(context),
+        )
+
+    /**
+     * Context-free core mapping — the single source of truth for every
+     * settings-driven [GlobalTomlConfig] field.
+     *
+     * @param settings Effective application settings (already resolved against agents).
+     * @param apiKey Resolved default-provider API key, or null.
+     * @param apiKeyValue Plain-text key value (may differ from `apiKey.key`
+     *   for OAuth bearer paths — caller resolves).
+     * @param hubAppContext Awareness fragments accumulated by feature contributors.
+     * @param securityFilePaths Locations for the e-stop state file and audit log.
+     */
+    @Suppress("LongMethod")
+    fun toGlobalTomlConfig(
+        settings: AppSettings,
+        apiKey: ApiKey?,
+        apiKeyValue: String,
+        hubAppContext: String?,
+        securityFilePaths: SecurityFilePaths,
     ): GlobalTomlConfig =
         GlobalTomlConfig(
             provider = SlotAwareAgentConfig.configProvider(settings.defaultProvider),
@@ -133,8 +190,8 @@ object DaemonGlobalConfigMapper {
             securityAuditEnabled = settings.securityAuditEnabled,
             securityEstopEnabled = settings.securityEstopEnabled,
             securityEstopRequireOtpToResume = settings.securityEstopRequireOtpToResume,
-            securityEstopStateFile = "${context.filesDir.absolutePath}/estop-state.json",
-            securityAuditLogPath = "${context.filesDir.absolutePath}/audit.log",
+            securityEstopStateFile = securityFilePaths.estopStateFile,
+            securityAuditLogPath = securityFilePaths.auditLogPath,
             skillsPromptInjectionMode = settings.skillsPromptInjectionMode,
             proxyEnabled = settings.proxyEnabled,
             proxyHttpProxy = settings.proxyHttpProxy,
