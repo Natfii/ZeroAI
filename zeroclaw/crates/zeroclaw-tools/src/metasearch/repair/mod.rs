@@ -20,7 +20,10 @@
 //! Every candidate passes the model-free validation gate before adoption,
 //! and adoption is atomic: overlay written to disk first, then the live
 //! spec swapped. Single-flight and cooldown guards keep repair attempts
-//! rare and non-overlapping.
+//! rare and non-overlapping, and the cooldown doubles with each
+//! consecutive failed repair (capped at 24 hours) so a permanently broken
+//! engine settles to one ladder run — and at most one model-rung call —
+//! per day instead of one per base cooldown forever.
 
 pub mod completer;
 pub mod induction;
@@ -41,8 +44,12 @@ use std::time::{Duration, Instant};
 /// Live engine set shared between the searcher and repair tasks.
 pub type SharedSpecs = Arc<parking_lot::RwLock<Vec<EngineSpec>>>;
 
-/// Minimum time between repair attempts for the same engine.
+/// Base cooldown between repair attempts for the same engine; doubles with
+/// each consecutive failed repair (see [`cooldown_after`]).
 const REPAIR_COOLDOWN: Duration = Duration::from_secs(15 * 60);
+
+/// Ceiling for the escalating per-engine repair cooldown.
+const REPAIR_COOLDOWN_CAP: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Results requested from golden probes.
 const PROBE_RESULTS: usize = 8;
@@ -93,6 +100,16 @@ impl std::fmt::Display for RepairOutcome {
 struct CoordinatorState {
     in_flight: HashSet<String>,
     last_attempt: HashMap<String, Instant>,
+    consecutive_failures: HashMap<String, u32>,
+}
+
+/// Cooldown before the next repair attempt after `failures` consecutive
+/// failed repairs: the base cooldown doubled per failure, capped at
+/// [`REPAIR_COOLDOWN_CAP`].
+fn cooldown_after(failures: u32) -> Duration {
+    REPAIR_COOLDOWN
+        .saturating_mul(2u32.saturating_pow(failures))
+        .min(REPAIR_COOLDOWN_CAP)
 }
 
 fn coordinator() -> &'static parking_lot::Mutex<CoordinatorState> {
@@ -117,8 +134,15 @@ pub(crate) fn maybe_spawn_repair(context: RepairContext, engine_id: String) {
                 })),
             "metasearch: engine repair attempt finished"
         );
-        finish(&engine_id);
+        finish(&engine_id, &outcome);
     });
+}
+
+/// Resets the engine's repair-cooldown escalation after an organically
+/// successful search, so a later fresh layout break starts from the base
+/// cooldown instead of one inflated by a long-resolved failure streak.
+pub(crate) fn note_engine_ok(engine_id: &str) {
+    coordinator().lock().consecutive_failures.remove(engine_id);
 }
 
 fn try_begin(engine_id: &str, now: Instant) -> bool {
@@ -126,18 +150,33 @@ fn try_begin(engine_id: &str, now: Instant) -> bool {
     if state.in_flight.contains(engine_id) {
         return false;
     }
-    if let Some(last) = state.last_attempt.get(engine_id)
-        && now.duration_since(*last) < REPAIR_COOLDOWN
-    {
-        return false;
+    if let Some(last) = state.last_attempt.get(engine_id) {
+        let failures = state
+            .consecutive_failures
+            .get(engine_id)
+            .copied()
+            .unwrap_or(0);
+        if now.duration_since(*last) < cooldown_after(failures) {
+            return false;
+        }
     }
     state.in_flight.insert(engine_id.to_owned());
     state.last_attempt.insert(engine_id.to_owned(), now);
     true
 }
 
-fn finish(engine_id: &str) {
-    coordinator().lock().in_flight.remove(engine_id);
+fn finish(engine_id: &str, outcome: &RepairOutcome) {
+    let mut state = coordinator().lock();
+    state.in_flight.remove(engine_id);
+    if matches!(outcome, RepairOutcome::Failed(_)) {
+        let streak = state
+            .consecutive_failures
+            .entry(engine_id.to_owned())
+            .or_insert(0);
+        *streak = streak.saturating_add(1);
+    } else {
+        state.consecutive_failures.remove(engine_id);
+    }
 }
 
 /// Runs the full repair ladder for one engine. Exposed to tests so they can
@@ -676,7 +715,7 @@ mod tests {
         let now = Instant::now();
         assert!(try_begin("coord_test_engine", now));
         assert!(!try_begin("coord_test_engine", now), "in-flight must dedupe");
-        finish("coord_test_engine");
+        finish("coord_test_engine", &RepairOutcome::NotBroken);
         assert!(
             !try_begin("coord_test_engine", now + Duration::from_secs(60)),
             "cooldown must hold after completion"
@@ -685,6 +724,77 @@ mod tests {
             try_begin("coord_test_engine", now + REPAIR_COOLDOWN + Duration::from_secs(1)),
             "cooldown must expire"
         );
-        finish("coord_test_engine");
+        finish("coord_test_engine", &RepairOutcome::NotBroken);
+    }
+
+    #[test]
+    fn cooldown_escalation_doubles_and_is_capped() {
+        assert_eq!(cooldown_after(0), REPAIR_COOLDOWN);
+        assert_eq!(cooldown_after(1), REPAIR_COOLDOWN * 2);
+        assert_eq!(cooldown_after(2), REPAIR_COOLDOWN * 4);
+        assert_eq!(cooldown_after(10), REPAIR_COOLDOWN_CAP);
+        assert_eq!(
+            cooldown_after(u32::MAX),
+            REPAIR_COOLDOWN_CAP,
+            "extreme streaks must saturate, not overflow"
+        );
+    }
+
+    #[test]
+    fn coordinator_escalates_cooldown_after_failed_repairs() {
+        let now = Instant::now();
+        let failed = RepairOutcome::Failed("no candidate passed".into());
+
+        assert!(try_begin("coord_escalation_engine", now));
+        finish("coord_escalation_engine", &failed);
+        assert!(
+            !try_begin(
+                "coord_escalation_engine",
+                now + REPAIR_COOLDOWN + Duration::from_secs(1)
+            ),
+            "one failed repair must double the cooldown"
+        );
+        let second = now + REPAIR_COOLDOWN * 2 + Duration::from_secs(1);
+        assert!(try_begin("coord_escalation_engine", second));
+        finish("coord_escalation_engine", &failed);
+        assert!(
+            !try_begin(
+                "coord_escalation_engine",
+                second + REPAIR_COOLDOWN * 2 + Duration::from_secs(1)
+            ),
+            "two failed repairs must quadruple the cooldown"
+        );
+        let third = second + REPAIR_COOLDOWN * 4 + Duration::from_secs(1);
+        assert!(try_begin("coord_escalation_engine", third));
+        finish("coord_escalation_engine", &RepairOutcome::NotBroken);
+        assert!(
+            try_begin(
+                "coord_escalation_engine",
+                third + REPAIR_COOLDOWN + Duration::from_secs(1)
+            ),
+            "a successful repair must reset escalation to the base cooldown"
+        );
+        finish("coord_escalation_engine", &RepairOutcome::NotBroken);
+    }
+
+    #[test]
+    fn organic_recovery_resets_repair_escalation() {
+        let now = Instant::now();
+        assert!(try_begin("coord_recovery_engine", now));
+        finish(
+            "coord_recovery_engine",
+            &RepairOutcome::Failed("no candidate passed".into()),
+        );
+
+        note_engine_ok("coord_recovery_engine");
+
+        assert!(
+            try_begin(
+                "coord_recovery_engine",
+                now + REPAIR_COOLDOWN + Duration::from_secs(1)
+            ),
+            "an organically recovered engine must start from the base cooldown"
+        );
+        finish("coord_recovery_engine", &RepairOutcome::NotBroken);
     }
 }

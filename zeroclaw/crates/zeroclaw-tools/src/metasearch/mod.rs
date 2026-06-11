@@ -221,6 +221,7 @@ impl MetaSearcher {
             match outcome {
                 Ok(results) => {
                     registry.record_ok(&spec.id);
+                    repair::note_engine_ok(&spec.id);
                     if !results.is_empty() {
                         batches.push(EngineBatch {
                             engine_id: spec.id.clone(),
