@@ -152,11 +152,25 @@ class OAuthCallbackServer(
         /** Default TCP port matching the upstream Rust redirect URI. */
         const val DEFAULT_PORT = 1455
 
-        /** Fallback TCP port if [DEFAULT_PORT] is already in use. */
-        private const val FALLBACK_PORT = 1456
+        /**
+         * Fallback TCP port if [DEFAULT_PORT] is already in use.
+         *
+         * Must stay on auth.openai.com's redirect-URI allow-list, which
+         * permits exactly ports 1455 and 1457 (the upstream Codex CLI
+         * pair). 1456 is NOT allow-listed — a fallback bind there makes
+         * the authorize request fail server-side.
+         */
+        private const val FALLBACK_PORT = 1457
 
-        /** Default timeout in milliseconds (2 minutes). */
-        private const val DEFAULT_TIMEOUT_MS = 120_000L
+        /**
+         * Default timeout in milliseconds (5 minutes).
+         *
+         * This bounds the WHOLE human login: password, 2FA, org pick,
+         * consent. 2 minutes proved too tight — when it fires the
+         * server stops, and a late consent redirect then dies with
+         * connection-refused, which reads as "the page froze".
+         */
+        private const val DEFAULT_TIMEOUT_MS = 300_000L
 
         /** URI path expected for the OAuth callback. */
         private const val CALLBACK_PATH = "/auth/callback"

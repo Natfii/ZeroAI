@@ -87,6 +87,15 @@ class OpenAiOAuthManagerTest {
         assertTrue("state=test-state" in url) {
             "URL should contain the state nonce"
         }
+        assertTrue("id_token_add_organizations=true" in url) {
+            "URL should request organization claims in the id_token"
+        }
+        assertTrue("codex_cli_simplified_flow=true" in url) {
+            "URL should request the Codex simplified flow"
+        }
+        assertTrue("originator=codex_cli_rs" in url) {
+            "URL should identify the client like the official codex CLI"
+        }
     }
 
     /** SHA-256 produces a 32-byte digest. */

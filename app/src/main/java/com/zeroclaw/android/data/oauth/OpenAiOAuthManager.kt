@@ -47,10 +47,10 @@ class OAuthExchangeException(
 /**
  * Orchestrates the OpenAI OAuth 2.0 authorization code flow with PKCE.
  *
- * This object mirrors the upstream Rust implementation in
- * `zeroclaw/src/auth/openai_oauth.rs`, replicating the same client ID,
- * endpoints, and PKCE parameters. The flow is implemented in pure Kotlin
- * to avoid FFI complexity for authentication.
+ * This object mirrors the Rust implementation in
+ * `zeroclaw-android/zeroai/src/auth/openai_oauth.rs`, replicating the same
+ * client ID, endpoints, and PKCE parameters. The flow is implemented in
+ * pure Kotlin to avoid FFI complexity for authentication.
  *
  * Typical usage:
  * 1. Call [generatePkceState] to create a fresh PKCE state.
@@ -133,8 +133,17 @@ object OpenAiOAuthManager {
      * Builds the full OpenAI authorization URL with all required parameters.
      *
      * The returned URL includes the PKCE code challenge, client ID, redirect
-     * URI, scopes, and the state nonce for CSRF protection. Parameters match
-     * the upstream Rust `build_authorize_url` function exactly.
+     * URI, scopes, the state nonce for CSRF protection, and the Codex
+     * simplified-flow parameters (`codex_cli_simplified_flow`,
+     * `id_token_add_organizations`). Without those two flags,
+     * auth.openai.com renders the organization-selection step down an
+     * untested server-side path that freezes — every working Codex client
+     * sends them. `originator` identifies the client to the consent
+     * finalize step; the official openai/codex CLI sends `codex_cli_rs`,
+     * and without it the "Sign in to Codex" confirm spinner hangs.
+     * Parameters match the codex CLI's `build_authorize_url` (a superset
+     * of the Rust twin in `zeroclaw-android/zeroai/src/auth/openai_oauth.rs`,
+     * which omits `originator`).
      *
      * @param pkce PKCE state from [generatePkceState].
      * @param port The actual port the callback server is listening on. This
@@ -156,6 +165,9 @@ object OpenAiOAuthManager {
                 "code_challenge" to pkce.codeChallenge,
                 "code_challenge_method" to "S256",
                 "state" to pkce.state,
+                "id_token_add_organizations" to "true",
+                "codex_cli_simplified_flow" to "true",
+                "originator" to "codex_cli_rs",
             )
 
         val query =
