@@ -82,6 +82,7 @@ fun PluginDetailScreen(
 
     val plugin by detailViewModel.plugin.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+    val searchEngineHealth by detailViewModel.searchEngineHealth.collectAsStateWithLifecycle()
     val loadedPlugin = plugin
     val isOfficial = loadedPlugin?.isOfficial == true
 
@@ -172,6 +173,7 @@ fun PluginDetailScreen(
                     officialPluginId = pluginId,
                     settings = settings,
                     viewModel = settingsViewModel,
+                    searchEngineHealth = searchEngineHealth,
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))

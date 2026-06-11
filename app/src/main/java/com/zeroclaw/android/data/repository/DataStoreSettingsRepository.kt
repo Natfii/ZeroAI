@@ -60,7 +60,7 @@ class DataStoreSettingsRepository(
     private val secureRevision = MutableStateFlow(0)
 
     /**
-     * Snapshot of the eight [EncryptedSharedPreferences] values consumed
+     * Snapshot of the five [EncryptedSharedPreferences] values consumed
      * by [mapPrefsToSettings]. Re-read only when [secureRevision] bumps,
      * so DataStore-only changes don't trigger expensive Tink decrypts.
      */
@@ -68,7 +68,7 @@ class DataStoreSettingsRepository(
         val gwPairedTokens: String,
         val composioApiKey: String,
         val webSearchBraveApiKey: String,
-        val webSearchGoogleApiKey: String,
+        val webSearchTavilyApiKey: String,
         val reliabilityApiKeysJson: String,
     )
 
@@ -82,7 +82,7 @@ class DataStoreSettingsRepository(
             gwPairedTokens = securePrefs.getString(SEC_GW_PAIRED_TOKENS, "") ?: "",
             composioApiKey = securePrefs.getString(SEC_COMPOSIO_API_KEY, "") ?: "",
             webSearchBraveApiKey = securePrefs.getString(SEC_WEB_SEARCH_BRAVE_API_KEY, "") ?: "",
-            webSearchGoogleApiKey = securePrefs.getString(SEC_WEB_SEARCH_GOOGLE_API_KEY, "") ?: "",
+            webSearchTavilyApiKey = securePrefs.getString(SEC_WEB_SEARCH_TAVILY_API_KEY, "") ?: "",
             reliabilityApiKeysJson =
                 securePrefs.getString(SEC_RELIABILITY_API_KEYS_JSON, "{}") ?: "{}",
         )
@@ -100,7 +100,7 @@ class DataStoreSettingsRepository(
      *
      * **Migration 1**: Enables web search and web fetch tools by default
      * for users upgrading from a version where these tools did not exist.
-     * Web fetch is free; web search uses the "auto" provider by default.
+     * Web fetch is free; web search uses the keyless "meta" provider by default.
      */
     private fun runMigrations() {
         CoroutineScope(Dispatchers.IO).launch {
@@ -296,14 +296,17 @@ class DataStoreSettingsRepository(
                 prefs[KEY_WEB_SEARCH_PROVIDER]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_PROVIDER,
             webSearchBraveApiKey = secrets.webSearchBraveApiKey,
-            webSearchGoogleApiKey = secrets.webSearchGoogleApiKey,
-            webSearchGoogleCx = prefs[KEY_WEB_SEARCH_GOOGLE_CX] ?: "",
+            webSearchTavilyApiKey = secrets.webSearchTavilyApiKey,
+            webSearchSearxngUrl = prefs[KEY_WEB_SEARCH_SEARXNG_URL] ?: "",
             webSearchMaxResults =
                 prefs[KEY_WEB_SEARCH_MAX_RESULTS]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_MAX_RESULTS,
             webSearchTimeoutSecs =
                 prefs[KEY_WEB_SEARCH_TIMEOUT_SECS]
                     ?: AppSettings.DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+            webSearchRequestsPerMinute =
+                prefs[KEY_WEB_SEARCH_REQUESTS_PER_MINUTE]
+                    ?: AppSettings.DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE,
             twitterBrowseEnabled = prefs[KEY_TWITTER_BROWSE_ENABLED] ?: false,
             twitterBrowseMaxItems =
                 prefs[KEY_TWITTER_BROWSE_MAX_ITEMS]
@@ -509,13 +512,15 @@ class DataStoreSettingsRepository(
 
     override suspend fun setWebSearchBraveApiKey(key: String) = editSecure(SEC_WEB_SEARCH_BRAVE_API_KEY, key)
 
-    override suspend fun setWebSearchGoogleApiKey(key: String) = editSecure(SEC_WEB_SEARCH_GOOGLE_API_KEY, key)
+    override suspend fun setWebSearchTavilyApiKey(key: String) = editSecure(SEC_WEB_SEARCH_TAVILY_API_KEY, key)
 
-    override suspend fun setWebSearchGoogleCx(cx: String) = edit { it[KEY_WEB_SEARCH_GOOGLE_CX] = cx }
+    override suspend fun setWebSearchSearxngUrl(url: String) = edit { it[KEY_WEB_SEARCH_SEARXNG_URL] = url }
 
     override suspend fun setWebSearchMaxResults(max: Long) = edit { it[KEY_WEB_SEARCH_MAX_RESULTS] = max }
 
     override suspend fun setWebSearchTimeoutSecs(secs: Long) = edit { it[KEY_WEB_SEARCH_TIMEOUT_SECS] = secs }
+
+    override suspend fun setWebSearchRequestsPerMinute(requestsPerMinute: Long) = edit { it[KEY_WEB_SEARCH_REQUESTS_PER_MINUTE] = requestsPerMinute }
 
     override suspend fun setTwitterBrowseEnabled(enabled: Boolean) = edit { it[KEY_TWITTER_BROWSE_ENABLED] = enabled }
 
@@ -615,7 +620,7 @@ class DataStoreSettingsRepository(
         const val SEC_GW_BEARER_TOKEN = "sec_gw_bearer_token"
         const val SEC_COMPOSIO_API_KEY = "sec_composio_api_key"
         const val SEC_WEB_SEARCH_BRAVE_API_KEY = "sec_web_search_brave_api_key"
-        const val SEC_WEB_SEARCH_GOOGLE_API_KEY = "sec_web_search_google_api_key"
+        const val SEC_WEB_SEARCH_TAVILY_API_KEY = "sec_web_search_tavily_api_key"
         const val SEC_RELIABILITY_API_KEYS_JSON = "sec_reliability_api_keys_json"
 
         val KEY_HOST = stringPreferencesKey("host")
@@ -694,9 +699,10 @@ class DataStoreSettingsRepository(
         val KEY_WEB_FETCH_TIMEOUT_SECS = longPreferencesKey("web_fetch_timeout_secs")
         val KEY_WEB_SEARCH_ENABLED = booleanPreferencesKey("web_search_enabled")
         val KEY_WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
-        val KEY_WEB_SEARCH_GOOGLE_CX = stringPreferencesKey("web_search_google_cx")
+        val KEY_WEB_SEARCH_SEARXNG_URL = stringPreferencesKey("web_search_searxng_url")
         val KEY_WEB_SEARCH_MAX_RESULTS = longPreferencesKey("web_search_max_results")
         val KEY_WEB_SEARCH_TIMEOUT_SECS = longPreferencesKey("web_search_timeout_secs")
+        val KEY_WEB_SEARCH_REQUESTS_PER_MINUTE = longPreferencesKey("web_search_requests_per_minute")
         val KEY_TWITTER_BROWSE_ENABLED = booleanPreferencesKey("twitter_browse_enabled")
         val KEY_TWITTER_BROWSE_MAX_ITEMS = longPreferencesKey("twitter_browse_max_items")
         val KEY_TWITTER_BROWSE_TIMEOUT_SECS = longPreferencesKey("twitter_browse_timeout_secs")

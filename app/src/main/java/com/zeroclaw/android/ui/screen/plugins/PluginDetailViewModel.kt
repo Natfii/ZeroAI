@@ -10,7 +10,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.zeroclaw.android.ZeroAIApplication
+import com.zeroclaw.android.model.OfficialPlugins
 import com.zeroclaw.android.model.Plugin
+import com.zeroclaw.android.model.SearchEngineHealth
+import com.zeroclaw.ffi.FfiException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,6 +21,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -41,8 +45,20 @@ class PluginDetailViewModel(
     private val repository = app.pluginRepository
     private val settingsRepository = app.settingsRepository
     private val daemonBridge = app.daemonBridge
+    private val healthBridge = app.healthBridge
 
     private val pluginId = MutableStateFlow<String?>(null)
+
+    private val _searchEngineHealth = MutableStateFlow<List<SearchEngineHealth>>(emptyList())
+
+    /**
+     * Per-engine health rows for the on-device meta search backend.
+     *
+     * Loaded once on entry when the observed plugin is the official web
+     * search plugin; empty for every other plugin and when the native
+     * call fails, in which case the UI hides the engine-status section.
+     */
+    val searchEngineHealth: StateFlow<List<SearchEngineHealth>> = _searchEngineHealth.asStateFlow()
 
     private val _navigateBack = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
 
@@ -76,6 +92,26 @@ class PluginDetailViewModel(
      */
     fun loadPlugin(pluginId: String) {
         this.pluginId.value = pluginId
+        if (pluginId == OfficialPlugins.WEB_SEARCH) {
+            loadSearchEngineHealth()
+        }
+    }
+
+    /**
+     * Loads meta search engine health rows into [searchEngineHealth].
+     *
+     * Failures clear the rows so the detail screen hides the section
+     * instead of surfacing an error state.
+     */
+    private fun loadSearchEngineHealth() {
+        viewModelScope.launch {
+            _searchEngineHealth.value =
+                try {
+                    healthBridge.getSearchEngineHealth()
+                } catch (_: FfiException) {
+                    emptyList()
+                }
+        }
     }
 
     /**

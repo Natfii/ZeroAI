@@ -13,7 +13,10 @@ package com.zeroclaw.android.model
  * plugin is enabled.
  */
 object OfficialPlugins {
-    /** Web search tool (Brave / Google CSE). Maps to `[web_search]`. */
+    /**
+     * Web search tool (on-device meta, DuckDuckGo, Brave, Tavily, or SearXNG).
+     * Maps to `[web_search]`.
+     */
     const val WEB_SEARCH = "official-web-search"
 
     /** Web page content fetcher. Maps to `[web_fetch]`. */

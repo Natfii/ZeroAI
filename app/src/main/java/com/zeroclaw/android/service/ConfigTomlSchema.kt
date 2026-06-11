@@ -136,12 +136,14 @@ data class AgentTomlEntry(
  * @property webFetchMaxResponseSize Maximum response body size in bytes.
  * @property webFetchTimeoutSecs Timeout for web fetch requests in seconds.
  * @property webSearchEnabled Whether the web search tool is enabled.
- * @property webSearchProvider Web search provider name ("auto", "brave", or "google").
+ * @property webSearchProvider Web search provider name ("meta", "duckduckgo", "brave",
+ *   "tavily", or "searxng"); legacy stored values are normalized to "meta" at emission.
  * @property webSearchBraveApiKey Brave Search API key for authenticated queries.
- * @property webSearchGoogleApiKey Google Custom Search API key for authenticated queries.
- * @property webSearchGoogleCx Google Custom Search Engine ID.
+ * @property webSearchTavilyApiKey Tavily Search API key for authenticated queries.
+ * @property webSearchSearxngUrl SearXNG instance URL for self-hosted search.
  * @property webSearchMaxResults Maximum number of search results to return.
  * @property webSearchTimeoutSecs Timeout for web search requests in seconds.
+ * @property webSearchRequestsPerMinute Maximum meta searches per minute (meta backend only).
  * @property twitterBrowseEnabled Whether the Twitter/X read-only tool is enabled.
  * @property twitterBrowseMaxItems Maximum number of Twitter/X items returned per request.
  * @property twitterBrowseTimeoutSecs Timeout for Twitter/X browsing requests in seconds.
@@ -246,12 +248,13 @@ data class GlobalTomlConfig(
     val webFetchMaxResponseSize: Long = DEFAULT_WEB_FETCH_MAX_RESPONSE_SIZE,
     val webFetchTimeoutSecs: Long = DEFAULT_WEB_FETCH_TIMEOUT_SECS,
     val webSearchEnabled: Boolean = false,
-    val webSearchProvider: String = "auto",
+    val webSearchProvider: String = "meta",
     val webSearchBraveApiKey: String = "",
-    val webSearchGoogleApiKey: String = "",
-    val webSearchGoogleCx: String = "",
+    val webSearchTavilyApiKey: String = "",
+    val webSearchSearxngUrl: String = "",
     val webSearchMaxResults: Long = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     val webSearchTimeoutSecs: Long = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+    val webSearchRequestsPerMinute: Long = DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE,
     val twitterBrowseEnabled: Boolean = false,
     val twitterBrowseMaxItems: Long = DEFAULT_TWITTER_BROWSE_MAX_ITEMS,
     val twitterBrowseTimeoutSecs: Long = DEFAULT_TWITTER_BROWSE_TIMEOUT_SECS,
@@ -390,8 +393,23 @@ data class GlobalTomlConfig(
         /** Default web search max results. */
         const val DEFAULT_WEB_SEARCH_MAX_RESULTS = 5L
 
+        /** Lowest web search max results the engine accepts. */
+        const val MIN_WEB_SEARCH_MAX_RESULTS = 1L
+
+        /** Highest web search max results the engine accepts. */
+        const val MAX_WEB_SEARCH_MAX_RESULTS = 10L
+
         /** Default web search timeout in seconds. */
         const val DEFAULT_WEB_SEARCH_TIMEOUT_SECS = 15L
+
+        /** Default maximum meta searches per minute. */
+        const val DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE = 10L
+
+        /** Lowest accepted meta searches-per-minute limit (0 would mean unlimited upstream). */
+        const val MIN_WEB_SEARCH_REQUESTS_PER_MINUTE = 1L
+
+        /** Highest accepted meta searches-per-minute limit. */
+        const val MAX_WEB_SEARCH_REQUESTS_PER_MINUTE = 60L
 
         /** Default Twitter/X browse max items. */
         const val DEFAULT_TWITTER_BROWSE_MAX_ITEMS = 20L

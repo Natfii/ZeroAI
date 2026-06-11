@@ -464,30 +464,30 @@ interface SettingsRepository {
     /**
      * Updates the web search provider.
      *
-     * @param provider Search provider: "auto", "brave", or "google".
+     * @param provider Search provider: "meta", "duckduckgo", "brave", "tavily", or "searxng".
      */
     suspend fun setWebSearchProvider(provider: String)
 
     /**
-     * Updates the Brave Search API key.
+     * Stores the Brave Search API key in encrypted preferences.
      *
-     * @param key API key string.
+     * @param key API key string. Empty string clears the key.
      */
     suspend fun setWebSearchBraveApiKey(key: String)
 
     /**
-     * Stores the Google Custom Search API key in encrypted preferences.
+     * Stores the Tavily Search API key in encrypted preferences.
      *
      * @param key API key string. Empty string clears the key.
      */
-    suspend fun setWebSearchGoogleApiKey(key: String)
+    suspend fun setWebSearchTavilyApiKey(key: String)
 
     /**
-     * Stores the Google Custom Search Engine ID.
+     * Updates the SearXNG instance URL.
      *
-     * @param cx Custom Search Engine identifier. Empty string clears it.
+     * @param url Instance URL (e.g. "https://searx.example.com"). Empty string clears it.
      */
-    suspend fun setWebSearchGoogleCx(cx: String)
+    suspend fun setWebSearchSearxngUrl(url: String)
 
     /**
      * Updates the web search max results.
@@ -502,6 +502,13 @@ interface SettingsRepository {
      * @param secs Request timeout in seconds.
      */
     suspend fun setWebSearchTimeoutSecs(secs: Long)
+
+    /**
+     * Updates the meta search rate limit.
+     *
+     * @param requestsPerMinute Maximum meta searches per minute.
+     */
+    suspend fun setWebSearchRequestsPerMinute(requestsPerMinute: Long)
 
     /**
      * Toggles the Twitter/X read-only tool.

@@ -79,12 +79,16 @@ package com.zeroclaw.android.model
  * @property webFetchMaxResponseSize Maximum response body size in bytes.
  * @property webFetchTimeoutSecs Request timeout in seconds for web fetch.
  * @property webSearchEnabled Whether the web search tool is active.
- * @property webSearchProvider Search provider: "auto", "brave", or "google".
+ * @property webSearchProvider Search provider: "meta" (default, keyless on-device multi-engine),
+ *   "duckduckgo", "brave", "tavily", or "searxng". Legacy stored values ("auto", "google")
+ *   resolve to "meta" via [WebSearchProviders.normalize].
  * @property webSearchBraveApiKey Brave Search API key (required when provider is "brave").
- * @property webSearchGoogleApiKey Google Custom Search API key (required when provider is "google").
- * @property webSearchGoogleCx Google Custom Search Engine ID (required when provider is "google").
+ * @property webSearchTavilyApiKey Tavily Search API key (required when provider is "tavily").
+ * @property webSearchSearxngUrl SearXNG instance URL (required when provider is "searxng").
  * @property webSearchMaxResults Maximum number of search results (1-10).
  * @property webSearchTimeoutSecs Request timeout in seconds for web search.
+ * @property webSearchRequestsPerMinute Maximum meta searches per minute (rate-limits the
+ *   on-device meta backend only).
  * @property twitterBrowseEnabled Whether the Twitter/X read-only tool is active.
  * @property twitterBrowseMaxItems Maximum timeline or search items returned per request (1-50).
  * @property twitterBrowseTimeoutSecs Request timeout in seconds for Twitter/X browsing.
@@ -215,10 +219,11 @@ data class AppSettings(
     val webSearchEnabled: Boolean = false,
     val webSearchProvider: String = DEFAULT_WEB_SEARCH_PROVIDER,
     val webSearchBraveApiKey: String = "",
-    val webSearchGoogleApiKey: String = "",
-    val webSearchGoogleCx: String = "",
+    val webSearchTavilyApiKey: String = "",
+    val webSearchSearxngUrl: String = "",
     val webSearchMaxResults: Long = DEFAULT_WEB_SEARCH_MAX_RESULTS,
     val webSearchTimeoutSecs: Long = DEFAULT_WEB_SEARCH_TIMEOUT_SECS,
+    val webSearchRequestsPerMinute: Long = DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE,
     val twitterBrowseEnabled: Boolean = false,
     val twitterBrowseMaxItems: Long = DEFAULT_TWITTER_BROWSE_MAX_ITEMS,
     val twitterBrowseTimeoutSecs: Long = DEFAULT_TWITTER_BROWSE_TIMEOUT_SECS,
@@ -388,13 +393,16 @@ data class AppSettings(
         const val DEFAULT_WEB_FETCH_TIMEOUT_SECS = 30L
 
         /** Default web search provider. */
-        const val DEFAULT_WEB_SEARCH_PROVIDER = "auto"
+        const val DEFAULT_WEB_SEARCH_PROVIDER = "meta"
 
         /** Default web search max results. */
         const val DEFAULT_WEB_SEARCH_MAX_RESULTS = 5L
 
         /** Default web search timeout in seconds. */
         const val DEFAULT_WEB_SEARCH_TIMEOUT_SECS = 15L
+
+        /** Default maximum meta searches per minute. */
+        const val DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE = 10L
 
         /** Default Twitter/X browse max items. */
         const val DEFAULT_TWITTER_BROWSE_MAX_ITEMS = 20L

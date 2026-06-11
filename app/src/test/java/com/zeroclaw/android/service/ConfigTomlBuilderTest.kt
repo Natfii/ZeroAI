@@ -660,6 +660,131 @@ class ConfigTomlBuilderTest {
     }
 
     @Nested
+    @DisplayName("build(GlobalTomlConfig) [web_search] section")
+    inner class BuildWebSearchSection {
+        private fun buildWebSearchToml(
+            provider: String = "meta",
+            braveApiKey: String = "",
+            tavilyApiKey: String = "",
+            searxngUrl: String = "",
+            requestsPerMinute: Long = GlobalTomlConfig.DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE,
+        ): String =
+            ConfigTomlBuilder.build(
+                GlobalTomlConfig(
+                    provider = "",
+                    model = "",
+                    apiKey = "",
+                    baseUrl = "",
+                    webSearchEnabled = true,
+                    webSearchProvider = provider,
+                    webSearchBraveApiKey = braveApiKey,
+                    webSearchTavilyApiKey = tavilyApiKey,
+                    webSearchSearxngUrl = searxngUrl,
+                    webSearchRequestsPerMinute = requestsPerMinute,
+                ),
+            )
+
+        @Test
+        @DisplayName("emits search_provider and no legacy google fields")
+        fun `emits search_provider and no legacy google fields`() {
+            val toml = buildWebSearchToml(provider = "meta")
+
+            assertTrue(toml.contains("[web_search]"))
+            assertTrue(toml.contains("""search_provider = "meta""""))
+            assertFalse(toml.contains("google_api_key"))
+            assertFalse(toml.contains("google_cx"))
+        }
+
+        @Test
+        @DisplayName("legacy stored providers normalize to meta")
+        fun `legacy stored providers normalize to meta`() {
+            for (legacy in listOf("auto", "google", "")) {
+                val toml = buildWebSearchToml(provider = legacy)
+
+                assertTrue(
+                    toml.contains("""search_provider = "meta""""),
+                    "legacy id \"$legacy\" must normalize to meta",
+                )
+            }
+        }
+
+        @Test
+        @DisplayName("valid provider ids are emitted verbatim")
+        fun `valid provider ids are emitted verbatim`() {
+            for (id in listOf("meta", "duckduckgo", "brave", "tavily", "searxng")) {
+                val toml = buildWebSearchToml(provider = id)
+
+                assertTrue(toml.contains("""search_provider = "$id""""))
+            }
+        }
+
+        @Test
+        @DisplayName("emits tavily key and searxng url when set")
+        fun `emits tavily key and searxng url when set`() {
+            val toml =
+                buildWebSearchToml(
+                    provider = "tavily",
+                    braveApiKey = "brave-key",
+                    tavilyApiKey = "tvly-key",
+                    searxngUrl = "https://searx.example.com",
+                )
+
+            assertTrue(toml.contains("""brave_api_key = "brave-key""""))
+            assertTrue(toml.contains("""tavily_api_key = "tvly-key""""))
+            assertTrue(toml.contains("""searxng_instance_url = "https://searx.example.com""""))
+        }
+
+        @Test
+        @DisplayName("omits blank credentials and default rate limit")
+        fun `omits blank credentials and default rate limit`() {
+            val toml = buildWebSearchToml()
+
+            assertFalse(toml.contains("brave_api_key"))
+            assertFalse(toml.contains("tavily_api_key"))
+            assertFalse(toml.contains("searxng_instance_url"))
+            assertFalse(toml.contains("max_requests_per_minute"))
+        }
+
+        @Test
+        @DisplayName("emits non-default requests per minute")
+        fun `emits non-default requests per minute`() {
+            val toml = buildWebSearchToml(requestsPerMinute = 25L)
+
+            assertTrue(toml.contains("max_requests_per_minute = 25"))
+        }
+
+        @Test
+        @DisplayName("clamps requests per minute into 1 to 60")
+        fun `clamps requests per minute into 1 to 60`() {
+            assertTrue(
+                buildWebSearchToml(requestsPerMinute = 0L)
+                    .contains("max_requests_per_minute = 1"),
+            )
+            assertTrue(
+                buildWebSearchToml(requestsPerMinute = 999L)
+                    .contains("max_requests_per_minute = 60"),
+            )
+        }
+
+        @Test
+        @DisplayName("disabled web search omits web_search section")
+        fun `disabled web search omits web_search section`() {
+            val toml =
+                ConfigTomlBuilder.build(
+                    GlobalTomlConfig(
+                        provider = "",
+                        model = "",
+                        apiKey = "",
+                        baseUrl = "",
+                        webSearchEnabled = false,
+                    ),
+                )
+
+            assertFalse(toml.contains("[web_search]"))
+        }
+    }
+
+    @Nested
     @DisplayName("buildAgentsToml()")
     inner class BuildAgentsToml {
         @Test

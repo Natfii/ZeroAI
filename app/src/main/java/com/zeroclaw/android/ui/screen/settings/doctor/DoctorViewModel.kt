@@ -265,8 +265,11 @@ class DoctorViewModel(
             webSearchEnabled = settings.webSearchEnabled,
             webSearchProvider = settings.webSearchProvider,
             webSearchBraveApiKey = settings.webSearchBraveApiKey,
+            webSearchTavilyApiKey = settings.webSearchTavilyApiKey,
+            webSearchSearxngUrl = settings.webSearchSearxngUrl,
             webSearchMaxResults = settings.webSearchMaxResults,
             webSearchTimeoutSecs = settings.webSearchTimeoutSecs,
+            webSearchRequestsPerMinute = settings.webSearchRequestsPerMinute,
             securitySandboxEnabled = settings.securitySandboxEnabled,
             securitySandboxBackend = settings.securitySandboxBackend,
             securitySandboxFirejailArgs =

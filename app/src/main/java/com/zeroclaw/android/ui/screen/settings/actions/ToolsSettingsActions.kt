@@ -6,6 +6,7 @@ package com.zeroclaw.android.ui.screen.settings.actions
 
 import androidx.compose.runtime.Stable
 import com.zeroclaw.android.model.OfficialPlugins
+import com.zeroclaw.android.service.GlobalTomlConfig
 
 /**
  * Tools settings area holder.
@@ -115,14 +116,14 @@ internal class ToolsSettingsActions(
         s.updateDaemonSetting { setWebSearchBraveApiKey(key) }
     }
 
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchGoogleApiKey */
-    fun updateWebSearchGoogleApiKey(key: String) {
-        s.updateDaemonSetting { setWebSearchGoogleApiKey(key) }
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchTavilyApiKey */
+    fun updateWebSearchTavilyApiKey(key: String) {
+        s.updateDaemonSetting { setWebSearchTavilyApiKey(key) }
     }
 
-    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchGoogleCx */
-    fun updateWebSearchGoogleCx(cx: String) {
-        s.updateDaemonSetting { setWebSearchGoogleCx(cx) }
+    /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchSearxngUrl */
+    fun updateWebSearchSearxngUrl(url: String) {
+        s.updateDaemonSetting { setWebSearchSearxngUrl(url) }
     }
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchMaxResults */
@@ -133,6 +134,23 @@ internal class ToolsSettingsActions(
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchTimeoutSecs */
     fun updateWebSearchTimeoutSecs(secs: Long) {
         s.updateDaemonSetting { setWebSearchTimeoutSecs(secs) }
+    }
+
+    /**
+     * Updates the meta search rate limit, clamped to the accepted range.
+     *
+     * The value is coerced into 1..60 because the engine treats 0 as
+     * unlimited, which the app never intends.
+     *
+     * @see com.zeroclaw.android.data.repository.SettingsRepository.setWebSearchRequestsPerMinute
+     */
+    fun updateWebSearchRequestsPerMinute(requestsPerMinute: Long) {
+        val clamped =
+            requestsPerMinute.coerceIn(
+                GlobalTomlConfig.MIN_WEB_SEARCH_REQUESTS_PER_MINUTE,
+                GlobalTomlConfig.MAX_WEB_SEARCH_REQUESTS_PER_MINUTE,
+            )
+        s.updateDaemonSetting { setWebSearchRequestsPerMinute(clamped) }
     }
 
     /** @see com.zeroclaw.android.data.repository.SettingsRepository.setTwitterBrowseEnabled */

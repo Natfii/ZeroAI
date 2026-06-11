@@ -10,6 +10,7 @@ import com.zeroclaw.android.model.Agent
 import com.zeroclaw.android.model.ChannelType
 import com.zeroclaw.android.model.ConnectedChannel
 import com.zeroclaw.android.model.FieldInputType
+import com.zeroclaw.android.model.WebSearchProviders
 
 /**
  * Builds a valid TOML configuration string for the ZeroAI daemon.
@@ -657,31 +658,55 @@ object ConfigTomlBuilder {
     /**
      * Appends the `[web_search]` TOML section when web search is enabled.
      *
-     * Upstream fields: enabled, provider, brave_api_key, google_api_key,
-     * google_cx, max_results, timeout_secs.
+     * Upstream fields: enabled, search_provider, brave_api_key,
+     * tavily_api_key, searxng_instance_url, max_results, timeout_secs,
+     * max_requests_per_minute.
+     *
+     * `search_provider` is always emitted and is normalized through
+     * [WebSearchProviders.normalize] so legacy stored ids from the old
+     * schema ("auto", "google", blank) resolve to "meta". The
+     * requests-per-minute limit is coerced into the accepted range
+     * because the engine treats 0 as unlimited, which the app never
+     * intends.
      *
      * @param config Configuration to read web search values from.
      */
     private fun StringBuilder.appendWebSearchSection(config: GlobalTomlConfig) {
         if (!config.webSearchEnabled) return
+        val provider = WebSearchProviders.normalize(config.webSearchProvider)
         appendLine()
         appendLine("[web_search]")
         appendLine("enabled = true")
-        appendLine("provider = ${tomlString(config.webSearchProvider)}")
+        appendLine("search_provider = ${tomlString(provider)}")
         if (config.webSearchBraveApiKey.isNotBlank()) {
             appendLine("brave_api_key = ${tomlString(config.webSearchBraveApiKey)}")
         }
-        if (config.webSearchGoogleApiKey.isNotBlank()) {
-            appendLine("google_api_key = ${tomlString(config.webSearchGoogleApiKey)}")
+        if (config.webSearchTavilyApiKey.isNotBlank()) {
+            appendLine("tavily_api_key = ${tomlString(config.webSearchTavilyApiKey)}")
         }
-        if (config.webSearchGoogleCx.isNotBlank()) {
-            appendLine("google_cx = ${tomlString(config.webSearchGoogleCx)}")
+        if (config.webSearchSearxngUrl.isNotBlank()) {
+            appendLine("searxng_instance_url = ${tomlString(config.webSearchSearxngUrl)}")
         }
         if (config.webSearchMaxResults != GlobalTomlConfig.DEFAULT_WEB_SEARCH_MAX_RESULTS) {
-            appendLine("max_results = ${config.webSearchMaxResults.coerceAtLeast(0L)}")
+            val maxResults =
+                config.webSearchMaxResults.coerceIn(
+                    GlobalTomlConfig.MIN_WEB_SEARCH_MAX_RESULTS,
+                    GlobalTomlConfig.MAX_WEB_SEARCH_MAX_RESULTS,
+                )
+            appendLine("max_results = $maxResults")
         }
         if (config.webSearchTimeoutSecs != GlobalTomlConfig.DEFAULT_WEB_SEARCH_TIMEOUT_SECS) {
             appendLine("timeout_secs = ${config.webSearchTimeoutSecs.coerceAtLeast(0L)}")
+        }
+        if (config.webSearchRequestsPerMinute !=
+            GlobalTomlConfig.DEFAULT_WEB_SEARCH_REQUESTS_PER_MINUTE
+        ) {
+            val requestsPerMinute =
+                config.webSearchRequestsPerMinute.coerceIn(
+                    GlobalTomlConfig.MIN_WEB_SEARCH_REQUESTS_PER_MINUTE,
+                    GlobalTomlConfig.MAX_WEB_SEARCH_REQUESTS_PER_MINUTE,
+                )
+            appendLine("max_requests_per_minute = $requestsPerMinute")
         }
     }
 
