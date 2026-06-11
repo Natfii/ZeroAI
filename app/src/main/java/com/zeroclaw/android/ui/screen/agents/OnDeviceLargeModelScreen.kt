@@ -465,7 +465,7 @@ private fun NotDownloadedRow(
         )
         if (!status.ramOk) {
             Text(
-                text = "Not enough free RAM to run this variant right now.",
+                text = "This device doesn't have enough RAM for this variant.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )

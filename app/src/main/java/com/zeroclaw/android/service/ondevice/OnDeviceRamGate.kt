@@ -51,31 +51,33 @@ class OnDeviceRamGate(
     /**
      * Snapshot of the current RAM gate result.
      *
-     * @property ramOk Whether the current free RAM exceeds the model's
+     * @property ramOk Whether the device's total RAM can host the model's
      *   working-memory estimate plus safety + OEM cushion.
      * @property storageOk Whether the data-files partition has enough
      *   free disk to host the model download.
-     * @property availMemBytes Snapshot of the OS-reported available RAM.
-     * @property lowMemory Whether the OS reports it is in a
-     *   low-memory state right now.
      */
     data class Result(
         val ramOk: Boolean,
         val storageOk: Boolean,
-        val availMemBytes: Long,
-        val lowMemory: Boolean,
     )
 
     /**
      * Computes the gate result for [model] at the moment this is called.
      *
+     * RAM is gated on [ActivityManager.MemoryInfo.totalMem] — a stable
+     * device-capability check — NOT on `availMem`. Android keeps RAM
+     * full of reclaimable app caches, so free-RAM-right-now sits far
+     * below what the OS hands a loading model; gating on it rejected
+     * every variant even on 16 GB devices (the v0.3.0 "not enough RAM"
+     * bug). Don't reintroduce an `availMem` check here.
+     *
      * Safe to call from the main thread; the underlying queries are
      * non-blocking. Re-call when the user comes back to the picker so
-     * the gate reflects current memory pressure.
+     * the storage gate reflects current free disk.
      *
      * @param model The LiteRT-LM variant to test against.
      * @return [Result] describing whether the download + run is safe
-     *   right now.
+     *   on this device.
      */
     fun evaluate(model: LiteRtModel): Result {
         val activityManager =
@@ -84,17 +86,12 @@ class OnDeviceRamGate(
         activityManager.getMemoryInfo(memoryInfo)
         val requiredRam =
             model.workingMemoryBytes + SAFETY_MARGIN_BYTES + OEM_CUSHION_BYTES
-        val ramOk =
-            !memoryInfo.lowMemory &&
-                memoryInfo.availMem >= requiredRam &&
-                memoryInfo.availMem >= memoryInfo.threshold * 2L
+        val ramOk = memoryInfo.totalMem >= requiredRam
         val freeBytes = freeDataPartitionBytes()
         val storageOk = freeBytes >= model.fileBytes + DOWNLOAD_DISK_PAD_BYTES
         return Result(
             ramOk = ramOk,
             storageOk = storageOk,
-            availMemBytes = memoryInfo.availMem,
-            lowMemory = memoryInfo.lowMemory,
         )
     }
 
