@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zeroclaw.android.model.OfficialPlugins
 import com.zeroclaw.android.ui.component.CategoryBadge
 import com.zeroclaw.android.ui.component.CollapsibleSection
 import com.zeroclaw.android.ui.component.LoadingIndicator
@@ -142,24 +143,35 @@ fun PluginDetailScreen(
                     style = MaterialTheme.typography.titleSmall,
                     modifier = Modifier.weight(1f),
                 )
-                Switch(
-                    checked = loadedPlugin.isEnabled,
-                    onCheckedChange = {
-                        if (isOfficial) {
-                            settingsViewModel.updateOfficialPluginEnabled(
-                                pluginId,
-                                !loadedPlugin.isEnabled,
-                            )
-                        }
-                        detailViewModel.toggleEnabled(pluginId)
-                    },
-                    modifier =
-                        Modifier.semantics {
-                            contentDescription =
-                                "${loadedPlugin.name} " +
-                                if (loadedPlugin.isEnabled) "enabled" else "disabled"
+                // Vision is always-on by design (see PluginListItem): there is
+                // no settings field backing it and reconciliation re-enables it
+                // on the next Hub open, so an interactive switch would lie.
+                if (pluginId == OfficialPlugins.VISION) {
+                    Text(
+                        text = "Always on",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Switch(
+                        checked = loadedPlugin.isEnabled,
+                        onCheckedChange = {
+                            if (isOfficial) {
+                                settingsViewModel.updateOfficialPluginEnabled(
+                                    pluginId,
+                                    !loadedPlugin.isEnabled,
+                                )
+                            }
+                            detailViewModel.toggleEnabled(pluginId)
                         },
-                )
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    "${loadedPlugin.name} " +
+                                    if (loadedPlugin.isEnabled) "enabled" else "disabled"
+                            },
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
         }
