@@ -75,10 +75,13 @@ class SshDataStore(
     }
 
     /**
-     * Removes entries whose [keyId] is absent from [validKeyIds].
+     * Removes software entries whose [keyId] is absent from [validKeyIds].
      *
      * Called at startup to reconcile metadata against the encrypted private
      * key store, recovering from partial writes or app data corruption.
+     * Hardware entries hold no encrypted bytes (the private key lives in the
+     * Android Keystore), so they are never present in [validKeyIds] and are
+     * always retained.
      *
      * @param validKeyIds Ids that currently hold encrypted private bytes.
      */
@@ -88,7 +91,7 @@ class SshDataStore(
                 prefs[KEY_SSH_KEYS]
                     ?.let { json.decodeFromString<List<SshKeyEntry>>(it) }
                     ?: return@edit
-            val valid = current.filter { it.keyId in validKeyIds }
+            val valid = current.filter { it.isHardware || it.keyId in validKeyIds }
             if (valid.size != current.size) {
                 prefs[KEY_SSH_KEYS] = json.encodeToString(valid)
             }

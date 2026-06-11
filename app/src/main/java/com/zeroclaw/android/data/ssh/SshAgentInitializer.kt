@@ -5,10 +5,13 @@
 package com.zeroclaw.android.data.ssh
 
 import android.util.Log
+import com.zeroclaw.ffi.sshAgentAddHardwareIdentity
 import com.zeroclaw.ffi.sshAgentAddIdentity
+import com.zeroclaw.ffi.sshAgentRegisterHwSigner
 import com.zeroclaw.ffi.sshAgentStart
 import java.io.File
 import java.security.SecureRandom
+import kotlinx.coroutines.flow.first
 
 /**
  * Brings the in-process ssh-agent up for the session and reconciles
@@ -36,11 +39,14 @@ import java.security.SecureRandom
  *   socket and the migration marker.
  * @param keyStore Encrypted-at-rest store for SSH private key bytes.
  * @param dataStore Metadata store reconciled against [keyStore] at startup.
+ * @param hardwareStore Android Keystore operations backing hardware
+ *   identities; its signer callback is registered during [prepareAgent].
  */
 class SshAgentInitializer(
     private val sshDir: File,
     private val keyStore: EncryptedSshKeyStore,
     private val dataStore: SshDataStore,
+    private val hardwareStore: HardwareSshKeyStore,
 ) {
     /**
      * Runs the lock-independent agent bring-up: migration, agent start, and
@@ -68,6 +74,11 @@ class SshAgentInitializer(
                 }.isSuccess
         if (!started) return false
 
+        runCatching { sshAgentRegisterHwSigner(HardwareSshSigner(hardwareStore)) }
+            .onFailure { error ->
+                Log.e(TAG, "SSH hardware signer registration failed: ${error.message}")
+            }
+
         runCatching { dataStore.pruneStaleKeys(keyStore.keyIds()) }
             .onFailure { error ->
                 Log.w(TAG, "SSH metadata prune failed: ${error.message}")
@@ -76,18 +87,21 @@ class SshAgentInitializer(
     }
 
     /**
-     * Decrypts every stored key and adds it to the running agent.
+     * Decrypts every stored software key and registers every hardware
+     * identity with the running agent.
      *
      * Must only run once the app is unlocked — this is the step that
-     * materialises plaintext private bytes in the live agent. A per-key
-     * failure (corrupt blob, parse error) is logged and skipped so one bad
-     * key cannot block the rest of the session's keys; the decrypted buffer is
-     * zeroed after each add.
+     * materialises plaintext software key bytes in the live agent (hardware
+     * keys contribute only their public halves; their private keys stay in
+     * the Keystore and additionally cannot sign while the device is locked).
+     * A per-key failure is logged and skipped so one bad key cannot block
+     * the rest of the session's keys; each decrypted buffer is zeroed after
+     * its add.
      *
      * Safe to call from a background dispatcher.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun loadKeysIntoAgent() {
+    suspend fun loadKeysIntoAgent() {
         var loaded = 0
         for (keyId in keyStore.keyIds()) {
             val pem = keyStore.get(keyId) ?: continue
@@ -100,7 +114,30 @@ class SshAgentInitializer(
                 pem.fill(0)
             }
         }
-        Log.i(TAG, "Loaded $loaded SSH key(s) into the session agent")
+
+        var hardware = 0
+        val hardwareEntries =
+            dataStore.keys
+                .first()
+                .filter { it.isHardware }
+                .mapNotNull { entry -> entry.keystoreAlias?.let { alias -> entry to alias } }
+        for ((entry, alias) in hardwareEntries) {
+            if (!hardwareStore.contains(alias)) {
+                Log.w(
+                    TAG,
+                    "Hardware SSH key ${entry.keyId} missing from Keystore " +
+                        "(invalidated or wiped); skipping registration",
+                )
+                continue
+            }
+            try {
+                sshAgentAddHardwareIdentity(entry.publicKeyOpenssh, alias, entry.label)
+                hardware += 1
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to register hardware SSH key ${entry.keyId}: ${e.message}")
+            }
+        }
+        Log.i(TAG, "Loaded $loaded software + $hardware hardware SSH key(s) into the agent")
     }
 
     /**

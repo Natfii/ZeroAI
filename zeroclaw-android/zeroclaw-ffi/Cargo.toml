@@ -101,6 +101,11 @@ ghostty-vt = []
 
 [dev-dependencies]
 tempfile = "3"
+# Round-trip tests for the hardware-key DER→SSH signature conversion: p256
+# stands in for Android Keystore's SHA256withECDSA signer, and `signature`
+# provides the Verifier trait implemented by the standalone ssh-key 0.6.
+p256 = { version = "0.13", features = ["ecdsa"] }
+signature = "2"
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.2"

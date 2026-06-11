@@ -19,6 +19,10 @@ import kotlinx.serialization.Serializable
  * @property fingerprintSha256 SHA-256 fingerprint in `SHA256:<base64>` format.
  * @property publicKeyOpenssh Public key in OpenSSH format.
  * @property createdAtEpochMs Creation timestamp as milliseconds since Unix epoch.
+ * @property isHardware Whether the private key is sealed in the Android Keystore
+ *   (StrongBox/TEE) and signs inside the secure element, with no exportable bytes.
+ * @property keystoreAlias Android Keystore entry alias for a hardware key, or `null`
+ *   for a software key whose encrypted bytes live in [EncryptedSshKeyStore].
  */
 @Serializable
 data class SshKeyEntry(
@@ -28,4 +32,6 @@ data class SshKeyEntry(
     val fingerprintSha256: String,
     val publicKeyOpenssh: String,
     val createdAtEpochMs: Long,
+    val isHardware: Boolean = false,
+    val keystoreAlias: String? = null,
 )

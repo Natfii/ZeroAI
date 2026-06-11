@@ -52,6 +52,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -226,8 +227,18 @@ fun SshKeyScreen(
                             key = { it.keyId },
                             contentType = { "ssh_key" },
                         ) { entry ->
+                            val hardwareBadge =
+                                remember(entry.keyId) {
+                                    if (entry.isHardware) {
+                                        viewModel.hardwareSecurityLabel(entry.keystoreAlias)
+                                            ?: "Hardware"
+                                    } else {
+                                        null
+                                    }
+                                }
                             SshKeyCard(
                                 entry = entry,
+                                hardwareBadge = hardwareBadge,
                                 onClick = { detailKey = entry },
                             )
                         }
@@ -243,6 +254,10 @@ fun SshKeyScreen(
             onConfirm = { algorithm, label ->
                 showGenerateDialog = false
                 viewModel.generateKey(algorithm, label)
+            },
+            onConfirmHardware = { label ->
+                showGenerateDialog = false
+                viewModel.generateHardwareKey(label)
             },
         )
     }
@@ -408,11 +423,14 @@ private fun SshDisabledBanner() {
  * bottom sheet.
  *
  * @param entry SSH key metadata to display.
+ * @param hardwareBadge Security-level badge text (`"StrongBox"`, `"TEE"`,
+ *   `"Hardware"`) for Keystore-backed keys, or null for software keys.
  * @param onClick Callback invoked when the card is tapped.
  */
 @Composable
 private fun SshKeyCard(
     entry: SshKeyEntry,
+    hardwareBadge: String?,
     onClick: () -> Unit,
 ) {
     val algorithmBadge =
@@ -431,7 +449,11 @@ private fun SshKeyCard(
                     onClick = onClick,
                 ).semantics {
                     contentDescription =
-                        "$algorithmBadge key, ${entry.label}"
+                        if (hardwareBadge != null) {
+                            "$algorithmBadge key, ${entry.label}, hardware-backed in $hardwareBadge"
+                        } else {
+                            "$algorithmBadge key, ${entry.label}"
+                        }
                 },
         colors =
             CardDefaults.cardColors(
@@ -464,6 +486,26 @@ private fun SshKeyCard(
                         ),
                 )
             }
+            if (hardwareBadge != null) {
+                Card(
+                    colors =
+                        CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        ),
+                ) {
+                    Text(
+                        text = hardwareBadge,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        modifier =
+                            Modifier.padding(
+                                horizontal = INLINE_SPACING_DP.dp,
+                                vertical = 4.dp,
+                            ),
+                    )
+                }
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = entry.label,
@@ -492,20 +534,28 @@ private fun SshKeyCard(
  * Dialog for generating a new SSH key.
  *
  * Presents algorithm selection via [FilterChip]s (ECDSA P-256 default,
- * Ed25519, RSA-4096) and a required label field. The Generate button is
- * disabled until a non-empty label is entered.
+ * Ed25519, RSA-4096), a hardware-backing toggle, and a required label
+ * field. Enabling hardware backing forces ECDSA P-256 (the only
+ * Keystore-compatible algorithm) and surfaces the non-exportability
+ * warnings. The Generate button is disabled until a non-empty label is
+ * entered.
  *
  * @param onDismiss Callback invoked when the dialog is dismissed.
- * @param onConfirm Callback invoked with the selected algorithm and label.
+ * @param onConfirm Callback invoked with the selected algorithm and label
+ *   for a software key.
+ * @param onConfirmHardware Callback invoked with the label for a
+ *   hardware-backed key.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GenerateKeyDialog(
     onDismiss: () -> Unit,
     onConfirm: (SshKeyAlgorithm, String) -> Unit,
+    onConfirmHardware: (String) -> Unit,
 ) {
     var algorithm by remember { mutableStateOf(SshKeyAlgorithm.ECDSA_P256) }
     var label by remember { mutableStateOf("") }
+    var hardware by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -536,6 +586,7 @@ private fun GenerateKeyDialog(
                         selected = algorithm == SshKeyAlgorithm.ED25519,
                         onClick = { algorithm = SshKeyAlgorithm.ED25519 },
                         label = { Text("Ed25519") },
+                        enabled = !hardware,
                         modifier =
                             Modifier
                                 .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
@@ -547,12 +598,55 @@ private fun GenerateKeyDialog(
                         selected = algorithm == SshKeyAlgorithm.RSA4096,
                         onClick = { algorithm = SshKeyAlgorithm.RSA4096 },
                         label = { Text("RSA-4096") },
+                        enabled = !hardware,
                         modifier =
                             Modifier
                                 .defaultMinSize(minHeight = MIN_TOUCH_TARGET_DP.dp)
                                 .semantics {
                                     contentDescription = "Select RSA-4096 algorithm"
                                 },
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(INLINE_SPACING_DP.dp),
+                ) {
+                    Switch(
+                        checked = hardware,
+                        onCheckedChange = { checked ->
+                            hardware = checked
+                            if (checked) algorithm = SshKeyAlgorithm.ECDSA_P256
+                        },
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    if (hardware) {
+                                        "Hardware-backed key, enabled"
+                                    } else {
+                                        "Hardware-backed key, disabled"
+                                    }
+                            },
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Hardware-backed",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Private key sealed in the secure element",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (hardware) {
+                    Text(
+                        text =
+                            "A hardware key can never be exported or backed up, " +
+                                "is permanently lost if this device is wiped, and " +
+                                "is destroyed if you remove the device screen lock.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
                 OutlinedTextField(
@@ -570,7 +664,10 @@ private fun GenerateKeyDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onConfirm(algorithm, label.trim()) },
+                onClick = {
+                    val trimmed = label.trim()
+                    if (hardware) onConfirmHardware(trimmed) else onConfirm(algorithm, trimmed)
+                },
                 enabled = label.isNotBlank(),
             ) {
                 Text("Generate")

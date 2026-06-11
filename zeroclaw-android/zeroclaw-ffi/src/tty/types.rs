@@ -39,6 +39,10 @@ pub struct SshKeyMetadata {
     pub public_key_openssh: String,
     /// Creation timestamp as milliseconds since Unix epoch.
     pub created_at_epoch_ms: i64,
+    /// Whether the private key is sealed in the Android Keystore (StrongBox/TEE)
+    /// and signs inside the secure element — `false` for software keys whose
+    /// encrypted private bytes Kotlin holds at rest.
+    pub is_hardware: bool,
 }
 
 /// A freshly generated or imported SSH key, returned across the FFI so

@@ -10,7 +10,8 @@
 use std::path::Path;
 
 use rand_core::OsRng;
-use ssh_key::{Algorithm, EcdsaCurve, HashAlg, LineEnding, PrivateKey};
+use ssh_key::public::{EcdsaPublicKey, KeyData};
+use ssh_key::{Algorithm, EcdsaCurve, HashAlg, LineEnding, PrivateKey, PublicKey};
 use zeroize::Zeroize;
 
 use crate::error::FfiError;
@@ -155,5 +156,41 @@ fn build_metadata(
         fingerprint_sha256: key.fingerprint(HashAlg::Sha256).to_string(),
         public_key_openssh,
         created_at_epoch_ms: now,
+        is_hardware: false,
+    })
+}
+
+/// Builds public metadata for a hardware (Android Keystore) SSH key from its
+/// raw EC public point.
+///
+/// The private key lives in the secure element and never reaches Rust; only the
+/// SEC1 uncompressed point (`0x04 || X || Y`) crosses the FFI, from which the
+/// OpenSSH `ecdsa-sha2-nistp256` public key and its SHA-256 fingerprint are
+/// derived.
+pub(crate) fn hardware_key_metadata(
+    ec_point_sec1: &[u8],
+    key_id: String,
+    label: &str,
+) -> Result<SshKeyMetadata, FfiError> {
+    let ecdsa =
+        EcdsaPublicKey::from_sec1_bytes(ec_point_sec1).map_err(|e| FfiError::InvalidArgument {
+            detail: format!("invalid EC public point: {e}"),
+        })?;
+    let public_key = PublicKey::new(KeyData::Ecdsa(ecdsa), label.to_owned());
+    let public_key_openssh = public_key.to_openssh().map_err(|e| FfiError::IoError {
+        detail: format!("failed to serialize public key: {e}"),
+    })?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    Ok(SshKeyMetadata {
+        key_id,
+        algorithm: SshKeyAlgorithm::EcdsaP256,
+        label: label.to_owned(),
+        fingerprint_sha256: public_key.fingerprint(HashAlg::Sha256).to_string(),
+        public_key_openssh,
+        created_at_epoch_ms: now,
+        is_hardware: true,
     })
 }

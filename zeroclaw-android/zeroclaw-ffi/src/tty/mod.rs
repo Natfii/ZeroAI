@@ -8,6 +8,7 @@
 
 use std::sync::OnceLock;
 
+pub(crate) mod agent_protocol;
 pub(crate) mod backend;
 pub(crate) mod context;
 #[cfg(feature = "ghostty-vt")]
@@ -17,6 +18,7 @@ pub(crate) mod ghostty_bridge;
 #[cfg(feature = "ghostty-vt")]
 #[allow(non_camel_case_types, dead_code)]
 pub(crate) mod ghostty_sys;
+pub(crate) mod hw_signer;
 pub(crate) mod io_exports;
 pub(crate) mod key_store;
 pub(crate) mod key_store_exports;

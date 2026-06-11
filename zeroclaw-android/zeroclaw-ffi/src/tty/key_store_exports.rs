@@ -52,6 +52,23 @@ crate::ffi_export!(
     ) -> types::SshGeneratedKey = ssh_import_key_inner
 );
 
+crate::ffi_export!(
+    /// Builds public metadata for an Android Keystore (hardware) SSH key from
+    /// its SEC1 EC public point (`0x04 || X || Y`). The private key stays sealed
+    /// in the secure element; only the public point crosses the FFI.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if the point is malformed,
+    /// [`crate::FfiError::IoError`] on serialization failure, or
+    /// [`crate::FfiError::InternalPanic`] if native code panics.
+    fn ssh_hardware_key_metadata(
+        ec_point_sec1: Vec<u8>,
+        key_id: String,
+        label: String
+    ) -> types::SshKeyMetadata = ssh_hardware_key_metadata_inner
+);
+
 // ── Inner implementations ──────────────────────────────────────────────────
 
 pub(crate) fn ssh_generate_key_inner(
@@ -76,4 +93,12 @@ pub(crate) fn ssh_import_key_inner(
         metadata,
         private_pem,
     })
+}
+
+pub(crate) fn ssh_hardware_key_metadata_inner(
+    ec_point_sec1: Vec<u8>,
+    key_id: String,
+    label: String,
+) -> Result<types::SshKeyMetadata, FfiError> {
+    key_store::hardware_key_metadata(&ec_point_sec1, key_id, &label)
 }

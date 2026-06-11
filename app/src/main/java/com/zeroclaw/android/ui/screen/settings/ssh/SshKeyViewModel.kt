@@ -12,7 +12,9 @@ import com.zeroclaw.android.ZeroAIApplication
 import com.zeroclaw.android.data.ssh.SshKeyEntry
 import com.zeroclaw.ffi.SshGeneratedKey
 import com.zeroclaw.ffi.SshKeyAlgorithm
+import com.zeroclaw.ffi.sshAgentAddHardwareIdentity
 import com.zeroclaw.ffi.sshAgentAddIdentity
+import com.zeroclaw.ffi.sshAgentRemoveHardwareIdentity
 import com.zeroclaw.ffi.sshAgentReset
 import com.zeroclaw.ffi.sshGenerateKey
 import com.zeroclaw.ffi.sshImportKey
@@ -47,6 +49,7 @@ class SshKeyViewModel(
     private val app = application as ZeroAIApplication
     private val dataStore = app.sshDataStore
     private val keyStore = app.sshKeyStore
+    private val hardwareStore = app.hardwareSshKeyStore
 
     /** Observable list of SSH key entries. */
     val keys: StateFlow<List<SshKeyEntry>> =
@@ -107,6 +110,54 @@ class SshKeyViewModel(
             }
         }
     }
+
+    /**
+     * Generates a hardware-backed SSH key sealed in the Android Keystore.
+     *
+     * The private key is non-exportable EC P-256 (StrongBox when available,
+     * TEE otherwise) and signs inside the secure element; only public
+     * metadata is persisted. The identity is registered with the running
+     * agent best-effort — a registration failure self-heals at the next
+     * unlock via the agent initializer.
+     *
+     * @param label User-assigned label.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    fun generateHardwareKey(label: String) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val generated =
+                    withContext(Dispatchers.IO) {
+                        hardwareStore.generate(label)
+                    }
+                dataStore.addKey(
+                    generated.metadata.toEntry(keystoreAlias = generated.keystoreAlias),
+                )
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        sshAgentAddHardwareIdentity(
+                            generated.metadata.publicKeyOpenssh,
+                            generated.keystoreAlias,
+                            label,
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _error.value = "Hardware key generation failed: ${e.message}"
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Returns the security-level badge label for a hardware key.
+     *
+     * @param keystoreAlias Keystore alias recorded on the key's entry.
+     * @return `"StrongBox"`, `"TEE"`, or null when unavailable.
+     */
+    fun hardwareSecurityLabel(keystoreAlias: String?): String? = keystoreAlias?.let(hardwareStore::securityLabel)
 
     /**
      * Imports a private key from a SAF URI.
@@ -192,7 +243,12 @@ class SshKeyViewModel(
     }
 
     /**
-     * Deletes a key from encrypted storage, metadata, and the running agent.
+     * Deletes a key from its backing store, metadata, and the running agent.
+     *
+     * Hardware keys are removed surgically: the Keystore entry is deleted
+     * and only that identity is dropped from the agent, leaving other
+     * loaded keys untouched. Software keys keep the original
+     * delete-then-reset flow.
      *
      * @param keyId UUID of the key to delete.
      */
@@ -200,9 +256,16 @@ class SshKeyViewModel(
     fun deleteKey(keyId: String) {
         viewModelScope.launch {
             try {
+                val entry = dataStore.keys.first().firstOrNull { it.keyId == keyId }
                 withContext(Dispatchers.IO) {
-                    keyStore.delete(keyId)
-                    sshAgentReset()
+                    val alias = entry?.keystoreAlias
+                    if (entry?.isHardware == true && alias != null) {
+                        hardwareStore.delete(alias)
+                        runCatching { sshAgentRemoveHardwareIdentity(alias) }
+                    } else {
+                        keyStore.delete(keyId)
+                        sshAgentReset()
+                    }
                 }
                 dataStore.removeKey(keyId)
             } catch (e: Exception) {
@@ -229,8 +292,12 @@ class SshKeyViewModel(
 /**
  * Converts a UniFFI-generated [SshKeyMetadata] to the Kotlin
  * [SshKeyEntry] for DataStore persistence.
+ *
+ * @receiver Metadata returned by the Rust key store.
+ * @param keystoreAlias Android Keystore alias for hardware keys, null for
+ *   software keys.
  */
-private fun com.zeroclaw.ffi.SshKeyMetadata.toEntry() =
+private fun com.zeroclaw.ffi.SshKeyMetadata.toEntry(keystoreAlias: String? = null) =
     SshKeyEntry(
         keyId = keyId,
         algorithm =
@@ -243,4 +310,6 @@ private fun com.zeroclaw.ffi.SshKeyMetadata.toEntry() =
         fingerprintSha256 = fingerprintSha256,
         publicKeyOpenssh = publicKeyOpenssh,
         createdAtEpochMs = createdAtEpochMs,
+        isHardware = isHardware,
+        keystoreAlias = keystoreAlias,
     )

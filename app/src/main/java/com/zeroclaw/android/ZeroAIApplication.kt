@@ -54,6 +54,7 @@ import com.zeroclaw.android.data.repository.RoomTerminalEntryRepository
 import com.zeroclaw.android.data.repository.SettingsRepository
 import com.zeroclaw.android.data.repository.TerminalEntryRepository
 import com.zeroclaw.android.data.ssh.EncryptedSshKeyStore
+import com.zeroclaw.android.data.ssh.HardwareSshKeyStore
 import com.zeroclaw.android.data.ssh.SshAgentInitializer
 import com.zeroclaw.android.data.ssh.SshDataStore
 import com.zeroclaw.android.model.CachedTailscalePeer
@@ -259,6 +260,14 @@ class ZeroAIApplication :
      * handed to the in-app ssh-agent over the FFI.
      */
     val sshKeyStore: EncryptedSshKeyStore by lazy { EncryptedSshKeyStore(context = this) }
+
+    /**
+     * Android Keystore operations for hardware-backed SSH keys.
+     *
+     * Stateless besides the Keystore handle; lazy to keep Keystore access
+     * off [onCreate]'s critical path.
+     */
+    val hardwareSshKeyStore: HardwareSshKeyStore by lazy { HardwareSshKeyStore() }
 
     /** Emergency stop state repository. */
     lateinit var estopRepository: EstopRepository
@@ -584,6 +593,7 @@ class ZeroAIApplication :
                 sshDir = File(filesDir, "ssh"),
                 keyStore = sshKeyStore,
                 dataStore = sshDataStore,
+                hardwareStore = hardwareSshKeyStore,
             )
         scope.launch {
             val ready = initializer.prepareAgent()

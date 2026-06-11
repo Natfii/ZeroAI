@@ -2,16 +2,19 @@
 
 //! In-process SSH agent.
 //!
-//! Runs a russh ssh-agent server bound to a Unix-domain socket inside the
-//! app process. Decrypted private keys live only in this agent for the
-//! duration of the session; the bundled `zssh` client authenticates against
-//! it via `SSH_AUTH_SOCK`. There is no biometric gate — the agent's
-//! `confirm_request` always returns `true`.
+//! Runs a hand-rolled ssh-agent server ([`crate::tty::agent_protocol`])
+//! bound to a Unix-domain socket inside the app process. Software keys
+//! live decrypted only in the agent for the duration of the session;
+//! hardware identities never leave the Android Keystore — their
+//! `SIGN_REQUEST`s round-trip to Kotlin through
+//! [`crate::tty::hw_signer`]. The bundled `zssh` client authenticates
+//! against the agent via `SSH_AUTH_SOCK`.
 //!
-//! The agent's key store is seeded exclusively through the agent protocol
-//! (an [`AgentClient`] connection's `add_identity`), never through a Rust
-//! API, so adding and resetting identities both go through a short-lived
-//! client connection to the same socket.
+//! Software identities are seeded exclusively through the agent protocol
+//! (an [`AgentClient`] connection's `add_identity`), so adding and
+//! resetting them go through a short-lived client connection to the same
+//! socket. Hardware identities have no private bytes to send over the
+//! protocol and register directly in the agent's registry.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -20,11 +23,11 @@ use std::sync::{Mutex, OnceLock};
 use russh::keys::PrivateKey;
 use russh::keys::agent::client::AgentClient;
 use tokio::net::UnixListener;
-use tokio_stream::wrappers::UnixListenerStream;
 use zeroize::Zeroize;
 
 use crate::error::FfiError;
 use crate::tty;
+use crate::tty::agent_protocol::{self, HardwareIdentity};
 
 /// Path of the running agent's Unix-domain socket.
 ///
@@ -78,11 +81,19 @@ pub(crate) fn start(socket_dir: &str) -> Result<String, FfiError> {
     // app-private dir). Best-effort: a failure here is not fatal.
     let _ = std::fs::set_permissions(&sock_path, std::fs::Permissions::from_mode(0o600));
 
-    let stream = UnixListenerStream::new(listener);
-    // `()` implements `Agent` with `confirm_request` always true — no biometric.
+    // Accept loop for the hand-rolled protocol server. Each connection is
+    // served on its own task; the shared identity registry lives in
+    // `agent_protocol::STATE`.
     tty::runtime().spawn(async move {
-        if let Err(e) = russh::keys::agent::server::serve(stream, ()).await {
-            tracing::warn!(target: "tty::ssh_agent", "agent serve loop exited: {e}");
+        loop {
+            match listener.accept().await {
+                Ok((stream, _addr)) => {
+                    tokio::spawn(agent_protocol::serve_connection(stream));
+                }
+                Err(e) => {
+                    tracing::warn!(target: "tty::ssh_agent", "agent accept failed: {e}");
+                }
+            }
         }
     });
 
@@ -211,6 +222,58 @@ crate::ffi_export!(
     fn ssh_agent_reset() -> () = ssh_agent_reset_inner
 );
 
+crate::ffi_export!(
+    /// Registers the Kotlin-side hardware SSH signer callback.
+    ///
+    /// The agent routes `SIGN_REQUEST`s for hardware identities through
+    /// this callback, which signs with the sealed Android Keystore key.
+    /// A new registration replaces the previous one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn ssh_agent_register_hw_signer(
+        signer: Box<dyn crate::tty::hw_signer::FfiHardwareSshSigner>
+    ) -> () = ssh_agent_register_hw_signer_boxed
+);
+
+crate::ffi_export!(
+    /// Registers a hardware (Android Keystore) identity with the agent.
+    ///
+    /// `public_key_openssh` is the key's OpenSSH public line (from
+    /// `ssh_hardware_key_metadata`); `keystore_alias` names the Keystore
+    /// entry Kotlin signs under; `comment` is surfaced in identity
+    /// listings. The private key never crosses this boundary. Flushed by
+    /// `ssh_agent_reset` like every other identity, so re-registration on
+    /// each unlock preserves the agent-holds-keys ⟺ app-unlocked
+    /// invariant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InvalidArgument`] if the public key does
+    /// not parse, or [`crate::FfiError::InternalPanic`] if native code
+    /// panics.
+    fn ssh_agent_add_hardware_identity(
+        public_key_openssh: String,
+        keystore_alias: String,
+        comment: String
+    ) -> () = ssh_agent_add_hardware_identity_inner
+);
+
+crate::ffi_export!(
+    /// Removes the hardware identity registered under `keystore_alias`.
+    ///
+    /// A no-op when the alias is unknown (e.g. already flushed by a
+    /// reset).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::FfiError::InternalPanic`] if native code panics.
+    fn ssh_agent_remove_hardware_identity(
+        keystore_alias: String
+    ) -> () = ssh_agent_remove_hardware_identity_inner
+);
+
 // ── Inner implementations ──────────────────────────────────────────────────
 
 pub(crate) fn ssh_agent_start_inner(socket_dir: String) -> Result<String, FfiError> {
@@ -223,4 +286,52 @@ pub(crate) fn ssh_agent_add_identity_inner(private_pem: Vec<u8>) -> Result<(), F
 
 pub(crate) fn ssh_agent_reset_inner() -> Result<(), FfiError> {
     reset()
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn ssh_agent_register_hw_signer_boxed(
+    signer: Box<dyn crate::tty::hw_signer::FfiHardwareSshSigner>,
+) -> Result<(), FfiError> {
+    crate::tty::hw_signer::register(std::sync::Arc::from(signer));
+    Ok(())
+}
+
+pub(crate) fn ssh_agent_add_hardware_identity_inner(
+    public_key_openssh: String,
+    keystore_alias: String,
+    comment: String,
+) -> Result<(), FfiError> {
+    // The blob must byte-match what identity listings hand to clients and
+    // what clients echo back in SIGN_REQUEST — the standard SSH wire
+    // encoding of the public key, via the standalone ssh-key crate.
+    let public_key = ::ssh_key::PublicKey::from_openssh(&public_key_openssh).map_err(|e| {
+        FfiError::InvalidArgument {
+            detail: format!("failed to parse hardware public key: {e}"),
+        }
+    })?;
+    let blob = public_key.to_bytes().map_err(|e| FfiError::IoError {
+        detail: format!("failed to encode hardware public key blob: {e}"),
+    })?;
+    agent_protocol::register_hardware_identity(
+        blob,
+        HardwareIdentity {
+            keystore_alias,
+            comment,
+        },
+    );
+    Ok(())
+}
+
+#[allow(clippy::unnecessary_wraps)]
+pub(crate) fn ssh_agent_remove_hardware_identity_inner(
+    keystore_alias: String,
+) -> Result<(), FfiError> {
+    if !agent_protocol::remove_hardware_identity(&keystore_alias) {
+        tracing::debug!(
+            target: "tty::ssh_agent",
+            alias = %keystore_alias,
+            "remove_hardware_identity: alias not registered"
+        );
+    }
+    Ok(())
 }
