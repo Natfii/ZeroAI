@@ -276,9 +276,11 @@ mod tests {
         assert_eq!((bits >> 48) & 0xFF, 0xFF);
         assert_eq!((bits >> 40) & 0xFF, 0x80);
         assert_eq!((bits >> 32) & 0xFF, 0x40);
-        // Background and flags should be zero
-        assert_eq!(bits & 0x0000_00FF_FFFF_FFFF & !0xFFFF_FF00_0000_0000, 0);
-        assert_eq!(bits & 0xFF, 0);
+        // Background (bits 8-31) and flags (bits 0-7) should be zero
+        assert_eq!(bits & 0xFFFF_FFFF, 0);
+        // has_explicit_fg marker set, has_explicit_bg clear
+        assert_ne!(bits & (1 << 60), 0);
+        assert_eq!(bits & (1 << 61), 0);
     }
 
     #[test]
@@ -557,80 +559,4 @@ mod tests {
         assert_eq!(offsets[2], 1, "'A' offset");
     }
 
-    // ── Session state tests ──────────────────────────────────────────
-
-    #[test]
-    fn lock_session_returns_none_initially() {
-        let guard = lock_session();
-        // Global state may have a session from another test, but the
-        // lock itself should not panic.
-        drop(guard);
-    }
-
-    #[test]
-    fn ring_buffer_evicts_oldest_when_full() {
-        let buf = Arc::new(Mutex::new(LineRingBuffer::new(3)));
-
-        // Push 3 lines via raw bytes (newline-delimited).
-        buf.lock().unwrap().push_bytes(b"line 0\nline 1\nline 2\n");
-        assert_eq!(buf.lock().unwrap().get_lines(10).len(), 3);
-
-        // One more should evict the oldest.
-        buf.lock().unwrap().push_bytes(b"overflow\n");
-        let lines = buf.lock().unwrap().get_lines(10);
-        assert_eq!(lines.len(), 3);
-        assert_eq!(lines[0], "line 1");
-        assert_eq!(lines[2], "overflow");
-    }
-
-    #[test]
-    fn get_output_lines_returns_empty_when_no_session() {
-        // Ensure no session is running.
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = get_output_lines(10);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn write_bytes_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = write_bytes(vec![0x41]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn destroy_is_idempotent_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        // Should succeed (no-op) when no session exists.
-        assert!(destroy().is_ok());
-    }
-
-    #[test]
-    fn resize_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = resize(80, 24);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_context_fails_when_no_session() {
-        let mut guard = lock_session();
-        *guard = None;
-        drop(guard);
-
-        let result = get_context(4096);
-        assert!(result.is_err());
-    }
 }

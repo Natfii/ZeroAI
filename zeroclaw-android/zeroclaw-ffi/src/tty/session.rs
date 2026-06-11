@@ -1115,3 +1115,72 @@ pub(crate) fn set_mouse_geometry(
     backend.set_mouse_geometry(cell_w, cell_h, width_px, height_px);
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    // These tests lived in `tty/render.rs` before the TTY module
+    // decomposition moved the session functions here; they exercise the
+    // no-session error paths and therefore must reset the global
+    // session slot before each call.
+
+    #[test]
+    fn lock_session_returns_none_initially() {
+        let guard = lock_session();
+        // Global state may have a session from another test, but the
+        // lock itself should not panic.
+        drop(guard);
+    }
+
+    #[test]
+    fn get_output_lines_returns_empty_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = get_output_lines(10);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn write_bytes_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = write_bytes(vec![0x41]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn destroy_is_idempotent_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        // Should succeed (no-op) when no session exists.
+        assert!(destroy().is_ok());
+    }
+
+    #[test]
+    fn resize_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = resize(80, 24);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_context_fails_when_no_session() {
+        let mut guard = lock_session();
+        *guard = None;
+        drop(guard);
+
+        let result = get_context(4096);
+        assert!(result.is_err());
+    }
+}

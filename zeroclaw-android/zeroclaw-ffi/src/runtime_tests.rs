@@ -119,9 +119,8 @@ default_temperature = 0.7
 [channels]
 cli = true
 
-[channels_config.telegram]
+[channels.telegram.default]
 bot_token = "fake:token"
-allowed_users = ["123"]
 mention_only = false
 "#;
     let config: Config = toml::from_str(toml_str).unwrap();
@@ -138,14 +137,12 @@ default_temperature = 0.7
 [channels]
 cli = true
 
-[channels_config.telegram]
+[channels.telegram.default]
 bot_token = "fake:token"
-allowed_users = []
 mention_only = false
 
-[channels_config.discord]
+[channels.discord.default]
 bot_token = "fake_discord_token"
-allowed_users = []
 listen_to_bots = false
 mention_only = false
 "#;

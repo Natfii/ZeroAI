@@ -170,7 +170,9 @@ pub(crate) struct FfiWebViewFallback;
 // preserved (and still constructed by `runtime.rs`) so the Android
 // side can re-wire it when upstream re-introduces a fallback hook.
 impl FfiWebViewFallback {
-    #[allow(dead_code)]
+    // unused_self: the method keeps the future trait's receiver shape so
+    // re-wiring is a one-line impl when upstream restores the hook.
+    #[allow(dead_code, clippy::unused_self)]
     pub(crate) fn render_page(&self, url: &str, timeout_ms: u64) -> Result<String, String> {
         match try_render_page(url, timeout_ms) {
             Some(Ok(text)) => Ok(text),
@@ -185,6 +187,18 @@ impl FfiWebViewFallback {
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    /// Serializes tests in this module: they all mutate the single
+    /// process-global renderer slot and race under parallel execution.
+    /// `into_inner` recovers the lock if a prior test panicked while
+    /// holding it.
+    static RENDERER_SLOT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_renderer_slot() -> std::sync::MutexGuard<'static, ()> {
+        RENDERER_SLOT_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
 
     /// A test renderer that returns a fixed HTML string.
     struct EchoRenderer;
@@ -208,6 +222,7 @@ mod tests {
 
     #[test]
     fn test_no_renderer_returns_none() {
+        let _slot_guard = lock_renderer_slot();
         unregister_web_renderer_inner().unwrap();
         let result = try_render_page("https://example.com", 5000);
         assert!(
@@ -218,6 +233,7 @@ mod tests {
 
     #[test]
     fn test_register_and_render() {
+        let _slot_guard = lock_renderer_slot();
         let renderer: Arc<dyn WebRenderer> = Arc::new(EchoRenderer);
         register_web_renderer_inner(renderer).unwrap();
 
@@ -234,6 +250,7 @@ mod tests {
 
     #[test]
     fn test_render_error_propagates() {
+        let _slot_guard = lock_renderer_slot();
         let renderer: Arc<dyn WebRenderer> = Arc::new(FailRenderer);
         register_web_renderer_inner(renderer).unwrap();
 
@@ -251,6 +268,7 @@ mod tests {
 
     #[test]
     fn test_unregister_clears_renderer() {
+        let _slot_guard = lock_renderer_slot();
         let renderer: Arc<dyn WebRenderer> = Arc::new(EchoRenderer);
         register_web_renderer_inner(renderer).unwrap();
         unregister_web_renderer_inner().unwrap();
@@ -261,6 +279,7 @@ mod tests {
 
     #[test]
     fn test_replace_renderer() {
+        let _slot_guard = lock_renderer_slot();
         let renderer1: Arc<dyn WebRenderer> = Arc::new(EchoRenderer);
         register_web_renderer_inner(renderer1).unwrap();
 

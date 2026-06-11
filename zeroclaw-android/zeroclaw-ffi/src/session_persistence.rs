@@ -354,7 +354,7 @@ mod tests {
         std::fs::write(dir.path().join("session-beta.json"), "{}").unwrap();
         std::fs::write(dir.path().join("not-a-session.txt"), "ignored").unwrap();
 
-        let ids = list_persisted_sessions(dir.path()).unwrap();
+        let ids = list_persisted_sessions_at(dir.path()).unwrap();
         assert_eq!(ids, vec!["session-alpha", "session-beta"]);
     }
 
@@ -362,7 +362,7 @@ mod tests {
     #[test]
     fn list_persisted_sessions_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let ids = list_persisted_sessions(dir.path()).unwrap();
+        let ids = list_persisted_sessions_at(dir.path()).unwrap();
         assert!(ids.is_empty());
     }
 
@@ -371,7 +371,7 @@ mod tests {
     #[test]
     fn list_persisted_sessions_nonexistent_dir() {
         let path = std::path::PathBuf::from("/tmp/nonexistent-session-dir-12345");
-        let ids = list_persisted_sessions(&path).unwrap();
+        let ids = list_persisted_sessions_at(&path).unwrap();
         assert!(ids.is_empty());
     }
 }
