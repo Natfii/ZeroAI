@@ -684,6 +684,8 @@ pub fn all_tools_with_runtime(
             root_config.web_search.timeout_secs,
             root_config.config_path.clone(),
             root_config.secrets.encrypt,
+            root_config.web_search.max_requests_per_minute,
+            Some(root_config.data_dir.join("metasearch")),
         )));
     }
 

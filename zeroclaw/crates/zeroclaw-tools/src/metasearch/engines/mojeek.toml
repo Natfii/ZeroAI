@@ -1,0 +1,23 @@
+# Copyright (c) 2026 @Natfii. All rights reserved.
+# Mojeek HTML results. Selectors verified against a live SERP capture on
+# 2026-06-11 (see fixtures/mojeek.html).
+
+id = "mojeek"
+display_name = "Mojeek"
+weight = 0.9
+
+[request]
+url = "https://www.mojeek.com/search?q={query}"
+
+[response]
+kind = "html"
+
+[response.html]
+result_selector = "ul.results-standard li"
+title_selector = "h2 a.title"
+url_selector = "h2 a.title"
+snippet_selector = "p.s"
+
+[golden]
+query = "wikipedia"
+expected_domain = "wikipedia.org"

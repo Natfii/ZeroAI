@@ -1,4 +1,6 @@
 use super::web_search_provider_routing::{WebSearchProviderRoute, resolve_web_search_provider};
+use crate::metasearch::MetaSearcher;
+use crate::metasearch::executor::contains_ascii_case_insensitive;
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::json;
@@ -7,7 +9,8 @@ use std::time::Duration;
 use zeroclaw_api::tool::{Tool, ToolResult};
 
 /// Web search tool for searching the internet.
-/// Supports multiple model_providers: DuckDuckGo (free), Brave (requires API key),
+/// Supports multiple model_providers: Meta (default; keyless on-device
+/// multi-engine search), DuckDuckGo (free), Brave (requires API key),
 /// Tavily (requires API key), SearXNG (self-hosted, requires instance URL).
 ///
 /// API keys are resolved lazily at execution time: if the boot-time key
@@ -29,7 +32,13 @@ pub struct WebSearchTool {
     config_path: PathBuf,
     /// Whether secret encryption is enabled (needed to create a `SecretStore`).
     secrets_encrypt: bool,
+    /// On-device multi-engine searcher backing the default `meta` provider.
+    meta: MetaSearcher,
 }
+
+/// Fallback meta-search rate limit for the legacy [`WebSearchTool::new`]
+/// constructor; mirrors the `[web_search] max_requests_per_minute` default.
+const DEFAULT_META_REQUESTS_PER_MINUTE: u32 = 10;
 
 impl WebSearchTool {
     pub fn new(
@@ -47,6 +56,11 @@ impl WebSearchTool {
             timeout_secs: timeout_secs.max(1),
             config_path: PathBuf::new(),
             secrets_encrypt: false,
+            meta: MetaSearcher::new(
+                None,
+                DEFAULT_META_REQUESTS_PER_MINUTE,
+                timeout_secs.max(1),
+            ),
         }
     }
 
@@ -54,7 +68,9 @@ impl WebSearchTool {
     ///
     /// `config_path` is the path to `config.toml` so the tool can re-read API
     /// keys at execution time. `secrets_encrypt` controls whether the keys are
-    /// decrypted via `SecretStore`.
+    /// decrypted via `SecretStore`. `max_requests_per_minute` throttles the
+    /// `meta` backend (0 = unlimited) and `metasearch_overlay_dir` is where
+    /// self-repaired engine specs live.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_config(
         model_provider: String,
@@ -65,6 +81,8 @@ impl WebSearchTool {
         timeout_secs: u64,
         config_path: PathBuf,
         secrets_encrypt: bool,
+        max_requests_per_minute: u32,
+        metasearch_overlay_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             model_provider: model_provider.trim().to_lowercase(),
@@ -75,6 +93,11 @@ impl WebSearchTool {
             timeout_secs: timeout_secs.max(1),
             config_path,
             secrets_encrypt,
+            meta: MetaSearcher::new(
+                metasearch_overlay_dir,
+                max_requests_per_minute,
+                timeout_secs.max(1),
+            ),
         }
     }
 
@@ -677,13 +700,6 @@ fn duckduckgo_block_message(
     }
 }
 
-fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
-    haystack
-        .as_bytes()
-        .windows(needle.len())
-        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
-}
-
 fn strip_tags(content: &str) -> String {
     let re = Regex::new(r"<[^>]+>").unwrap();
     re.replace_all(content, "").to_string()
@@ -748,6 +764,7 @@ impl Tool for WebSearchTool {
         }
 
         let result = match resolution.route {
+            WebSearchProviderRoute::Meta => self.meta.search(query, self.max_results).await?,
             WebSearchProviderRoute::DuckDuckGo => self.search_duckduckgo(query).await?,
             WebSearchProviderRoute::Brave => self.search_brave(query).await?,
             WebSearchProviderRoute::Tavily => self.search_tavily(query).await?,
@@ -1064,6 +1081,8 @@ mod tests {
             15,
             config_path,
             false,
+            10,
+            None,
         );
         let key = tool.resolve_brave_api_key().unwrap();
         assert_eq!(key, "fresh-key-from-disk");
@@ -1092,6 +1111,8 @@ mod tests {
             15,
             config_path,
             true,
+            10,
+            None,
         );
         let key = tool.resolve_brave_api_key().unwrap();
         assert_eq!(key, "brave-secret-key");
@@ -1112,6 +1133,8 @@ mod tests {
             15,
             config_path,
             false,
+            10,
+            None,
         );
         let result = tool.execute(json!({"query": "test"})).await;
         assert!(result.is_err());
@@ -1188,6 +1211,8 @@ mod tests {
             15,
             config_path,
             false,
+            10,
+            None,
         );
         let result = tool.execute(json!({"query": "test"})).await;
         assert!(result.is_err());
@@ -1210,6 +1235,8 @@ mod tests {
             15,
             PathBuf::new(),
             false,
+            10,
+            None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
         assert_eq!(key, "tvly-boot-key");
@@ -1235,6 +1262,8 @@ mod tests {
             15,
             config_path,
             false,
+            10,
+            None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
         assert_eq!(key, "tvly-fresh-from-disk");
@@ -1263,6 +1292,8 @@ mod tests {
             15,
             config_path,
             true,
+            10,
+            None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
         assert_eq!(key, "tvly-secret-key");
@@ -1301,6 +1332,8 @@ mod tests {
             15,
             PathBuf::new(),
             false,
+            10,
+            None,
         );
 
         // Isolated client so the request shape under test isn't affected
@@ -1400,6 +1433,7 @@ mod tests {
             timeout_secs: 15,
             config_path: PathBuf::new(),
             secrets_encrypt: false,
+            meta: MetaSearcher::new(None, 10, 15),
         };
         let url = tool.resolve_searxng_instance_url().unwrap();
         assert_eq!(url, "https://searx.example.com");
@@ -1424,6 +1458,8 @@ mod tests {
             15,
             config_path,
             false,
+            10,
+            None,
         );
         let url = tool.resolve_searxng_instance_url().unwrap();
         assert_eq!(url, "https://search.local");
@@ -1446,6 +1482,8 @@ mod tests {
             15,
             config_path.clone(),
             false,
+            10,
+            None,
         );
 
         // Key not configured yet -- should fail

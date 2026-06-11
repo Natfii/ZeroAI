@@ -1,0 +1,25 @@
+# Copyright (c) 2026 @Natfii. All rights reserved.
+# Marginalia indie-web search API using the shared keyless "public" key.
+# Response shape verified live on 2026-06-11 (see fixtures/marginalia.json).
+# Niche index — weighted low as a supplementary engine.
+
+id = "marginalia"
+display_name = "Marginalia"
+weight = 0.5
+
+[request]
+url = "https://api.marginalia.nu/public/search/{query}?count={max_results}"
+user_agent = "ZeroAI/1.0 (Android; on-device meta search)"
+
+[response]
+kind = "json"
+
+[response.json]
+results_pointer = "/results"
+title_pointer = "/title"
+url_pointer = "/url"
+snippet_pointer = "/description"
+
+[golden]
+query = "marginalia"
+expected_domain = "marginalia.nu"
