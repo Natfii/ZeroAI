@@ -8,6 +8,10 @@ package com.zeroclaw.android.data.remote
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+import android.net.NetworkCapabilities
+import com.zeroclaw.android.model.AppSettings
 import com.zeroclaw.android.model.DiscoveredServer
 import com.zeroclaw.android.model.LocalServerType
 import com.zeroclaw.android.model.ScanState
@@ -75,10 +79,16 @@ object NetworkScanner {
      * [ScanState.Completed] with the list of all discovered servers, or
      * [ScanState.Error] if the scan cannot start (e.g. no local network).
      *
+     * Every connected WiFi or Ethernet network is scanned, not just the
+     * active one: when a VPN such as Tailscale is up it becomes the
+     * active network, and scanning only its tunnel address would miss
+     * the real LAN entirely (see [deriveScanSubnets]).
+     *
      * When Tailscale awareness is enabled and cached peers exist, those
-     * peers are also probed for AI servers alongside the local subnet.
+     * peers are also probed for AI servers alongside the local subnets.
      * This allows discovering Ollama instances running on remote
-     * machines connected via the tailnet.
+     * machines connected via the tailnet. Results are deduplicated by
+     * host and port in case a peer also sits inside a scanned subnet.
      *
      * @param context Application context for accessing [ConnectivityManager].
      * @return A cold [Flow] of scan state updates.
@@ -86,34 +96,32 @@ object NetworkScanner {
     @Suppress("InjectDispatcher")
     fun scan(context: Context): Flow<ScanState> =
         channelFlow {
-            val subnet = getLocalSubnet(context)
+            val subnets = getScanSubnets(context)
             val tailscalePeers = getTailscalePeerIps(context)
 
-            if (subnet == null && tailscalePeers.isEmpty()) {
+            if (subnets.isEmpty() && tailscalePeers.isEmpty()) {
                 send(ScanState.Error("Not connected to a local network"))
                 return@channelFlow
             }
 
             send(ScanState.Scanning(0f))
 
-            val subnetProbeCount =
-                if (subnet != null) {
-                    SUBNET_HOST_COUNT * TARGET_PORTS.size
-                } else {
-                    0
-                }
+            val subnetProbeCount = subnets.size * SUBNET_HOST_COUNT * TARGET_PORTS.size
             val tailscaleProbeCount = tailscalePeers.size * TARGET_PORTS.size
             val totalProbes = subnetProbeCount + tailscaleProbeCount
             val completed = AtomicInteger(0)
 
             val servers =
                 coroutineScope {
+                    val semaphore = Semaphore(MAX_CONCURRENT)
                     val jobs =
                         buildList {
-                            if (subnet != null) {
-                                addAll(launchProbeJobs(subnet, completed))
+                            for (subnet in subnets) {
+                                addAll(launchProbeJobs(subnet, semaphore, completed))
                             }
-                            addAll(launchTailscaleProbeJobs(tailscalePeers, completed))
+                            addAll(
+                                launchTailscaleProbeJobs(tailscalePeers, semaphore, completed),
+                            )
                         }
 
                     val progressJob =
@@ -126,7 +134,7 @@ object NetworkScanner {
                     results
                 }
 
-            send(ScanState.Completed(servers))
+            send(ScanState.Completed(servers.distinctBy { "${it.host}:${it.port}" }))
         }.flowOn(Dispatchers.IO)
 
     /**
@@ -135,12 +143,28 @@ object NetworkScanner {
      * @param context Application context for accessing settings.
      * @return List of peer IP addresses to probe, empty if Tailscale is not set up.
      */
-    @Suppress("TooGenericExceptionCaught", "SwallowedException")
     private suspend fun getTailscalePeerIps(context: Context): List<String> {
         val app =
             context.applicationContext as? com.zeroclaw.android.ZeroAIApplication
                 ?: return emptyList()
-        val settings = app.settingsRepository.settings.first()
+        return tailscalePeerIps(app.settingsRepository.settings.first())
+    }
+
+    /**
+     * Extracts the Tailscale peer IPs to probe from persisted settings.
+     *
+     * Returns an empty list unless [AppSettings.tailscaleAwarenessEnabled]
+     * is on, which means a fresh install never probes tailnet peers until
+     * Tailscale awareness has been set up in Settings. Cached discovery
+     * results and manually added peers are merged and deduplicated; a
+     * corrupt JSON cache is skipped rather than failing the scan.
+     *
+     * @param settings Current persisted app settings.
+     * @return Distinct peer IPs, empty when awareness is off or nothing is cached.
+     */
+    @JvmStatic
+    @Suppress("TooGenericExceptionCaught", "SwallowedException")
+    internal fun tailscalePeerIps(settings: AppSettings): List<String> {
         if (!settings.tailscaleAwarenessEnabled) return emptyList()
 
         val ips = mutableListOf<String>()
@@ -174,15 +198,16 @@ object NetworkScanner {
      * Launches parallel probe jobs for Tailscale peer IPs on all target ports.
      *
      * @param peerIps Tailscale peer IP addresses to probe.
+     * @param semaphore Shared limiter capping concurrent connection attempts.
      * @param completed Atomic counter incremented after each probe completes.
      * @return List of deferred probe results.
      */
     private suspend fun kotlinx.coroutines.CoroutineScope.launchTailscaleProbeJobs(
         peerIps: List<String>,
+        semaphore: Semaphore,
         completed: AtomicInteger,
     ): List<kotlinx.coroutines.Deferred<DiscoveredServer?>> {
         if (peerIps.isEmpty()) return emptyList()
-        val semaphore = Semaphore(MAX_CONCURRENT)
         return buildList {
             for (ip in peerIps) {
                 for (port in TARGET_PORTS) {
@@ -204,15 +229,16 @@ object NetworkScanner {
      * Launches parallel probe jobs for every host:port combination in the subnet.
      *
      * @param subnet The /24 subnet prefix (e.g. "192.168.1").
+     * @param semaphore Shared limiter capping concurrent connection attempts.
      * @param completed Atomic counter incremented after each probe completes.
      * @return List of deferred probe results.
      */
     private suspend fun kotlinx.coroutines.CoroutineScope.launchProbeJobs(
         subnet: String,
+        semaphore: Semaphore,
         completed: AtomicInteger,
-    ): List<kotlinx.coroutines.Deferred<DiscoveredServer?>> {
-        val semaphore = Semaphore(MAX_CONCURRENT)
-        return buildList {
+    ): List<kotlinx.coroutines.Deferred<DiscoveredServer?>> =
+        buildList {
             for (host in 1..SUBNET_HOST_COUNT) {
                 val ip = "$subnet.$host"
                 for (port in TARGET_PORTS) {
@@ -228,7 +254,6 @@ object NetworkScanner {
                 }
             }
         }
-    }
 
     /**
      * Emits scanning progress at regular intervals until all probes complete.
@@ -247,30 +272,104 @@ object NetworkScanner {
     }
 
     /**
-     * Extracts the /24 subnet prefix from the device's active network interface.
+     * Collects the /24 subnet prefixes worth scanning across all connected networks.
+     *
+     * The active network alone is not enough: when a VPN such as
+     * Tailscale is up, it becomes the active network and its tunnel
+     * address would shadow the real WiFi LAN entirely. Every network
+     * with a WiFi or Ethernet transport is therefore considered
+     * alongside the active network, and [deriveScanSubnets] drops
+     * address space that cannot be a scannable LAN.
+     *
+     * [ConnectivityManager.getAllNetworks] is deprecated in favor of the
+     * asynchronous callback API, but it remains the only synchronous way
+     * to enumerate currently connected networks for a one-shot scan.
      *
      * @param context Application context for [ConnectivityManager] access.
-     * @return Subnet prefix (e.g. "192.168.1") or null if unavailable.
+     * @return Distinct subnet prefixes (e.g. "192.168.1"), empty if none qualify.
      */
-    private fun getLocalSubnet(context: Context): String? {
+    private fun getScanSubnets(context: Context): List<String> {
         val cm =
             context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return null
-        val network = cm.activeNetwork ?: return null
-        val linkProps = cm.getLinkProperties(network) ?: return null
+                ?: return emptyList()
+        val active = cm.activeNetwork
 
-        val ipv4 =
-            linkProps.linkAddresses
-                .firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress }
-                ?.address
-                ?.hostAddress
-                ?: return null
+        @Suppress("DEPRECATION")
+        val networks = cm.allNetworks
+        val addresses =
+            networks
+                .filter { it == active || hasLanTransport(cm, it) }
+                .mapNotNull { ipv4AddressOf(cm.getLinkProperties(it)) }
+        return deriveScanSubnets(addresses)
+    }
 
-        val parts = ipv4.split(".")
-        return if (parts.size == OCTET_COUNT) {
-            "${parts[0]}.${parts[1]}.${parts[2]}"
-        } else {
+    /**
+     * Reports whether [network] is a LAN-class (WiFi or Ethernet) network.
+     *
+     * @param cm Connectivity manager used to query capabilities.
+     * @param network Network to inspect.
+     * @return True for WiFi or Ethernet transports, false otherwise or
+     *     when capabilities are unavailable.
+     */
+    private fun hasLanTransport(
+        cm: ConnectivityManager,
+        network: Network,
+    ): Boolean {
+        val caps = cm.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    }
+
+    /**
+     * Extracts the first non-loopback IPv4 address from link properties.
+     *
+     * @param linkProps Link properties of a network, may be null.
+     * @return Dotted-quad address string, or null if none present.
+     */
+    private fun ipv4AddressOf(linkProps: LinkProperties?): String? =
+        linkProps
+            ?.linkAddresses
+            ?.firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress }
+            ?.address
+            ?.hostAddress
+
+    /**
+     * Derives distinct, scannable /24 subnet prefixes from device addresses.
+     *
+     * Addresses that cannot belong to a scannable LAN are dropped:
+     * loopback (127.0.0.0/8), link-local (169.254.0.0/16), and the
+     * CGNAT shared address space (100.64.0.0/10, RFC 6598). The CGNAT
+     * rule matters in practice: Tailscale assigns tailnet addresses
+     * from that range with peers scattered across the whole /10, so
+     * scanning the device's own /24 slice finds nothing — tailnet peers
+     * are reached via the Tailscale awareness peer list instead.
+     * Cellular carriers also assign CGNAT addresses, where a subnet
+     * scan is equally meaningless.
+     *
+     * @param ipv4Addresses Dotted-quad addresses of the device's networks.
+     * @return Distinct /24 prefixes (e.g. "192.168.1") in input order.
+     */
+    @JvmStatic
+    internal fun deriveScanSubnets(ipv4Addresses: List<String>): List<String> = ipv4Addresses.mapNotNull(::scannableSubnetPrefix).distinct()
+
+    /**
+     * Maps an IPv4 address to its /24 prefix when it can belong to a
+     * scannable LAN, per the rules documented on [deriveScanSubnets].
+     *
+     * @param ip Candidate dotted-quad address.
+     * @return Subnet prefix, or null for malformed or non-LAN addresses.
+     */
+    private fun scannableSubnetPrefix(ip: String): String? {
+        val octets = ip.split(".").mapNotNull { it.toIntOrNull() }
+        if (octets.size != OCTET_COUNT || octets.any { it !in 0..OCTET_MAX }) return null
+        val isLoopback = octets[0] == LOOPBACK_FIRST_OCTET
+        val isLinkLocal =
+            octets[0] == LINK_LOCAL_FIRST_OCTET && octets[1] == LINK_LOCAL_SECOND_OCTET
+        val isCgnat = octets[0] == CGNAT_FIRST_OCTET && octets[1] in CGNAT_SECOND_OCTET_RANGE
+        return if (isLoopback || isLinkLocal || isCgnat) {
             null
+        } else {
+            "${octets[0]}.${octets[1]}.${octets[2]}"
         }
     }
 
@@ -614,6 +713,24 @@ object NetworkScanner {
 
     /** Number of octets in an IPv4 address. */
     private const val OCTET_COUNT = 4
+
+    /** Highest valid value of an IPv4 octet. */
+    private const val OCTET_MAX = 255
+
+    /** First octet of the loopback range (127.0.0.0/8). */
+    private const val LOOPBACK_FIRST_OCTET = 127
+
+    /** First octet of the IPv4 link-local range (169.254.0.0/16). */
+    private const val LINK_LOCAL_FIRST_OCTET = 169
+
+    /** Second octet of the IPv4 link-local range (169.254.0.0/16). */
+    private const val LINK_LOCAL_SECOND_OCTET = 254
+
+    /** First octet of the CGNAT shared address space (100.64.0.0/10). */
+    private const val CGNAT_FIRST_OCTET = 100
+
+    /** Second-octet range of the CGNAT shared address space (100.64.0.0/10). */
+    private val CGNAT_SECOND_OCTET_RANGE = 64..127
 
     /** Default Ollama port. */
     private const val PORT_OLLAMA = 11434

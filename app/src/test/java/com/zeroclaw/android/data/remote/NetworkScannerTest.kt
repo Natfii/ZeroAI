@@ -6,6 +6,7 @@
 
 package com.zeroclaw.android.data.remote
 
+import com.zeroclaw.android.model.AppSettings
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.net.ServerSocket
@@ -19,11 +20,18 @@ import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
 /**
- * Unit tests for [NetworkScanner] raw HTTP helper methods.
+ * Unit tests for [NetworkScanner] pure helper methods.
  *
  * Tests cover [NetworkScanner.readCapped], [NetworkScanner.rawHttpGet],
- * and [NetworkScanner.decodeChunked]. The [rawHttpGet] tests use a
+ * [NetworkScanner.decodeChunked], [NetworkScanner.deriveScanSubnets],
+ * and [NetworkScanner.tailscalePeerIps]. The [rawHttpGet] tests use a
  * local [ServerSocket] on a random port to serve canned HTTP responses.
+ *
+ * The subnet-derivation and peer-extraction groups are fresh-install
+ * regression tests: they pin down what the scanner probes given default
+ * settings and VPN-shaped network addresses, the exact circumstances
+ * that once left a first-run user unable to discover an LM Studio
+ * server reachable only through Tailscale.
  */
 @DisplayName("NetworkScanner")
 class NetworkScannerTest {
@@ -244,6 +252,164 @@ class NetworkScannerTest {
 
             val result = NetworkScanner.rawHttpGet("127.0.0.1", port, "/chunked")
             assertEquals("Hello, world!", result)
+        }
+    }
+
+    @Nested
+    @DisplayName("deriveScanSubnets")
+    inner class DeriveScanSubnetsTests {
+        @Test
+        @DisplayName("maps a LAN address to its 24-bit prefix")
+        fun `maps a LAN address to its 24-bit prefix`() {
+            val result = NetworkScanner.deriveScanSubnets(listOf("192.168.1.42"))
+            assertEquals(listOf("192.168.1"), result)
+        }
+
+        @Test
+        @DisplayName("deduplicates addresses in the same subnet")
+        fun `deduplicates addresses in the same subnet`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(listOf("192.168.1.5", "192.168.1.99"))
+            assertEquals(listOf("192.168.1"), result)
+        }
+
+        @Test
+        @DisplayName("keeps distinct subnets in input order")
+        fun `keeps distinct subnets in input order`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(listOf("192.168.1.5", "10.0.0.7"))
+            assertEquals(listOf("192.168.1", "10.0.0"), result)
+        }
+
+        @Test
+        @DisplayName("scans the WiFi LAN even when a Tailscale VPN address is present")
+        fun `scans the WiFi LAN even when a Tailscale VPN address is present`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(listOf("100.86.12.9", "192.168.1.42"))
+            assertEquals(listOf("192.168.1"), result)
+        }
+
+        @Test
+        @DisplayName("excludes CGNAT addresses across the whole 100.64.0.0-10 range")
+        fun `excludes CGNAT addresses across the whole range`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(
+                    listOf("100.64.0.1", "100.106.201.33", "100.127.255.254"),
+                )
+            assertEquals(emptyList<String>(), result)
+        }
+
+        @Test
+        @DisplayName("keeps public addresses adjacent to the CGNAT range")
+        fun `keeps public addresses adjacent to the CGNAT range`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(listOf("100.63.255.1", "100.128.0.1"))
+            assertEquals(listOf("100.63.255", "100.128.0"), result)
+        }
+
+        @Test
+        @DisplayName("excludes loopback addresses")
+        fun `excludes loopback addresses`() {
+            val result = NetworkScanner.deriveScanSubnets(listOf("127.0.0.1"))
+            assertEquals(emptyList<String>(), result)
+        }
+
+        @Test
+        @DisplayName("excludes link-local addresses")
+        fun `excludes link-local addresses`() {
+            val result = NetworkScanner.deriveScanSubnets(listOf("169.254.13.37"))
+            assertEquals(emptyList<String>(), result)
+        }
+
+        @Test
+        @DisplayName("drops malformed and IPv6 addresses")
+        fun `drops malformed and IPv6 addresses`() {
+            val result =
+                NetworkScanner.deriveScanSubnets(
+                    listOf("fe80::1", "not an ip", "1.2.3", "1.2.3.4.5", "256.1.1.1", ""),
+                )
+            assertEquals(emptyList<String>(), result)
+        }
+
+        @Test
+        @DisplayName("returns empty for empty input")
+        fun `returns empty for empty input`() {
+            assertEquals(emptyList<String>(), NetworkScanner.deriveScanSubnets(emptyList()))
+        }
+    }
+
+    @Nested
+    @DisplayName("tailscalePeerIps")
+    inner class TailscalePeerIpsTests {
+        /** A valid serialized discovery cache holding a single PC peer. */
+        private val cachedPcPeer =
+            """[{"hostname":"natal-pc","ip":"100.67.109.56","isManual":false}]"""
+
+        @Test
+        @DisplayName("fresh-install defaults probe no tailnet peers")
+        fun `fresh-install defaults probe no tailnet peers`() {
+            assertEquals(emptyList<String>(), NetworkScanner.tailscalePeerIps(AppSettings()))
+        }
+
+        @Test
+        @DisplayName("ignores cached peers while awareness is disabled")
+        fun `ignores cached peers while awareness is disabled`() {
+            val settings =
+                AppSettings(
+                    tailscaleAwarenessEnabled = false,
+                    tailscaleCachedDiscovery = cachedPcPeer,
+                )
+            assertEquals(emptyList<String>(), NetworkScanner.tailscalePeerIps(settings))
+        }
+
+        @Test
+        @DisplayName("returns cached discovery peers when awareness is enabled")
+        fun `returns cached discovery peers when awareness is enabled`() {
+            val settings =
+                AppSettings(
+                    tailscaleAwarenessEnabled = true,
+                    tailscaleCachedDiscovery = cachedPcPeer,
+                )
+            assertEquals(listOf("100.67.109.56"), NetworkScanner.tailscalePeerIps(settings))
+        }
+
+        @Test
+        @DisplayName("merges manual peers with cached discovery and deduplicates")
+        fun `merges manual peers with cached discovery and deduplicates`() {
+            val settings =
+                AppSettings(
+                    tailscaleAwarenessEnabled = true,
+                    tailscaleCachedDiscovery = cachedPcPeer,
+                    tailscaleManualPeers = """["100.67.109.56","100.70.1.2"]""",
+                )
+            assertEquals(
+                listOf("100.67.109.56", "100.70.1.2"),
+                NetworkScanner.tailscalePeerIps(settings),
+            )
+        }
+
+        @Test
+        @DisplayName("skips a corrupt discovery cache without failing")
+        fun `skips a corrupt discovery cache without failing`() {
+            val settings =
+                AppSettings(
+                    tailscaleAwarenessEnabled = true,
+                    tailscaleCachedDiscovery = "{not json",
+                    tailscaleManualPeers = """["100.70.1.2"]""",
+                )
+            assertEquals(listOf("100.70.1.2"), NetworkScanner.tailscalePeerIps(settings))
+        }
+
+        @Test
+        @DisplayName("skips corrupt manual peers without failing")
+        fun `skips corrupt manual peers without failing`() {
+            val settings =
+                AppSettings(
+                    tailscaleAwarenessEnabled = true,
+                    tailscaleCachedDiscovery = cachedPcPeer,
+                    tailscaleManualPeers = "][",
+                )
+            assertEquals(listOf("100.67.109.56"), NetworkScanner.tailscalePeerIps(settings))
         }
     }
 
