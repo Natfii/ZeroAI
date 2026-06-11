@@ -15,14 +15,19 @@ pub mod executor;
 pub mod health;
 pub mod merge;
 pub mod rate_limit;
+pub mod repair;
 pub mod spec;
+
+pub use repair::RepairModelConfig;
 
 use executor::EngineFailure;
 use merge::EngineBatch;
 use rate_limit::SearchRateLimiter;
+use repair::SharedSpecs;
 use spec::EngineSpec;
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Number of results requested from each engine before fusion. Fetching a
 /// few more than the final cut improves cross-engine overlap detection.
@@ -30,14 +35,17 @@ const PER_ENGINE_RESULTS: usize = 8;
 
 /// Orchestrates the engine set for the `meta` web-search backend.
 pub struct MetaSearcher {
-    specs: Vec<EngineSpec>,
+    specs: SharedSpecs,
+    overlay_dir: Option<PathBuf>,
+    repair_model: Option<Arc<RepairModelConfig>>,
     limiter: SearchRateLimiter,
     timeout_secs: u64,
 }
 
 impl MetaSearcher {
     /// Builds a searcher from the bundled engine specs, overlaid with any
-    /// valid self-repair specs found in `overlay_dir`.
+    /// valid self-repair specs found in `overlay_dir`. `repair_model`
+    /// enables the model rung of the repair ladder when present.
     ///
     /// A bundled-spec failure is downgraded to an empty engine set (searches
     /// then error cleanly) so construction can never panic across the FFI
@@ -46,6 +54,7 @@ impl MetaSearcher {
         overlay_dir: Option<PathBuf>,
         max_requests_per_minute: u32,
         timeout_secs: u64,
+        repair_model: Option<RepairModelConfig>,
     ) -> Self {
         let specs = spec::resolve_specs(overlay_dir.as_deref()).unwrap_or_else(|err| {
             ::zeroclaw_log::record!(
@@ -58,7 +67,9 @@ impl MetaSearcher {
             Vec::new()
         });
         Self {
-            specs,
+            specs: Arc::new(parking_lot::RwLock::new(specs)),
+            overlay_dir,
+            repair_model: repair_model.map(Arc::new),
             limiter: SearchRateLimiter::new(max_requests_per_minute),
             timeout_secs: timeout_secs.max(1),
         }
@@ -67,7 +78,9 @@ impl MetaSearcher {
     #[cfg(test)]
     fn with_specs(specs: Vec<EngineSpec>, max_requests_per_minute: u32, timeout_secs: u64) -> Self {
         Self {
-            specs,
+            specs: Arc::new(parking_lot::RwLock::new(specs)),
+            overlay_dir: None,
+            repair_model: None,
             limiter: SearchRateLimiter::new(max_requests_per_minute),
             timeout_secs,
         }
@@ -84,6 +97,7 @@ impl MetaSearcher {
         let registry = health::global();
         let active: Vec<EngineSpec> = self
             .specs
+            .read()
             .iter()
             .filter(|spec| registry.is_available(&spec.id))
             .cloned()
@@ -129,6 +143,19 @@ impl MetaSearcher {
                 Err(failure) => {
                     registry.record_failure(&spec.id, &failure);
                     log_engine_failure(&spec.id, &failure);
+                    if matches!(failure, EngineFailure::ZeroParse { .. })
+                        && registry.is_layout_suspect(&spec.id)
+                    {
+                        repair::maybe_spawn_repair(
+                            repair::RepairContext {
+                                specs: Arc::clone(&self.specs),
+                                overlay_dir: self.overlay_dir.clone(),
+                                timeout_secs: self.timeout_secs,
+                                model_config: self.repair_model.clone(),
+                            },
+                            spec.id.clone(),
+                        );
+                    }
                     failures.push((spec.display_name.clone(), failure));
                 }
             }
@@ -292,8 +319,8 @@ mod tests {
 
     #[test]
     fn new_loads_bundled_specs() {
-        let searcher = MetaSearcher::new(None, 10, 15);
-        assert_eq!(searcher.specs.len(), 4);
+        let searcher = MetaSearcher::new(None, 10, 15, None);
+        assert_eq!(searcher.specs.read().len(), 4);
     }
 
     #[test]

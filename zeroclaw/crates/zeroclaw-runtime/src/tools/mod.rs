@@ -675,6 +675,27 @@ pub fn all_tools_with_runtime(
 
     // Web search tool (enabled by default for GLM and other models)
     if root_config.web_search.enabled {
+        // Repair-model rung for the meta backend: reuse the active agent's
+        // provider; absent provider config simply disables that rung.
+        let metasearch_repair_model = root_config
+            .first_model_provider_type()
+            .map(str::to_owned)
+            .and_then(|provider| {
+                let model = root_config
+                    .first_model_provider()
+                    .and_then(|e| e.model.clone())
+                    .filter(|m| !m.trim().is_empty())?;
+                Some(zeroclaw_tools::metasearch::RepairModelConfig {
+                    provider,
+                    model,
+                    api_key: root_config
+                        .first_model_provider()
+                        .and_then(|e| e.api_key.clone()),
+                    runtime_options: zeroclaw_providers::provider_runtime_options_from_config(
+                        root_config,
+                    ),
+                })
+            });
         tool_arcs.push(Arc::new(WebSearchTool::new_with_config(
             root_config.web_search.search_provider.clone(),
             root_config.web_search.brave_api_key.clone(),
@@ -686,6 +707,7 @@ pub fn all_tools_with_runtime(
             root_config.secrets.encrypt,
             root_config.web_search.max_requests_per_minute,
             Some(root_config.data_dir.join("metasearch")),
+            metasearch_repair_model,
         )));
     }
 

@@ -11048,6 +11048,7 @@ dependencies = [
  "base64",
  "chrono",
  "directories",
+ "ego-tree",
  "fantoccini",
  "futures-util",
  "glob",

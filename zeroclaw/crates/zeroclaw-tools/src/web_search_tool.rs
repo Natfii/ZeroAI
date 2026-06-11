@@ -60,6 +60,7 @@ impl WebSearchTool {
                 None,
                 DEFAULT_META_REQUESTS_PER_MINUTE,
                 timeout_secs.max(1),
+                None,
             ),
         }
     }
@@ -69,8 +70,9 @@ impl WebSearchTool {
     /// `config_path` is the path to `config.toml` so the tool can re-read API
     /// keys at execution time. `secrets_encrypt` controls whether the keys are
     /// decrypted via `SecretStore`. `max_requests_per_minute` throttles the
-    /// `meta` backend (0 = unlimited) and `metasearch_overlay_dir` is where
-    /// self-repaired engine specs live.
+    /// `meta` backend (0 = unlimited), `metasearch_overlay_dir` is where
+    /// self-repaired engine specs live, and `metasearch_repair_model`
+    /// enables the model rung of the repair ladder.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with_config(
         model_provider: String,
@@ -83,6 +85,7 @@ impl WebSearchTool {
         secrets_encrypt: bool,
         max_requests_per_minute: u32,
         metasearch_overlay_dir: Option<PathBuf>,
+        metasearch_repair_model: Option<crate::metasearch::RepairModelConfig>,
     ) -> Self {
         Self {
             model_provider: model_provider.trim().to_lowercase(),
@@ -97,6 +100,7 @@ impl WebSearchTool {
                 metasearch_overlay_dir,
                 max_requests_per_minute,
                 timeout_secs.max(1),
+                metasearch_repair_model,
             ),
         }
     }
@@ -1083,6 +1087,7 @@ mod tests {
             false,
             10,
             None,
+            None,
         );
         let key = tool.resolve_brave_api_key().unwrap();
         assert_eq!(key, "fresh-key-from-disk");
@@ -1113,6 +1118,7 @@ mod tests {
             true,
             10,
             None,
+            None,
         );
         let key = tool.resolve_brave_api_key().unwrap();
         assert_eq!(key, "brave-secret-key");
@@ -1134,6 +1140,7 @@ mod tests {
             config_path,
             false,
             10,
+            None,
             None,
         );
         let result = tool.execute(json!({"query": "test"})).await;
@@ -1213,6 +1220,7 @@ mod tests {
             false,
             10,
             None,
+            None,
         );
         let result = tool.execute(json!({"query": "test"})).await;
         assert!(result.is_err());
@@ -1236,6 +1244,7 @@ mod tests {
             PathBuf::new(),
             false,
             10,
+            None,
             None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
@@ -1263,6 +1272,7 @@ mod tests {
             config_path,
             false,
             10,
+            None,
             None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
@@ -1293,6 +1303,7 @@ mod tests {
             config_path,
             true,
             10,
+            None,
             None,
         );
         let key = tool.resolve_tavily_api_key().unwrap();
@@ -1333,6 +1344,7 @@ mod tests {
             PathBuf::new(),
             false,
             10,
+            None,
             None,
         );
 
@@ -1433,7 +1445,7 @@ mod tests {
             timeout_secs: 15,
             config_path: PathBuf::new(),
             secrets_encrypt: false,
-            meta: MetaSearcher::new(None, 10, 15),
+            meta: MetaSearcher::new(None, 10, 15, None),
         };
         let url = tool.resolve_searxng_instance_url().unwrap();
         assert_eq!(url, "https://searx.example.com");
@@ -1460,6 +1472,7 @@ mod tests {
             false,
             10,
             None,
+            None,
         );
         let url = tool.resolve_searxng_instance_url().unwrap();
         assert_eq!(url, "https://search.local");
@@ -1483,6 +1496,7 @@ mod tests {
             config_path.clone(),
             false,
             10,
+            None,
             None,
         );
 

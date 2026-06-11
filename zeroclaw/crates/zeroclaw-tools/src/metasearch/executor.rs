@@ -71,6 +71,26 @@ pub async fn run_engine(
     max_results: usize,
     timeout_secs: u64,
 ) -> Result<Vec<EngineResult>, EngineFailure> {
+    let body = fetch_body(spec, query, max_results, timeout_secs).await?;
+    let results = parse_response(spec, &body, max_results)?;
+    if results.is_empty() && body.len() >= MIN_LAYOUT_BREAK_BODY_BYTES {
+        return Err(EngineFailure::ZeroParse {
+            body_bytes: body.len(),
+        });
+    }
+    Ok(results)
+}
+
+/// Fetches the engine's response body for `query`: token pre-fetch, request,
+/// status classification, and block-marker detection — everything except
+/// result parsing. The repair pipeline calls this directly to obtain a raw
+/// golden-probe body for candidate-spec generation.
+pub(crate) async fn fetch_body(
+    spec: &EngineSpec,
+    query: &str,
+    max_results: usize,
+    timeout_secs: u64,
+) -> Result<String, EngineFailure> {
     let client = build_client(spec, timeout_secs)?;
     let token = match &spec.request.token {
         Some(token_spec) => Some(fetch_token(&client, token_spec, query).await?),
@@ -101,14 +121,7 @@ pub async fn run_engine(
             return Err(EngineFailure::Blocked(format!("block marker '{marker}'")));
         }
     }
-
-    let results = parse_response(spec, &body, max_results)?;
-    if results.is_empty() && body.len() >= MIN_LAYOUT_BREAK_BODY_BYTES {
-        return Err(EngineFailure::ZeroParse {
-            body_bytes: body.len(),
-        });
-    }
-    Ok(results)
+    Ok(body)
 }
 
 /// Extracts results from a response body according to the spec's kind.

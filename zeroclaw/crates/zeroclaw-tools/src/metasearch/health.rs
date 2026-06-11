@@ -107,6 +107,14 @@ impl HealthRegistry {
         }
     }
 
+    /// Whether the engine is currently marked layout-suspect.
+    pub fn is_layout_suspect(&self, engine_id: &str) -> bool {
+        let inner = self.inner.read();
+        inner
+            .get(engine_id)
+            .is_some_and(|h| h.condition == EngineCondition::LayoutSuspect)
+    }
+
     /// Records a successful search, clearing failure streaks and backoff.
     pub fn record_ok(&self, engine_id: &str) {
         let mut inner = self.inner.write();

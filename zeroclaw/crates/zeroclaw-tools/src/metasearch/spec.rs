@@ -27,7 +27,7 @@ const BUNDLED_SPECS: &[&str] = &[
 ];
 
 /// A complete declarative description of one search engine.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EngineSpec {
     /// Stable snake_case identifier; also the overlay file stem on disk.
@@ -38,7 +38,7 @@ pub struct EngineSpec {
     #[serde(default = "default_engine_weight")]
     pub weight: f64,
     /// Case-insensitive body substrings that identify an anti-bot block page.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub block_markers: Vec<String>,
     /// How to build the search request.
     pub request: RequestSpec,
@@ -49,26 +49,26 @@ pub struct EngineSpec {
 }
 
 /// Request construction: URL template, headers, and optional token pre-fetch.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RequestSpec {
     /// HTTPS URL template. Supports `{query}` (required, percent-encoded),
     /// `{max_results}`, and `{token}` (requires a `token` section).
     pub url: String,
     /// Override for the default browser User-Agent.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_agent: Option<String>,
     /// Additional request headers.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub headers: BTreeMap<String, String>,
     /// Optional anti-bot token pre-fetch (e.g. DuckDuckGo's `vqd` dance).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenSpec>,
 }
 
 /// Pre-fetch a page and regex-extract a token to substitute into the
 /// request URL as `{token}`.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TokenSpec {
     /// URL to fetch the token from. Supports `{query}`.
@@ -78,21 +78,21 @@ pub struct TokenSpec {
 }
 
 /// Response parsing strategy selector plus the matching per-kind section.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ResponseSpec {
     /// Which parser to apply to the response body.
     pub kind: ResponseKind,
     /// CSS-selector extraction rules; required when `kind = "html"`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub html: Option<HtmlResponseSpec>,
     /// JSON-pointer extraction rules; required when `kind = "json"`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub json: Option<JsonResponseSpec>,
 }
 
 /// Supported response body formats.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponseKind {
     /// Scrape a SERP with CSS selectors.
@@ -102,7 +102,7 @@ pub enum ResponseKind {
 }
 
 /// CSS-selector extraction rules for HTML result pages.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HtmlResponseSpec {
     /// Selector matching one element per search result.
@@ -115,17 +115,17 @@ pub struct HtmlResponseSpec {
     #[serde(default = "default_url_attribute")]
     pub url_attribute: String,
     /// Selector (scoped to a result element) for the snippet text.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_selector: Option<String>,
     /// Query parameter to unwrap redirect-style hrefs
     /// (e.g. `uddg` for DuckDuckGo's `/l/?uddg=<real-url>` links).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_unwrap_param: Option<String>,
 }
 
 /// JSON-pointer extraction rules for JSON API responses. Pointers for the
 /// per-result fields are relative to each element of the results array.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JsonResponseSpec {
     /// JSON pointer to the array of result objects.
@@ -133,24 +133,24 @@ pub struct JsonResponseSpec {
     /// JSON pointer to the result title.
     pub title_pointer: String,
     /// JSON pointer to the result URL. Mutually exclusive with `url_template`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_pointer: Option<String>,
     /// URL template with a `{value}` placeholder, for APIs that return a page
     /// key instead of a full URL. Requires `url_template_value_pointer`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_template: Option<String>,
     /// JSON pointer to the value substituted into `url_template`.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url_template_value_pointer: Option<String>,
     /// JSON pointer to the result snippet.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub snippet_pointer: Option<String>,
 }
 
 /// Known-answer probe: searching `query` on a healthy engine must surface
 /// `expected_domain` among the results. The repair pipeline refuses to adopt
 /// any candidate spec that cannot reproduce this.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct GoldenSpec {
     /// Probe query with a stable, predictable answer.
@@ -195,8 +195,8 @@ impl EngineSpec {
             self.weight
         );
         anyhow::ensure!(
-            self.request.url.starts_with("https://"),
-            "engine '{}': request url must use https",
+            self.request.url.starts_with("https://") || is_loopback_http(&self.request.url),
+            "engine '{}': request url must use https (plain http is allowed only on loopback)",
             self.id
         );
         anyhow::ensure!(
@@ -309,6 +309,13 @@ impl EngineSpec {
         let url = reqwest::Url::parse(&concrete).ok()?;
         url.host_str().map(str::to_owned)
     }
+}
+
+/// Loopback http is tolerated so the validation gate and overlay loader can
+/// operate against local mock servers; the same-host overlay constraint
+/// keeps production engines pinned to their bundled https hosts.
+fn is_loopback_http(url: &str) -> bool {
+    url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost")
 }
 
 /// Parses and validates the engine specs compiled into the binary.
@@ -485,7 +492,11 @@ mod tests {
         if let Some(html) = overlay.response.html.as_mut() {
             html.result_selector = "div.fresh-result".into();
         }
-        std::fs::write(dir.path().join("ddg_html.toml"), spec_to_toml(&overlay)).unwrap();
+        std::fs::write(
+            dir.path().join("ddg_html.toml"),
+            toml::to_string(&overlay).unwrap(),
+        )
+        .unwrap();
 
         let specs = resolve_specs(Some(dir.path())).unwrap();
         let ddg = specs.iter().find(|s| s.id == "ddg_html").unwrap();
@@ -500,7 +511,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut overlay = ddg_spec();
         overlay.request.url = "https://evil.example.com/html/?q={query}".into();
-        std::fs::write(dir.path().join("ddg_html.toml"), spec_to_toml(&overlay)).unwrap();
+        std::fs::write(
+            dir.path().join("ddg_html.toml"),
+            toml::to_string(&overlay).unwrap(),
+        )
+        .unwrap();
 
         let specs = resolve_specs(Some(dir.path())).unwrap();
         let ddg = specs.iter().find(|s| s.id == "ddg_html").unwrap();
@@ -512,7 +527,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut overlay = ddg_spec();
         overlay.golden.expected_domain = "evil.example.com".into();
-        std::fs::write(dir.path().join("ddg_html.toml"), spec_to_toml(&overlay)).unwrap();
+        std::fs::write(
+            dir.path().join("ddg_html.toml"),
+            toml::to_string(&overlay).unwrap(),
+        )
+        .unwrap();
 
         let specs = resolve_specs(Some(dir.path())).unwrap();
         let ddg = specs.iter().find(|s| s.id == "ddg_html").unwrap();
@@ -530,66 +549,14 @@ mod tests {
         assert!(ddg.request.url.contains("html.duckduckgo.com"));
     }
 
-    /// Serializes a spec back to TOML for overlay tests. Specs are
-    /// deserialize-only in production, so tests hand-roll the document.
-    fn spec_to_toml(spec: &EngineSpec) -> String {
-        let mut out = String::new();
-        out.push_str(&format!("id = \"{}\"\n", spec.id));
-        out.push_str(&format!("display_name = \"{}\"\n", spec.display_name));
-        out.push_str(&format!("weight = {:.1}\n", spec.weight));
-        if !spec.block_markers.is_empty() {
-            let markers: Vec<String> = spec
-                .block_markers
-                .iter()
-                .map(|m| format!("\"{}\"", m.replace('\\', "\\\\")))
-                .collect();
-            out.push_str(&format!("block_markers = [{}]\n", markers.join(", ")));
+    #[test]
+    fn bundled_specs_roundtrip_through_toml() {
+        for spec in bundled_specs().unwrap() {
+            let serialized = toml::to_string(&spec).unwrap();
+            let reparsed: EngineSpec = toml::from_str(&serialized).unwrap();
+            reparsed.validate().unwrap();
+            assert_eq!(reparsed.id, spec.id);
+            assert_eq!(reparsed.request.url, spec.request.url);
         }
-        out.push_str("\n[request]\n");
-        out.push_str(&format!("url = \"{}\"\n", spec.request.url));
-        if let Some(ua) = &spec.request.user_agent {
-            out.push_str(&format!("user_agent = \"{ua}\"\n"));
-        }
-        out.push_str("\n[response]\n");
-        match spec.response.kind {
-            ResponseKind::Html => out.push_str("kind = \"html\"\n"),
-            ResponseKind::Json => out.push_str("kind = \"json\"\n"),
-        }
-        if let Some(html) = &spec.response.html {
-            out.push_str("\n[response.html]\n");
-            out.push_str(&format!("result_selector = \"{}\"\n", html.result_selector));
-            out.push_str(&format!("title_selector = \"{}\"\n", html.title_selector));
-            out.push_str(&format!("url_selector = \"{}\"\n", html.url_selector));
-            if let Some(snippet) = &html.snippet_selector {
-                out.push_str(&format!("snippet_selector = \"{snippet}\"\n"));
-            }
-            if let Some(param) = &html.url_unwrap_param {
-                out.push_str(&format!("url_unwrap_param = \"{param}\"\n"));
-            }
-        }
-        if let Some(json) = &spec.response.json {
-            out.push_str("\n[response.json]\n");
-            out.push_str(&format!("results_pointer = \"{}\"\n", json.results_pointer));
-            out.push_str(&format!("title_pointer = \"{}\"\n", json.title_pointer));
-            if let Some(p) = &json.url_pointer {
-                out.push_str(&format!("url_pointer = \"{p}\"\n"));
-            }
-            if let Some(t) = &json.url_template {
-                out.push_str(&format!("url_template = \"{t}\"\n"));
-            }
-            if let Some(p) = &json.url_template_value_pointer {
-                out.push_str(&format!("url_template_value_pointer = \"{p}\"\n"));
-            }
-            if let Some(p) = &json.snippet_pointer {
-                out.push_str(&format!("snippet_pointer = \"{p}\"\n"));
-            }
-        }
-        out.push_str("\n[golden]\n");
-        out.push_str(&format!("query = \"{}\"\n", spec.golden.query));
-        out.push_str(&format!(
-            "expected_domain = \"{}\"\n",
-            spec.golden.expected_domain
-        ));
-        out
     }
 }
